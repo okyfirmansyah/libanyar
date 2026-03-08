@@ -1,0 +1,43 @@
+@import "tailwindcss";
+
+/* ── Custom dark theme tokens ── */
+:root {
+  --bg: #0c0c0e;
+  --surface: #18181b;
+  --surface-2: #1f1f23;
+  --border: #27272a;
+  --accent: #7c3aed;
+  --accent-hover: #6d28d9;
+  --text: #f4f4f5;
+  --text-dim: #a1a1aa;
+  --success: #22c55e;
+  --danger: #ef4444;
+  --chart-video: #7c3aed;
+  --chart-audio: #06b6d4;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  min-height: 100vh;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: var(--bg); }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+/* Video element */
+video {
+  width: 100%;
+  background: #000;
+  border-radius: 8px;
+}
+
+/* uPlot overrides */
+.u-wrap { background: transparent !important; }
+.u-over { cursor: crosshair; }

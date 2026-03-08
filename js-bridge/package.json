@@ -1,0 +1,118 @@
+{
+  "name": "@libanyar/api",
+  "version": "0.1.0",
+  "description": "TypeScript API for LibAnyar desktop applications — invoke C++ commands, listen to events, access native APIs.",
+  "type": "module",
+  "main": "./dist/cjs/index.js",
+  "module": "./dist/esm/index.js",
+  "types": "./dist/esm/index.d.ts",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/esm/index.d.ts",
+        "default": "./dist/esm/index.js"
+      },
+      "require": {
+        "types": "./dist/cjs/index.d.ts",
+        "default": "./dist/cjs/index.js"
+      }
+    },
+    "./fs": {
+      "import": {
+        "types": "./dist/esm/modules/fs.d.ts",
+        "default": "./dist/esm/modules/fs.js"
+      },
+      "require": {
+        "types": "./dist/cjs/modules/fs.d.ts",
+        "default": "./dist/cjs/modules/fs.js"
+      }
+    },
+    "./dialog": {
+      "import": {
+        "types": "./dist/esm/modules/dialog.d.ts",
+        "default": "./dist/esm/modules/dialog.js"
+      },
+      "require": {
+        "types": "./dist/cjs/modules/dialog.d.ts",
+        "default": "./dist/cjs/modules/dialog.js"
+      }
+    },
+    "./shell": {
+      "import": {
+        "types": "./dist/esm/modules/shell.d.ts",
+        "default": "./dist/esm/modules/shell.js"
+      },
+      "require": {
+        "types": "./dist/cjs/modules/shell.d.ts",
+        "default": "./dist/cjs/modules/shell.js"
+      }
+    },
+    "./event": {
+      "import": {
+        "types": "./dist/esm/modules/event.d.ts",
+        "default": "./dist/esm/modules/event.js"
+      },
+      "require": {
+        "types": "./dist/cjs/modules/event.d.ts",
+        "default": "./dist/cjs/modules/event.js"
+      }
+    },
+    "./db": {
+      "import": {
+        "types": "./dist/esm/modules/db.d.ts",
+        "default": "./dist/esm/modules/db.js"
+      },
+      "require": {
+        "types": "./dist/cjs/modules/db.d.ts",
+        "default": "./dist/cjs/modules/db.js"
+      }
+    },
+    "./react": {
+      "import": {
+        "types": "./dist/esm/react.d.ts",
+        "default": "./dist/esm/react.js"
+      },
+      "require": {
+        "types": "./dist/cjs/react.d.ts",
+        "default": "./dist/cjs/react.js"
+      }
+    }
+  },
+  "files": [
+    "dist/",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "npm run build:esm && npm run build:cjs",
+    "build:esm": "tsc -p tsconfig.esm.json",
+    "build:cjs": "tsc -p tsconfig.cjs.json",
+    "clean": "rm -rf dist",
+    "prepublishOnly": "npm run clean && npm run build"
+  },
+  "peerDependencies": {
+    "react": ">=17.0.0"
+  },
+  "peerDependenciesMeta": {
+    "react": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "typescript": "^5.4.0",
+    "@types/react": "^18.2.0",
+    "react": "^18.2.0"
+  },
+  "keywords": [
+    "libanyar",
+    "desktop",
+    "webview",
+    "ipc",
+    "tauri-like",
+    "cpp"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/libanyar/libanyar"
+  }
+}

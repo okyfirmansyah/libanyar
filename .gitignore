@@ -1,0 +1,40 @@
+# AI & build artifacts
+.ai/
+
+# Build
+build/
+cmake-build-*/
+out/
+
+# IDE
+.idea/
+.vscode/settings.json
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Compiled
+*.o
+*.obj
+*.a
+*.lib
+*.so
+*.dylib
+*.dll
+*.exe
+
+# Node
+node_modules/
+dist/
+.vite/
+*.tgz
+
+# Docs (generated)
+docs/api/
+
+# Logs
+*.log

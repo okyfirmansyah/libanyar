@@ -1,0 +1,17 @@
+{
+  "$schema": "https://typedoc.org/schema.json",
+  "entryPoints": ["src/index.ts"],
+  "out": "../docs/api/js",
+  "name": "@libanyar/api",
+  "readme": "none",
+  "theme": "default",
+  "includeVersion": true,
+  "categorizeByGroup": true,
+  "categoryOrder": ["Core", "Events", "Modules", "React", "Types", "*"],
+  "navigationLinks": {
+    "GitHub": "https://github.com/libanyar/libanyar",
+    "Docs": "../../../docs"
+  },
+  "excludePrivate": true,
+  "excludeInternal": true
+}

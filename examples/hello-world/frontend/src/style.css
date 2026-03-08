@@ -1,0 +1,236 @@
+:root {
+  --bg: #0f0f0f;
+  --surface: #1a1a2e;
+  --border: #2a2a4a;
+  --primary: #6c63ff;
+  --primary-hover: #5a52e0;
+  --text: #e4e4e7;
+  --text-dim: #a1a1aa;
+  --success: #22c55e;
+  --radius: 12px;
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  min-height: 100vh;
+}
+
+.container {
+  max-width: 640px;
+  margin: 0 auto;
+  padding: 40px 24px;
+}
+
+header {
+  text-align: center;
+  margin-bottom: 32px;
+}
+
+header h1 {
+  font-size: 2.4rem;
+  font-weight: 800;
+  background: linear-gradient(135deg, var(--primary), #a855f7);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.subtitle {
+  color: var(--text-dim);
+  margin-top: 4px;
+  font-size: 0.95rem;
+}
+
+.status {
+  display: inline-block;
+  margin-top: 12px;
+  padding: 4px 12px;
+  border-radius: 20px;
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.status.connected {
+  background: rgba(34, 197, 94, 0.15);
+  color: var(--success);
+}
+
+.status.pending {
+  background: rgba(250, 204, 21, 0.15);
+  color: #facc15;
+}
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 24px;
+  margin-bottom: 16px;
+}
+
+.card h2 {
+  font-size: 1.1rem;
+  font-weight: 600;
+  margin-bottom: 16px;
+  color: var(--text);
+}
+
+.input-row {
+  display: flex;
+  gap: 8px;
+}
+
+input[type="text"] {
+  flex: 1;
+  padding: 10px 14px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+  font-size: 0.95rem;
+  outline: none;
+  transition: border-color 0.2s;
+}
+
+input[type="text"]:focus {
+  border-color: var(--primary);
+}
+
+button {
+  padding: 10px 20px;
+  border-radius: 8px;
+  border: none;
+  background: var(--primary);
+  color: white;
+  font-size: 0.95rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.2s;
+  white-space: nowrap;
+}
+
+button:hover {
+  background: var(--primary-hover);
+}
+
+button:active {
+  transform: scale(0.98);
+}
+
+.result {
+  margin-top: 12px;
+  padding: 12px;
+  background: var(--bg);
+  border-radius: 8px;
+  font-size: 1rem;
+  border: 1px solid var(--border);
+}
+
+.counter-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.button-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.button-row button {
+  flex: 1 1 auto;
+  min-width: 120px;
+}
+
+.count {
+  font-size: 2.5rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--primary);
+  min-width: 80px;
+  text-align: center;
+}
+
+.info table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.info td {
+  padding: 6px 0;
+  font-size: 0.9rem;
+}
+
+.info td.key {
+  color: var(--text-dim);
+  font-weight: 500;
+  width: 40%;
+}
+
+footer {
+  text-align: center;
+  margin-top: 32px;
+  color: var(--text-dim);
+  font-size: 0.85rem;
+}
+
+footer strong {
+  color: var(--text);
+}
+
+/* ── Todo List (Database demo) ── */
+
+.todo-list {
+  list-style: none;
+  padding: 0;
+  margin: 12px 0 0;
+}
+
+.todo-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.todo-list li:last-child {
+  border-bottom: none;
+}
+
+.todo-list li label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  flex: 1;
+}
+
+.todo-list li.done span {
+  text-decoration: line-through;
+  opacity: 0.5;
+}
+
+.btn-delete {
+  background: none;
+  border: none;
+  color: var(--text-dim);
+  font-size: 1.2rem;
+  cursor: pointer;
+  padding: 2px 8px;
+  border-radius: 4px;
+}
+
+.btn-delete:hover {
+  background: #ff4444;
+  color: white;
+}

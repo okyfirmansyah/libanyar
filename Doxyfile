@@ -1,0 +1,73 @@
+# Doxyfile — LibAnyar C++ API Reference
+# Run: doxygen Doxyfile
+# Output: docs/api/cpp/
+
+PROJECT_NAME           = "LibAnyar"
+PROJECT_NUMBER         = "0.1.0"
+PROJECT_BRIEF          = "A Tauri-like C++ desktop application framework"
+PROJECT_LOGO           =
+
+OUTPUT_DIRECTORY       = docs/api/cpp
+CREATE_SUBDIRS         = NO
+
+# ── Input ────────────────────────────────────────────────────────────────────
+INPUT                  = core/include/anyar \
+                         core/include/anyar/plugins
+INPUT_ENCODING         = UTF-8
+FILE_PATTERNS          = *.h *.hpp
+RECURSIVE              = YES
+
+# ── Extraction ───────────────────────────────────────────────────────────────
+EXTRACT_ALL            = YES
+EXTRACT_PRIVATE        = NO
+EXTRACT_STATIC         = YES
+EXTRACT_LOCAL_CLASSES  = NO
+
+# ── Processing ───────────────────────────────────────────────────────────────
+ENABLE_PREPROCESSING   = YES
+MACRO_EXPANSION        = NO
+BUILTIN_STL_SUPPORT    = YES
+JAVADOC_AUTOBRIEF      = YES
+MARKDOWN_SUPPORT       = YES
+AUTOLINK_SUPPORT       = YES
+
+# ── Warnings ─────────────────────────────────────────────────────────────────
+WARN_IF_UNDOCUMENTED   = YES
+WARN_IF_DOC_ERROR      = YES
+WARN_NO_PARAMDOC       = YES
+
+# ── Output formats ───────────────────────────────────────────────────────────
+GENERATE_HTML          = YES
+HTML_OUTPUT            = html
+HTML_COLORSTYLE_HUE    = 260
+HTML_COLORSTYLE_SAT    = 80
+HTML_COLORSTYLE_GAMMA  = 100
+HTML_DYNAMIC_SECTIONS  = YES
+GENERATE_TREEVIEW      = YES
+
+GENERATE_LATEX         = NO
+GENERATE_MAN           = NO
+GENERATE_XML           = NO
+
+# ── Diagrams ─────────────────────────────────────────────────────────────────
+HAVE_DOT               = YES
+DOT_IMAGE_FORMAT       = svg
+INTERACTIVE_SVG        = YES
+CLASS_DIAGRAMS         = YES
+CLASS_GRAPH            = YES
+COLLABORATION_GRAPH    = YES
+INCLUDE_GRAPH          = YES
+INCLUDED_BY_GRAPH      = YES
+CALL_GRAPH             = NO
+CALLER_GRAPH           = NO
+
+# ── Source browsing ──────────────────────────────────────────────────────────
+SOURCE_BROWSER         = YES
+INLINE_SOURCES         = NO
+STRIP_CODE_COMMENTS    = NO
+REFERENCED_BY_RELATION = YES
+REFERENCES_RELATION    = YES
+
+# ── Excludes ─────────────────────────────────────────────────────────────────
+EXCLUDE                = third_party build node_modules
+EXCLUDE_PATTERNS       = */test_* */tests/*

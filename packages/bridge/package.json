@@ -1,0 +1,12 @@
+{
+  "name": "@anyar/bridge",
+  "version": "0.1.0",
+  "description": "LibAnyar JavaScript bridge — invoke commands & listen for events",
+  "main": "index.js",
+  "module": "index.js",
+  "type": "module",
+  "exports": {
+    ".": "./index.js"
+  },
+  "license": "MIT"
+}
