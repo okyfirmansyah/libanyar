@@ -38,6 +38,7 @@ struct Window::Impl {
         : server_port(port), label(opts.label), closable(opts.closable),
           stored_width(opts.width), stored_height(opts.height),
           stored_hint(opts.resizable ? WEBVIEW_HINT_NONE : WEBVIEW_HINT_FIXED),
+          stored_min_width(opts.min_width), stored_min_height(opts.min_height),
           needs_show(true)
     {
         wv = webview_create(opts.debug ? 1 : 0, nullptr);
@@ -74,6 +75,11 @@ struct Window::Impl {
     void show_window() {
         if (!wv || !needs_show) return;
         needs_show = false;
+        // Apply minimum size constraint before showing
+        if (stored_min_width > 0 || stored_min_height > 0) {
+            webview_set_size(wv, stored_min_width, stored_min_height,
+                             WEBVIEW_HINT_MIN);
+        }
         webview_set_size(wv, stored_width, stored_height, stored_hint);
         connect_close_signals();
     }
@@ -100,6 +106,8 @@ struct Window::Impl {
     int stored_width = 800;
     int stored_height = 600;
     webview_hint_t stored_hint = WEBVIEW_HINT_NONE;
+    int stored_min_width = 0;
+    int stored_min_height = 0;
     bool needs_show = false;
 
     Impl(const Impl&) = delete;

@@ -39,6 +39,10 @@ export interface WindowOptions {
   closable?: boolean;
   /** Allow user minimize. Default: true */
   minimizable?: boolean;
+  /** Minimum width in pixels. 0 = no minimum. */
+  minWidth?: number;
+  /** Minimum height in pixels. 0 = no minimum. */
+  minHeight?: number;
 }
 
 /** Information about an open window. */

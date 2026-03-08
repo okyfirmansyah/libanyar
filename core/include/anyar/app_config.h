@@ -90,6 +90,12 @@ struct WindowCreateOptions : WindowConfig {
 
     /// @brief Allow the user to minimize the window.
     bool minimizable = true;
+
+    /// @brief Minimum window width in pixels. 0 = no minimum.
+    int min_width = 0;
+
+    /// @brief Minimum window height in pixels. 0 = no minimum.
+    int min_height = 0;
 };
 
 /// @brief Configuration for the LibAnyar application server.

@@ -328,7 +328,8 @@ void App::register_window_commands() {
         opts.always_on_top = args.value("alwaysOnTop", false);
         opts.closable  = args.value("closable", true);
         opts.decorations = args.value("decorations", true);
-        opts.debug     = config_.debug;
+            opts.min_width = args.value("minWidth", 0);
+            opts.min_height = args.value("minHeight", 0);
 
         // Window creation must happen on the main thread.
         // run_on_main_thread blocks the current fiber until complete.
