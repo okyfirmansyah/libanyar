@@ -79,6 +79,12 @@ struct Window::Impl {
     }
 
     ~Impl() {
+        // Re-enable parent if this was a modal child
+        if (is_modal && parent_window) {
+            gtk_widget_set_sensitive(
+                GTK_WIDGET(parent_window), TRUE);
+            parent_window = nullptr;
+        }
         if (wv && !destroyed) {
             // Normal path: Window is being deleted without the GTK
             // "destroy" signal having fired (e.g. shared_ptr dropped).
@@ -140,6 +146,12 @@ struct Window::Impl {
                 self->wv = nullptr;  // library handles cleanup — prevent double-destroy in ~Impl
                 self->delete_event_handler_id = 0;
                 self->destroy_handler_id = 0;
+                // Re-enable parent if this was a modal child
+                if (self->is_modal && self->parent_window) {
+                    gtk_widget_set_sensitive(
+                        GTK_WIDGET(self->parent_window), TRUE);
+                    self->parent_window = nullptr;
+                }
                 // IMPORTANT: Defer the on_close callback to avoid re-entrant destruction.
                 // Calling on_close() directly would drop the last shared_ptr → ~Impl
                 // → webview_destroy → deplete_run_loop_event_queue → re-entrant event
@@ -175,16 +187,31 @@ struct Window::Impl {
         auto* child_win = gtk_window();
         auto* parent_win = parent_impl.gtk_window();
         if (child_win && parent_win) {
-            gtk_window_set_transient_for(child_win, parent_win);
+            // Use DIALOG hint + keep-above instead of transient_for.
+            // transient_for causes the WM to group-move parent+child and
+            // prevents moving the child when the parent is fullscreen.
+            gtk_window_set_type_hint(
+                child_win, GDK_WINDOW_TYPE_HINT_DIALOG);
+            gtk_window_set_keep_above(child_win, TRUE);
+            parent_window = parent_win;
         }
     }
 
     void set_modal(bool modal) {
         auto* win = gtk_window();
-        if (win) {
-            gtk_window_set_modal(win, modal ? TRUE : FALSE);
+        if (!win) return;
+        is_modal = modal;
+        if (modal && parent_window) {
+            // Disable parent input instead of gtk_window_set_modal
+            // (which only works with transient_for and causes group-move).
+            gtk_widget_set_sensitive(
+                GTK_WIDGET(parent_window), FALSE);
         }
     }
+
+    // Pointer to the parent GtkWindow (non-owning) for manual modal management
+    GtkWindow* parent_window = nullptr;
+    bool is_modal = false;
 
     void set_enabled(bool enabled) {
         auto* win = static_cast<GtkWidget*>(native_handle());
@@ -211,12 +238,11 @@ struct Window::Impl {
         auto* win = gtk_window();
         if (!win) return;
 
-        GtkWindow* parent = gtk_window_get_transient_for(win);
-        if (parent) {
+        if (parent_window) {
             // Center on parent
             int px, py, pw, ph;
-            gtk_window_get_position(parent, &px, &py);
-            gtk_window_get_size(parent, &pw, &ph);
+            gtk_window_get_position(parent_window, &px, &py);
+            gtk_window_get_size(parent_window, &pw, &ph);
             int cw, ch;
             gtk_window_get_size(win, &cw, &ch);
             int x = px + (pw - cw) / 2;
