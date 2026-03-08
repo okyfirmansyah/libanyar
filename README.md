@@ -1,3 +1,5 @@
+<img src="docs/libanyar.png" alt="LibAnyar" width="420" />
+
 # LibAnyar
 
 > **Anyar** (Indonesian/Javanese) — "new", "fresh", "modern"
