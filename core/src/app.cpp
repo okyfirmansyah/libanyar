@@ -160,7 +160,7 @@ void App::start_server() {
     commands_.add("anyar:emit_event", [this](const json& args) -> json {
         std::string event = args.at("event").get<std::string>();
         json payload = args.value("payload", json::object());
-        events_.emit_local(event, payload);   // C++ subscribers only, no echo
+        events_.emit(event, payload);   // broadcast to C++ subs + all windows
         return nullptr;
     });
 

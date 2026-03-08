@@ -399,7 +399,8 @@
         <button class="btn btn-secondary btn-sm" onclick={handleCancel}>
           Cancel
         </button>
-        <button class="btn btn-primary btn-sm" onclick={handleSave}
+        <button class="btn btn-sm save-btn" class:save-active={dirty && !saving}
+                onclick={handleSave}
                 disabled={!dirty || saving}>
           {saving ? 'Saving...' : 'Save'}
         </button>
@@ -605,5 +606,30 @@
   .footer-actions {
     display: flex;
     gap: 8px;
+  }
+
+  /* Save button: muted when no changes, highlighted primary when dirty */
+  .save-btn {
+    background: var(--surface-2);
+    color: var(--text-muted);
+    border: 1px solid var(--border);
+    transition: background 0.2s, color 0.2s, border-color 0.2s,
+                box-shadow 0.2s, opacity 0.2s;
+  }
+  .save-btn:disabled {
+    opacity: 0.6;
+  }
+  .save-active {
+    background: var(--accent) !important;
+    color: #fff !important;
+    border-color: var(--accent) !important;
+    box-shadow: 0 1px 4px rgba(124,107,246,0.35),
+                inset 0 1px 0 rgba(255,255,255,0.08);
+    opacity: 1;
+  }
+  .save-active:hover {
+    background: var(--accent-hover) !important;
+    box-shadow: 0 2px 8px rgba(124,107,246,0.45),
+                inset 0 1px 0 rgba(255,255,255,0.08);
   }
 </style>
