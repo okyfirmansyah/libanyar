@@ -312,52 +312,49 @@ int App::run() {
 
 void App::register_window_commands() {
     // window:create — create a new window from frontend
-    commands_.add_async("window:create",
-        [this](const json& args, CommandReply reply) {
-            WindowCreateOptions opts;
-            opts.label     = args.at("label").get<std::string>();
-            opts.title     = args.value("title", "LibAnyar");
-            opts.width     = args.value("width", 800);
-            opts.height    = args.value("height", 600);
-            opts.url       = args.value("url", "/");
-            opts.parent    = args.value("parent", std::string());
-            opts.modal     = args.value("modal", false);
-            opts.resizable = args.value("resizable", true);
-            opts.center    = args.value("center", true);
-            opts.always_on_top = args.value("alwaysOnTop", false);
-            opts.closable  = args.value("closable", true);
-            opts.decorations = args.value("decorations", true);
-            opts.debug     = config_.debug;
+    // Uses run_on_main_thread() (fiber-blocking) so that the calling fiber
+    // waits until the GTK main thread finishes window creation.
+    commands_.add("window:create", [this](const json& args) -> json {
+        WindowCreateOptions opts;
+        opts.label     = args.at("label").get<std::string>();
+        opts.title     = args.value("title", "LibAnyar");
+        opts.width     = args.value("width", 800);
+        opts.height    = args.value("height", 600);
+        opts.url       = args.value("url", "/");
+        opts.parent    = args.value("parent", std::string());
+        opts.modal     = args.value("modal", false);
+        opts.resizable = args.value("resizable", true);
+        opts.center    = args.value("center", true);
+        opts.always_on_top = args.value("alwaysOnTop", false);
+        opts.closable  = args.value("closable", true);
+        opts.decorations = args.value("decorations", true);
+        opts.debug     = config_.debug;
 
-            // Window creation must happen on the main thread
-            post_to_main_thread([this, opts, reply]() {
-                try {
-                    std::string label = window_mgr_.create(opts, port_);
-                    // Emit window:created event
-                    events_.emit("window:created", {
-                        {"label", label},
-                        {"title", opts.title}
-                    });
-                    reply(json{{"label", label}}, "");
-                } catch (const std::exception& e) {
-                    reply(json::object(), e.what());
-                }
-            });
+        // Window creation must happen on the main thread.
+        // run_on_main_thread blocks the current fiber until complete.
+        std::string label = run_on_main_thread([this, opts]() -> std::string {
+            return window_mgr_.create(opts, port_);
         });
+
+        // Emit window:created event (safe from fiber context)
+        events_.emit("window:created", {
+            {"label", label},
+            {"title", opts.title}
+        });
+        return json{{"label", label}};
+    });
 
     // window:close — close a specific window
-    commands_.add_async("window:close",
-        [this](const json& args, CommandReply reply) {
-            std::string label = args.value("label", std::string());
-            if (label.empty()) {
-                reply(json::object(), "Missing window label");
-                return;
-            }
-            post_to_main_thread([this, label, reply]() {
-                window_mgr_.close(label);
-                reply(json{{"ok", true}}, "");
-            });
+    commands_.add("window:close", [this](const json& args) -> json {
+        std::string label = args.value("label", std::string());
+        if (label.empty()) {
+            throw std::runtime_error("Missing window label");
+        }
+        run_on_main_thread([this, label]() {
+            window_mgr_.close(label);
         });
+        return json{{"ok", true}};
+    });
 
     // window:close-all — close all windows (triggers app shutdown)
     commands_.add("window:close-all", [this](const json&) -> json {
@@ -381,84 +378,74 @@ void App::register_window_commands() {
     });
 
     // window:set-title — change a window's title
-    commands_.add_async("window:set-title",
-        [this](const json& args, CommandReply reply) {
-            std::string label = args.at("label").get<std::string>();
-            std::string title = args.at("title").get<std::string>();
-            post_to_main_thread([this, label, title, reply]() {
-                Window* win = window_mgr_.get(label);
-                if (win) {
-                    win->set_title(title);
-                    reply(json{{"ok", true}}, "");
-                } else {
-                    reply(json::object(), "Window not found: " + label);
-                }
-            });
+    commands_.add("window:set-title", [this](const json& args) -> json {
+        std::string label = args.at("label").get<std::string>();
+        std::string title = args.at("title").get<std::string>();
+        return run_on_main_thread([this, label, title]() -> json {
+            Window* win = window_mgr_.get(label);
+            if (win) {
+                win->set_title(title);
+                return json{{"ok", true}};
+            }
+            throw std::runtime_error("Window not found: " + label);
         });
+    });
 
     // window:set-size — resize a window
-    commands_.add_async("window:set-size",
-        [this](const json& args, CommandReply reply) {
-            std::string label = args.at("label").get<std::string>();
-            int w = args.at("width").get<int>();
-            int h = args.at("height").get<int>();
-            post_to_main_thread([this, label, w, h, reply]() {
-                Window* win = window_mgr_.get(label);
-                if (win) {
-                    win->set_size(w, h);
-                    reply(json{{"ok", true}}, "");
-                } else {
-                    reply(json::object(), "Window not found: " + label);
-                }
-            });
+    commands_.add("window:set-size", [this](const json& args) -> json {
+        std::string label = args.at("label").get<std::string>();
+        int w = args.at("width").get<int>();
+        int h = args.at("height").get<int>();
+        return run_on_main_thread([this, label, w, h]() -> json {
+            Window* win = window_mgr_.get(label);
+            if (win) {
+                win->set_size(w, h);
+                return json{{"ok", true}};
+            }
+            throw std::runtime_error("Window not found: " + label);
         });
+    });
 
     // window:focus — bring a window to front
-    commands_.add_async("window:focus",
-        [this](const json& args, CommandReply reply) {
-            std::string label = args.at("label").get<std::string>();
-            post_to_main_thread([this, label, reply]() {
-                Window* win = window_mgr_.get(label);
-                if (win) {
-                    win->focus();
-                    reply(json{{"ok", true}}, "");
-                } else {
-                    reply(json::object(), "Window not found: " + label);
-                }
-            });
+    commands_.add("window:focus", [this](const json& args) -> json {
+        std::string label = args.at("label").get<std::string>();
+        return run_on_main_thread([this, label]() -> json {
+            Window* win = window_mgr_.get(label);
+            if (win) {
+                win->focus();
+                return json{{"ok", true}};
+            }
+            throw std::runtime_error("Window not found: " + label);
         });
+    });
 
     // window:set-enabled — enable/disable input on a window
-    commands_.add_async("window:set-enabled",
-        [this](const json& args, CommandReply reply) {
-            std::string label = args.at("label").get<std::string>();
-            bool enabled = args.at("enabled").get<bool>();
-            post_to_main_thread([this, label, enabled, reply]() {
-                Window* win = window_mgr_.get(label);
-                if (win) {
-                    win->set_enabled(enabled);
-                    reply(json{{"ok", true}}, "");
-                } else {
-                    reply(json::object(), "Window not found: " + label);
-                }
-            });
+    commands_.add("window:set-enabled", [this](const json& args) -> json {
+        std::string label = args.at("label").get<std::string>();
+        bool enabled = args.at("enabled").get<bool>();
+        return run_on_main_thread([this, label, enabled]() -> json {
+            Window* win = window_mgr_.get(label);
+            if (win) {
+                win->set_enabled(enabled);
+                return json{{"ok", true}};
+            }
+            throw std::runtime_error("Window not found: " + label);
         });
+    });
 
     // window:set-always-on-top — toggle always-on-top
-    commands_.add_async("window:set-always-on-top",
-        [this](const json& args, CommandReply reply) {
-            std::string label = args.at("label").get<std::string>();
-            bool on_top = args.at("alwaysOnTop").get<bool>();
-            post_to_main_thread([this, label, on_top, reply]() {
-                Window* win = window_mgr_.get(label);
-                if (win) {
-                    win->set_always_on_top(on_top);
-                    reply(json{{"ok", true}}, "");
-                } else {
-                    reply(json::object(), "Window not found: " + label);
-                }
-            });
+    commands_.add("window:set-always-on-top", [this](const json& args) -> json {
+        std::string label = args.at("label").get<std::string>();
+        bool on_top = args.at("alwaysOnTop").get<bool>();
+        return run_on_main_thread([this, label, on_top]() -> json {
+            Window* win = window_mgr_.get(label);
+            if (win) {
+                win->set_always_on_top(on_top);
+                return json{{"ok", true}};
+            }
+            throw std::runtime_error("Window not found: " + label);
         });
+    });
 
     // window:get-label — returns the calling window's own label
     // (resolved from the calling context — each window has its label injected)
