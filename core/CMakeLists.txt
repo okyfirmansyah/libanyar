@@ -7,6 +7,7 @@ add_library(anyar_core STATIC
     src/command_registry.cpp
     src/event_bus.cpp
     src/window.cpp
+    src/window_manager.cpp
     src/plugins/fs_plugin.cpp
     src/plugins/db_plugin.cpp
 )

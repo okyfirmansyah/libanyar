@@ -50,6 +50,48 @@ struct WindowConfig {
     bool debug = false;
 };
 
+/// @brief Extended options for creating a window.
+///
+/// Inherits all `WindowConfig` fields plus multi-window specific options
+/// like parent/child relationships, modality, URL path, and positioning.
+///
+/// ## Example
+/// ```cpp
+/// anyar::WindowCreateOptions opts;
+/// opts.label  = "settings";
+/// opts.title  = "App Settings";
+/// opts.parent = "main";     // child of main window
+/// opts.modal  = true;       // blocks parent until closed
+/// opts.url    = "/settings"; // frontend route
+/// opts.width  = 500;
+/// opts.height = 400;
+/// ```
+struct WindowCreateOptions : WindowConfig {
+    /// @brief Unique window identifier (alphanumeric + `-/:_`).
+    std::string label = "main";
+
+    /// @brief Label of the parent window. Empty string = top-level window.
+    std::string parent;
+
+    /// @brief Whether this window blocks its parent (requires `parent`).
+    bool modal = false;
+
+    /// @brief URL path or full URL to load. Default `"/"` loads the app root.
+    std::string url = "/";
+
+    /// @brief Center the window on screen (or on parent if set).
+    bool center = true;
+
+    /// @brief Keep the window above all other windows.
+    bool always_on_top = false;
+
+    /// @brief Allow the user to close the window via the title-bar button.
+    bool closable = true;
+
+    /// @brief Allow the user to minimize the window.
+    bool minimizable = true;
+};
+
 /// @brief Configuration for the LibAnyar application server.
 ///
 /// Controls the HTTP/WebSocket server that serves the frontend and

@@ -1,4 +1,5 @@
 #include <anyar/app.h>
+#include <anyar/main_thread.h>
 
 #include <anyar/plugins/fs_plugin.h>
 #include <anyar/plugins/dialog_plugin.h>
@@ -99,8 +100,21 @@ UnsubscribeFn App::on(const std::string& event, EventHandler handler) {
 // ── Window Management ───────────────────────────────────────────────────────
 
 void App::create_window(WindowConfig config) {
-    window_config_ = std::move(config);
-    window_config_.debug = window_config_.debug || config_.debug;
+    WindowCreateOptions opts;
+    // Copy fields from WindowConfig
+    opts.title = std::move(config.title);
+    opts.width = config.width;
+    opts.height = config.height;
+    opts.resizable = config.resizable;
+    opts.decorations = config.decorations;
+    opts.debug = config.debug;
+    opts.label = "main";
+    create_window(std::move(opts));
+}
+
+void App::create_window(WindowCreateOptions opts) {
+    opts.debug = opts.debug || config_.debug;
+    main_window_opts_ = std::move(opts);
     has_window_ = true;
 }
 
@@ -150,6 +164,9 @@ void App::start_server() {
         return nullptr;
     });
 
+    // ── Register window management commands ─────────────────────────────
+    register_window_commands();
+
     // ── Auto-register built-in plugins ─────────────────────────────────────
     std::vector<std::shared_ptr<IAnyarPlugin>> builtins;
     builtins.push_back(std::make_shared<FsPlugin>());
@@ -159,12 +176,6 @@ void App::start_server() {
     builtins.push_back(std::make_shared<DbPlugin>());
 
     // ── Initialize plugins BEFORE serve_static ─────────────────────────────
-    // Plugin routes (e.g. /video/stream) must be registered before the
-    // catch-all static-file handler, because libasyik uses first-match
-    // routing.  If serve_static("/") is registered first it shadows every
-    // plugin route and the request gets served as a static file (or 404),
-    // which can crash GStreamer/WebKitGTK when a <video> element receives
-    // HTML instead of a media stream.
     PluginContext ctx{service_, server_, commands_, events_, config_};
     for (auto& plugin : builtins) {
         plugin->initialize(ctx);
@@ -177,16 +188,13 @@ void App::start_server() {
     plugins_.insert(plugins_.begin(), builtins.begin(), builtins.end());
 
     // ── Static file serving (frontend assets) — uses LibAsyik serve_static ──
-    // Registered AFTER plugin routes so that specific routes take precedence
-    // over the catch-all static file handler.
     std::string dist_abs = std::filesystem::absolute(config_.dist_path).string();
     if (std::filesystem::exists(dist_abs)) {
         asyik::static_file_config cfg;
-        cfg.cache_control = "no-cache";          // dev-friendly default
-        cfg.index_file    = "index.html";         // SPA entry point
+        cfg.cache_control = "no-cache";
+        cfg.index_file    = "index.html";
         server_->serve_static("/", dist_abs, cfg);
     } else {
-        // If no dist folder, serve a fallback page
         server_->on_http_request("/", "GET",
             [](asyik::http_request_ptr req, asyik::http_route_args args) {
                 req->response.body =
@@ -216,15 +224,63 @@ int App::run() {
     });
 
     if (has_window_) {
-        // Create and run the window on the main thread (OS requirement)
-        window_ = std::make_unique<Window>(window_config_, port_);
+        // ── Window creation callback — sets up IPC for every new window ──
+        window_mgr_.set_on_window_created(
+            [this](Window& window, const WindowCreateOptions& opts) {
+                setup_native_ipc(&window);
+            });
 
-        // Set up native IPC (webview_bind) before the event loop starts
-        setup_native_ipc();
+        // ── Window closed callback — cleanup sinks, stop app on last ──
+        window_mgr_.set_on_window_closed(
+            [this](const std::string& label) {
+                // Remove the event sink for this window
+                auto it = native_event_sinks_.find(label);
+                if (it != native_event_sinks_.end()) {
+                    events_.remove_ws_sink(it->second);
+                    native_event_sinks_.erase(it);
+                }
 
-        window_->run();  // Blocks until window is closed
+                // Emit window:closed event
+                events_.emit("window:closed", {{"label", label}});
 
-        // Window closed — stop service
+                if (config_.debug) {
+                    std::cout << "[LibAnyar] Window closed: " << label
+                              << " (" << window_mgr_.count() << " remaining)"
+                              << std::endl;
+                }
+
+                // If main window closed or no windows left, stop app
+                if (label == "main" || window_mgr_.count() == 0) {
+                    // Close remaining child windows
+                    window_mgr_.close_all();
+                    if (service_) {
+                        service_->stop();
+                    }
+                }
+            });
+
+        // Create the main window on the main thread
+        window_mgr_.create(main_window_opts_, port_);
+
+        Window* main_win = window_mgr_.main_window();
+        if (!main_win) {
+            std::cerr << "[LibAnyar] Failed to create main window" << std::endl;
+            if (service_) service_->stop();
+            if (service_thread_.joinable()) service_thread_.join();
+            return 1;
+        }
+
+        // Emit window:created event for main
+        events_.emit("window:created", {
+            {"label", "main"},
+            {"title", main_window_opts_.title}
+        });
+
+        // Block on the main window's event loop.
+        // This also processes events for all child windows.
+        main_win->run();
+
+        // Main window closed — stop service
         if (service_) {
             service_->stop();
         }
@@ -243,34 +299,195 @@ int App::run() {
         plugin->shutdown();
     }
 
-    // Clean up native event sink
-    if (native_event_sink_id_) {
-        events_.remove_ws_sink(native_event_sink_id_);
+    // Clean up remaining event sinks
+    for (auto& [label, sink_id] : native_event_sinks_) {
+        events_.remove_ws_sink(sink_id);
     }
+    native_event_sinks_.clear();
 
     return 0;
 }
 
+// ── Window IPC Commands ─────────────────────────────────────────────────────
+
+void App::register_window_commands() {
+    // window:create — create a new window from frontend
+    commands_.add_async("window:create",
+        [this](const json& args, CommandReply reply) {
+            WindowCreateOptions opts;
+            opts.label     = args.at("label").get<std::string>();
+            opts.title     = args.value("title", "LibAnyar");
+            opts.width     = args.value("width", 800);
+            opts.height    = args.value("height", 600);
+            opts.url       = args.value("url", "/");
+            opts.parent    = args.value("parent", std::string());
+            opts.modal     = args.value("modal", false);
+            opts.resizable = args.value("resizable", true);
+            opts.center    = args.value("center", true);
+            opts.always_on_top = args.value("alwaysOnTop", false);
+            opts.closable  = args.value("closable", true);
+            opts.decorations = args.value("decorations", true);
+            opts.debug     = config_.debug;
+
+            // Window creation must happen on the main thread
+            post_to_main_thread([this, opts, reply]() {
+                try {
+                    std::string label = window_mgr_.create(opts, port_);
+                    // Emit window:created event
+                    events_.emit("window:created", {
+                        {"label", label},
+                        {"title", opts.title}
+                    });
+                    reply(json{{"label", label}}, "");
+                } catch (const std::exception& e) {
+                    reply(json::object(), e.what());
+                }
+            });
+        });
+
+    // window:close — close a specific window
+    commands_.add_async("window:close",
+        [this](const json& args, CommandReply reply) {
+            std::string label = args.value("label", std::string());
+            if (label.empty()) {
+                reply(json::object(), "Missing window label");
+                return;
+            }
+            post_to_main_thread([this, label, reply]() {
+                window_mgr_.close(label);
+                reply(json{{"ok", true}}, "");
+            });
+        });
+
+    // window:close-all — close all windows (triggers app shutdown)
+    commands_.add("window:close-all", [this](const json&) -> json {
+        post_to_main_thread([this]() {
+            Window* main_win = window_mgr_.main_window();
+            if (main_win) {
+                main_win->terminate();
+            }
+        });
+        return {{"ok", true}};
+    });
+
+    // window:list — list open windows
+    commands_.add("window:list", [this](const json&) -> json {
+        auto lbls = window_mgr_.labels();
+        json result = json::array();
+        for (auto& lbl : lbls) {
+            result.push_back({{"label", lbl}});
+        }
+        return result;
+    });
+
+    // window:set-title — change a window's title
+    commands_.add_async("window:set-title",
+        [this](const json& args, CommandReply reply) {
+            std::string label = args.at("label").get<std::string>();
+            std::string title = args.at("title").get<std::string>();
+            post_to_main_thread([this, label, title, reply]() {
+                Window* win = window_mgr_.get(label);
+                if (win) {
+                    win->set_title(title);
+                    reply(json{{"ok", true}}, "");
+                } else {
+                    reply(json::object(), "Window not found: " + label);
+                }
+            });
+        });
+
+    // window:set-size — resize a window
+    commands_.add_async("window:set-size",
+        [this](const json& args, CommandReply reply) {
+            std::string label = args.at("label").get<std::string>();
+            int w = args.at("width").get<int>();
+            int h = args.at("height").get<int>();
+            post_to_main_thread([this, label, w, h, reply]() {
+                Window* win = window_mgr_.get(label);
+                if (win) {
+                    win->set_size(w, h);
+                    reply(json{{"ok", true}}, "");
+                } else {
+                    reply(json::object(), "Window not found: " + label);
+                }
+            });
+        });
+
+    // window:focus — bring a window to front
+    commands_.add_async("window:focus",
+        [this](const json& args, CommandReply reply) {
+            std::string label = args.at("label").get<std::string>();
+            post_to_main_thread([this, label, reply]() {
+                Window* win = window_mgr_.get(label);
+                if (win) {
+                    win->focus();
+                    reply(json{{"ok", true}}, "");
+                } else {
+                    reply(json::object(), "Window not found: " + label);
+                }
+            });
+        });
+
+    // window:set-enabled — enable/disable input on a window
+    commands_.add_async("window:set-enabled",
+        [this](const json& args, CommandReply reply) {
+            std::string label = args.at("label").get<std::string>();
+            bool enabled = args.at("enabled").get<bool>();
+            post_to_main_thread([this, label, enabled, reply]() {
+                Window* win = window_mgr_.get(label);
+                if (win) {
+                    win->set_enabled(enabled);
+                    reply(json{{"ok", true}}, "");
+                } else {
+                    reply(json::object(), "Window not found: " + label);
+                }
+            });
+        });
+
+    // window:set-always-on-top — toggle always-on-top
+    commands_.add_async("window:set-always-on-top",
+        [this](const json& args, CommandReply reply) {
+            std::string label = args.at("label").get<std::string>();
+            bool on_top = args.at("alwaysOnTop").get<bool>();
+            post_to_main_thread([this, label, on_top, reply]() {
+                Window* win = window_mgr_.get(label);
+                if (win) {
+                    win->set_always_on_top(on_top);
+                    reply(json{{"ok", true}}, "");
+                } else {
+                    reply(json::object(), "Window not found: " + label);
+                }
+            });
+        });
+
+    // window:get-label — returns the calling window's own label
+    // (resolved from the calling context — each window has its label injected)
+    commands_.add("window:get-label", [](const json& args) -> json {
+        // The label is injected client-side as window.__LIBANYAR_WINDOW_LABEL__
+        // This command is a fallback / validation.
+        return {{"label", args.value("_caller_label", "main")}};
+    });
+}
+
 // ── Native IPC Setup ────────────────────────────────────────────────────────
 //
-// Binds `window.__anyar_ipc__(json)` → CommandRegistry::dispatch.
-// Also registers a native event push sink so that C++ events reach the
-// webview via webview_eval() instead of WebSocket.
+// Per-window: binds `window.__anyar_ipc__(json)` → CommandRegistry::dispatch.
+// Also registers a native event push sink per window.
 
-void App::setup_native_ipc() {
-    if (!window_) return;
+void App::setup_native_ipc(Window* window) {
+    if (!window) return;
+    std::string label = window->label();
 
     // ── Bind __anyar_ipc__ for direct command invocation ─────────────────
-    window_->bind("__anyar_ipc__",
-        [this](const std::string& seq, const std::string& req) {
-            // webview_bind passes args as a JSON array: ["<stringified_body>"]
-            // This callback runs on the GTK main thread.  Dispatch the
+    window->bind("__anyar_ipc__",
+        [this, label](const std::string& seq, const std::string& req) {
+            // This callback runs on the main thread.  Dispatch the
             // real work to a libasyik fiber so that command handlers can
-            // use run_on_gtk_main() without deadlocking.
+            // use run_on_main_thread() without deadlocking.
             std::string seq_copy = seq;
             std::string req_copy = req;
 
-            service_->execute([this, seq_copy, req_copy]() {
+            service_->execute([this, label, seq_copy, req_copy]() {
                 std::string result;
                 try {
                     auto args_arr = json::parse(req_copy);
@@ -281,6 +498,8 @@ void App::setup_native_ipc() {
                     ipc_req.id  = body.value("id", "");
                     ipc_req.cmd = body.at("cmd").get<std::string>();
                     ipc_req.args = body.value("args", json::object());
+                    // Inject calling window's label
+                    ipc_req.args["_caller_label"] = label;
 
                     auto resp = commands_.dispatch(ipc_req);
                     result = resp.to_json().dump();
@@ -290,31 +509,41 @@ void App::setup_native_ipc() {
                     result = err_resp.to_json().dump();
                 }
 
-                // Resolve the JS promise on the GTK main thread
-                window_->dispatch([this, seq_copy, result]() {
-                    window_->return_result(seq_copy, 0, result);
-                });
+                // Resolve the JS promise — dispatch to main thread
+                Window* win = window_mgr_.get(label);
+                if (win && !win->is_destroyed()) {
+                    win->dispatch([this, label, seq_copy, result]() {
+                        Window* w = window_mgr_.get(label);
+                        if (w && !w->is_destroyed()) {
+                            w->return_result(seq_copy, 0, result);
+                        }
+                    });
+                }
             });
         }
     );
 
-    // ── Register a native event push sink ────────────────────────────────
-    // When C++ emits an event, push it directly into the webview via eval()
-    // instead of going through a WebSocket connection.
-    native_event_sink_id_ = events_.add_ws_sink(
-        [this](const std::string& message) {
-            if (window_) {
-                window_->dispatch([this, message]() {
-                    window_->eval(
-                        "window.__anyar_dispatch_event__&&"
-                        "window.__anyar_dispatch_event__(" + message + ")");
+    // ── Register a native event push sink for this window ────────────────
+    uint64_t sink_id = events_.add_ws_sink(
+        [this, label](const std::string& message) {
+            Window* win = window_mgr_.get(label);
+            if (win && !win->is_destroyed()) {
+                std::string msg_copy = message;
+                win->dispatch([this, label, msg_copy]() {
+                    Window* w = window_mgr_.get(label);
+                    if (w && !w->is_destroyed()) {
+                        w->eval(
+                            "window.__anyar_dispatch_event__&&"
+                            "window.__anyar_dispatch_event__(" + msg_copy + ")");
+                    }
                 });
             }
         }
     );
+    native_event_sinks_[label] = sink_id;
 
     // ── Inject the JS-side event dispatcher (runs before window.onload) ─
-    window_->init(R"JS(
+    window->init(R"JS(
         window.__LIBANYAR_NATIVE__ = true;
         window.__anyar_event_listeners__ = {};
         window.__anyar_dispatch_event__ = function(msg) {
@@ -331,14 +560,8 @@ void App::setup_native_ipc() {
     )JS");
 
     // ── Native-app behavior: disable browser defaults in production ────
-    //
-    // Per-component pinch-zoom: Add data-pinch-zoom attribute to any
-    // element that should receive pinch/zoom events.  The global
-    // blockers below will skip those elements so they can handle
-    // wheel(ctrlKey) / touch gestures themselves.
-    //
-    if (!window_config_.debug) {
-        window_->init(R"JS(
+    if (!main_window_opts_.debug && !config_.debug) {
+        window->init(R"JS(
             // Helper: check if an element or ancestor has data-pinch-zoom
             function __anyar_allows_zoom(el) {
                 while (el && el !== document) {
@@ -380,7 +603,8 @@ void App::setup_native_ipc() {
     }
 
     if (config_.debug) {
-        std::cout << "[LibAnyar] Native IPC bound (__anyar_ipc__ + event push)" << std::endl;
+        std::cout << "[LibAnyar] Native IPC bound for window '"
+                  << label << "'" << std::endl;
     }
 }
 

@@ -1,7 +1,7 @@
 #pragma once
 
 // LibAnyar — Main Application Class
-// Central entry point owning the service, HTTP server, IPC, and window.
+// Central entry point owning the service, HTTP server, IPC, and windows.
 
 #include <anyar/app_config.h>
 #include <anyar/command_registry.h>
@@ -10,6 +10,7 @@
 #include <anyar/plugin.h>
 #include <anyar/types.h>
 #include <anyar/window.h>
+#include <anyar/window_manager.h>
 
 #include <libasyik/service.hpp>
 #include <libasyik/http.hpp>
@@ -49,8 +50,17 @@ public:
 
     // ── Window Management ───────────────────────────────────────────────────
 
-    /// Create and display a window (only one window in Phase 1)
+    /// Configure and display the main window (convenience for simple apps).
+    /// Equivalent to calling create_window(opts) with label "main".
     void create_window(WindowConfig config = {});
+
+    /// Create and display a window with full options.
+    /// Can be called before run() for the main window, or from commands
+    /// during run() for child/modal windows.
+    void create_window(WindowCreateOptions opts);
+
+    /// Get the WindowManager for direct window manipulation.
+    WindowManager& window_manager() { return window_mgr_; }
 
     // ── Plugin System ───────────────────────────────────────────────────────
 
@@ -72,7 +82,8 @@ public:
 
 private:
     void start_server();
-    void setup_native_ipc();
+    void setup_native_ipc(Window* window);
+    void register_window_commands();
     int find_available_port();
 
     AppConfig config_;
@@ -86,10 +97,12 @@ private:
     EventBus events_;
     std::unique_ptr<IpcRouter> ipc_router_;
 
-    std::unique_ptr<Window> window_;
-    WindowConfig window_config_;
+    WindowManager window_mgr_;
+    WindowCreateOptions main_window_opts_;
     bool has_window_ = false;
-    uint64_t native_event_sink_id_ = 0;
+
+    /// Per-window native event sink IDs (label → sink id)
+    std::map<std::string, uint64_t> native_event_sinks_;
 
     std::vector<std::shared_ptr<IAnyarPlugin>> plugins_;
 };
