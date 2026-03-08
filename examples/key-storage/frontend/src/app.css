@@ -18,6 +18,9 @@
   --danger-dim: rgba(248, 113, 113, 0.12);
   --warning: #fbbf24;
   --warning-dim: rgba(251, 191, 36, 0.12);
+  --gold: #e2b340;
+  --gold-dim: rgba(226, 179, 64, 0.10);
+  --gold-glow: rgba(226, 179, 64, 0.35);
 }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -190,4 +193,26 @@ input::placeholder, textarea::placeholder {
 ::selection {
   background: var(--accent-dim);
   color: var(--text);
+}
+
+/* ── Save button pulse animation ────────────────────────────────────────── */
+@keyframes save-pulse {
+  0%, 100% {
+    background: transparent;
+    box-shadow: 0 0 0 0 transparent;
+    color: var(--gold);
+    opacity: 0.55;
+  }
+  50% {
+    background: rgba(226, 179, 64, 0.18);
+    box-shadow: 0 0 14px 3px var(--gold-glow);
+    color: #f5d060;
+    opacity: 1;
+  }
+}
+
+.save-pulse {
+  color: var(--gold) !important;
+  animation: save-pulse 1.8s ease-in-out infinite;
+  border-radius: 8px;
 }

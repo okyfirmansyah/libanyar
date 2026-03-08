@@ -108,6 +108,32 @@ cd examples/hello-world
 
 See [PLAN.md](PLAN.md) for full roadmap.
 
+## Example Projects
+
+### Hello World
+
+A minimal example showing IPC commands, events, and built-in plugins.
+
+<p align="center">
+  <img src="docs/hello_world.gif" alt="Hello World Example" width="720" />
+</p>
+
+### Local Video Player
+
+FFmpeg-powered video player with WebSocket streaming and Canvas rendering.
+
+<p align="center">
+  <img src="docs/video_player.gif" alt="Local Video Player Example" width="720" />
+</p>
+
+### Secure Key Storage
+
+Encrypted password manager with AES-256-GCM, multi-window modal dialogs, and a custom plugin.
+
+<p align="center">
+  <img src="docs/secure_key_storage.gif" alt="Secure Key Storage Example" width="720" />
+</p>
+
 ## License
 
 MIT

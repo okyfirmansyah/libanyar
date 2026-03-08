@@ -45,6 +45,34 @@
   let errorMsg = $state('');
   let statusMsg = $state('');
 
+  // ── Global keyboard shortcuts ─────────────────────────────────────────
+  $effect(() => {
+    function onKeydown(e) {
+      // Ctrl+N — new entry (when db is open)
+      if (e.ctrlKey && e.key === 'n' && !e.shiftKey && dbOpen) {
+        e.preventDefault();
+        handleCreateEntry();
+      }
+      // Ctrl+Shift+N — new vault
+      if (e.ctrlKey && e.shiftKey && e.key === 'N') {
+        e.preventDefault();
+        handleNew();
+      }
+      // Ctrl+O — open vault
+      if (e.ctrlKey && e.key === 'o') {
+        e.preventDefault();
+        handleOpen();
+      }
+      // Ctrl+S — save
+      if (e.ctrlKey && e.key === 's' && dbOpen) {
+        e.preventDefault();
+        handleSave();
+      }
+    }
+    window.addEventListener('keydown', onKeydown);
+    return () => window.removeEventListener('keydown', onKeydown);
+  });
+
   // ── Cross-window event listeners (native mode) ────────────────────────────
   // When the entry-detail child window saves/deletes, refresh the main list.
   $effect(() => {
@@ -410,8 +438,8 @@
     <div class="flex-1 flex min-h-0">
       <!-- Left sidebar: groups -->
       <aside class="flex flex-col shrink-0" style="width: 240px; background: var(--surface); border-right: 1px solid var(--border);">
-        <div class="px-4 py-2.5 text-xs font-semibold uppercase tracking-wider flex items-center justify-between"
-             style="color: var(--text-muted); border-bottom: 1px solid var(--border);">
+        <div class="px-4 py-3 text-[12px] font-semibold uppercase tracking-wider flex items-center justify-between"
+             style="color: var(--text-muted); border-bottom: 1px solid var(--border); border-left: 2px solid var(--gold);">
           <span>Groups</span>
           <button
             class="w-6 h-6 flex items-center justify-center rounded-md hover:bg-white/5 transition-colors"
@@ -427,7 +455,7 @@
 
         <!-- "All Entries" item -->
         <button
-          class="w-full text-left px-4 py-2 text-[13px] flex items-center gap-2.5 transition-colors"
+          class="w-full text-left px-4 py-2.5 text-[13px] flex items-center gap-2.5 transition-colors"
           style="color: {selectedGroupId == null && !searchMode ? 'var(--accent)' : 'var(--text-dim)'}; background: {selectedGroupId == null && !searchMode ? 'var(--accent-dim)' : 'transparent'};"
           onclick={() => handleSelectGroup(null)}
         >
@@ -452,7 +480,7 @@
 
       <!-- Right: entry table -->
       <section class="flex-1 min-w-0 flex flex-col">
-        <div class="px-4 py-2.5 text-xs font-semibold uppercase tracking-wider flex items-center justify-between"
+        <div class="px-4 py-3 text-[12px] font-semibold uppercase tracking-wider flex items-center justify-between"
              style="color: var(--text-muted); border-bottom: 1px solid var(--border);">
           <span>
             {#if searchMode}
@@ -463,7 +491,7 @@
               {groups.find(g => g.id === selectedGroupId)?.name || 'Entries'}
             {/if}
           </span>
-          <span class="text-[11px] font-normal" style="color: var(--text-muted);">{entries.length} entries</span>
+          <span class="text-[12px] font-normal" style="color: var(--text-muted);">{entries.length} entries</span>
         </div>
         <div class="flex-1 overflow-auto">
           <EntryList
@@ -540,12 +568,12 @@
   {/if}
 
   <!-- Status bar -->
-  <footer class="shrink-0 px-4 py-1.5 flex items-center justify-between text-xs"
-          style="background: var(--surface); border-top: 1px solid var(--border); color: var(--text-muted);">
+  <footer class="shrink-0 flex items-center justify-between"
+          style="background: var(--surface); border-top: 1px solid var(--border); color: var(--text-dim); font-size: 13px; padding: 8px 20px;">
     <div class="flex items-center gap-3">
       {#if dbOpen}
         <span class="flex items-center gap-1">
-          <span class="w-1.5 h-1.5 rounded-full" style="background: {dbDirty ? 'var(--warning)' : 'var(--success)'};"></span>
+          <span class="w-2 h-2 rounded-full" style="background: {dbDirty ? 'var(--gold)' : 'var(--success)'};"></span>
           {dbDirty ? 'Unsaved changes' : 'Saved'}
         </span>
         <span style="color: var(--border);">|</span>

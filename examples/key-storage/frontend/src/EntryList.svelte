@@ -56,9 +56,9 @@
 <svelte:window onclick={handleWindowClick} />
 
 {#if entries.length === 0}
-  <div class="flex-1 flex items-center justify-center p-8" style="color: var(--text-muted);">
-    <div class="text-center">
-      <svg class="w-12 h-12 mx-auto mb-3 opacity-30" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+  <div class="h-full flex items-center justify-center p-8" style="color: var(--text-muted);">
+    <div class="flex flex-col items-center text-center">
+      <svg class="w-12 h-12 mb-3 opacity-30" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
               d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z" />
       </svg>
@@ -116,12 +116,12 @@
             </span>
           </td>
           <td>
-            <span class="truncate text-xs" style="color: var(--text-muted);">
+            <span class="truncate" style="color: var(--text-dim);">
               {domainFromUrl(entry.url)}
             </span>
           </td>
           <td>
-            <span class="truncate text-xs" style="color: var(--text-muted);">
+            <span class="truncate" style="color: var(--text-dim);">
               {truncate(entry.notes, 30)}
             </span>
           </td>
@@ -160,8 +160,8 @@
     position: sticky;
     top: 0;
     z-index: 2;
-    padding: 8px 12px;
-    font-size: 11px;
+    padding: 10px 14px;
+    font-size: 11.5px;
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.05em;
@@ -185,7 +185,7 @@
   }
 
   .entry-row:hover {
-    background: rgba(255, 255, 255, 0.03);
+    background: rgba(226, 179, 64, 0.04);
   }
 
   .entry-row.selected {
@@ -193,7 +193,7 @@
   }
 
   .entry-row td {
-    padding: 8px 12px;
+    padding: 10px 14px;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -205,17 +205,17 @@
   }
 
   .entry-icon {
-    width: 26px;
-    height: 26px;
-    border-radius: 6px;
+    width: 28px;
+    height: 28px;
+    border-radius: 7px;
     display: flex;
     align-items: center;
     justify-content: center;
     flex-shrink: 0;
-    font-size: 12px;
+    font-size: 13px;
     font-weight: 600;
-    background: var(--surface-3);
-    color: var(--text-dim);
+    background: var(--gold-dim);
+    color: var(--gold);
   }
 
   .entry-icon.selected {
@@ -224,8 +224,8 @@
   }
 
   .badge-expired {
-    font-size: 9px;
-    padding: 1px 5px;
+    font-size: 10px;
+    padding: 2px 6px;
     border-radius: 3px;
     font-weight: 600;
     background: var(--danger-dim);
@@ -234,8 +234,8 @@
   }
 
   .badge-expiring {
-    font-size: 9px;
-    padding: 1px 5px;
+    font-size: 10px;
+    padding: 2px 6px;
     border-radius: 3px;
     font-weight: 600;
     background: var(--warning-dim);

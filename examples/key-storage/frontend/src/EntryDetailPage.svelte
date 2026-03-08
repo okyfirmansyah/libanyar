@@ -269,8 +269,18 @@
               oninput={(e) => updateDraft('url', e.target.value)}
             />
             {#if draft.url}
-              <button class="copy-btn" onclick={() => copyToClipboard('url', draft.url)}>
-                {copiedField === 'url' ? '✓' : 'Copy'}
+              <button class="copy-icon-btn" class:copy-glow={copiedField === 'url'}
+                      onclick={() => copyToClipboard('url', draft.url)} title="Copy">
+                {#if copiedField === 'url'}
+                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+                  </svg>
+                {:else}
+                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <rect x="9" y="9" width="13" height="13" rx="2" stroke-width="2" />
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1" />
+                  </svg>
+                {/if}
               </button>
             {/if}
           </div>
@@ -288,8 +298,18 @@
               oninput={(e) => updateDraft('username', e.target.value)}
             />
             {#if draft.username}
-              <button class="copy-btn" onclick={() => copyToClipboard('username', draft.username)}>
-                {copiedField === 'username' ? '✓' : 'Copy'}
+              <button class="copy-icon-btn" class:copy-glow={copiedField === 'username'}
+                      onclick={() => copyToClipboard('username', draft.username)} title="Copy">
+                {#if copiedField === 'username'}
+                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+                  </svg>
+                {:else}
+                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <rect x="9" y="9" width="13" height="13" rx="2" stroke-width="2" />
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1" />
+                  </svg>
+                {/if}
               </button>
             {/if}
           </div>
@@ -324,8 +344,18 @@
                 {/if}
               </button>
             </div>
-            <button class="copy-btn" onclick={() => copyToClipboard('password', draft.password)}>
-              {copiedField === 'password' ? '✓' : 'Copy'}
+            <button class="copy-icon-btn" class:copy-glow={copiedField === 'password'}
+                    onclick={() => copyToClipboard('password', draft.password)} title="Copy">
+              {#if copiedField === 'password'}
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
+                </svg>
+              {:else}
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <rect x="9" y="9" width="13" height="13" rx="2" stroke-width="2" />
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1" />
+                </svg>
+              {/if}
             </button>
             <button class="generate-btn" onclick={() => { updateDraft('password', generatePassword()); }}>
               Generate
@@ -364,7 +394,7 @@
         <div class="field-group">
           <div class="flex items-center justify-between mb-1.5">
             <label class="field-label" style="margin-bottom: 0;">Attachments</label>
-            <button class="copy-btn" onclick={handleAttachmentUpload}>+ Add File</button>
+            <button class="att-btn" style="color: var(--accent);" onclick={handleAttachmentUpload}>+ Add File</button>
           </div>
           {#if attachments.length > 0}
             <div class="attachment-list">
@@ -515,7 +545,7 @@
   }
 
   /* ── Inline buttons ─────────────────────────────────────────────────── */
-  .copy-btn, .generate-btn, .att-btn {
+  .generate-btn, .att-btn {
     font-size: 11px;
     padding: 4px 8px;
     border-radius: 5px;
@@ -525,9 +555,46 @@
     transition: background 0.12s, color 0.12s;
     flex-shrink: 0;
   }
-  .copy-btn:hover, .att-btn:hover {
+  .att-btn:hover {
     background: rgba(255,255,255,0.06);
     color: var(--text);
+  }
+
+  /* ── Copy icon button ───────────────────────────────────────────────── */
+  .copy-icon-btn {
+    width: 32px;
+    height: 32px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    border-radius: 7px;
+    background: transparent;
+    color: var(--text-muted);
+    transition: background 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
+    cursor: pointer;
+  }
+  .copy-icon-btn:hover {
+    background: rgba(255,255,255,0.07);
+    color: var(--text);
+  }
+
+  @keyframes copy-flash {
+    0% {
+      background: rgba(226, 179, 64, 0.25);
+      box-shadow: 0 0 12px 3px rgba(226, 179, 64, 0.4);
+      color: #f5d060;
+    }
+    100% {
+      background: transparent;
+      box-shadow: 0 0 0 0 transparent;
+      color: var(--gold);
+    }
+  }
+
+  .copy-glow {
+    color: var(--gold) !important;
+    animation: copy-flash 0.8s ease-out forwards;
   }
   .generate-btn {
     color: var(--accent);
