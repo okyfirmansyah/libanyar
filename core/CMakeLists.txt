@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.16)
 
-# ── Define the core library ──────────────────────────────────────────────────
+# ── Define the core library (platform-neutral sources) ───────────────────────
 add_library(anyar_core STATIC
     src/app.cpp
     src/ipc_router.cpp
@@ -8,11 +8,34 @@ add_library(anyar_core STATIC
     src/event_bus.cpp
     src/window.cpp
     src/plugins/fs_plugin.cpp
-    src/plugins/dialog_plugin.cpp
-    src/plugins/shell_plugin.cpp
-    src/plugins/clipboard_plugin.cpp
     src/plugins/db_plugin.cpp
 )
+
+# ── Platform-specific sources ────────────────────────────────────────────────
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    target_sources(anyar_core PRIVATE
+        src/main_thread_linux.cpp
+        src/plugins/dialog_linux.cpp
+        src/plugins/clipboard_linux.cpp
+        src/plugins/shell_linux.cpp
+    )
+elseif(WIN32)
+    # Phase 7: add Windows implementations
+    # target_sources(anyar_core PRIVATE
+    #     src/main_thread_win32.cpp
+    #     src/plugins/dialog_win32.cpp
+    #     src/plugins/clipboard_win32.cpp
+    #     src/plugins/shell_win32.cpp
+    # )
+elseif(APPLE)
+    # Phase 7: add macOS implementations
+    # target_sources(anyar_core PRIVATE
+    #     src/main_thread_macos.mm
+    #     src/plugins/dialog_macos.mm
+    #     src/plugins/clipboard_macos.mm
+    #     src/plugins/shell_macos.mm
+    # )
+endif()
 
 target_include_directories(anyar_core
     PUBLIC
@@ -92,21 +115,25 @@ else()
 endif()
 
 # ── WebView (webview/webview) ────────────────────────────────────────────────
-# Find webkit2gtk for Linux webview support
-find_package(PkgConfig REQUIRED)
-pkg_check_modules(WEBKIT2GTK REQUIRED webkit2gtk-4.0)
-target_include_directories(anyar_core PUBLIC ${WEBKIT2GTK_INCLUDE_DIRS})
-target_link_libraries(anyar_core PUBLIC ${WEBKIT2GTK_LIBRARIES})
-
-pkg_check_modules(GTK3 REQUIRED gtk+-3.0)
-target_include_directories(anyar_core PUBLIC ${GTK3_INCLUDE_DIRS})
-target_link_libraries(anyar_core PUBLIC ${GTK3_LIBRARIES})
-
 # webview/webview — multi-file header-only library in third_party
 target_include_directories(anyar_core PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/../third_party/webview
 )
-# WEBVIEW_GTK is auto-detected on Linux via macros.h, but we define it explicitly
-target_compile_definitions(anyar_core PUBLIC
-    WEBVIEW_GTK=1
-)
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    # Find webkit2gtk and GTK3 for Linux webview support
+    find_package(PkgConfig REQUIRED)
+    pkg_check_modules(WEBKIT2GTK REQUIRED webkit2gtk-4.0)
+    target_include_directories(anyar_core PUBLIC ${WEBKIT2GTK_INCLUDE_DIRS})
+    target_link_libraries(anyar_core PUBLIC ${WEBKIT2GTK_LIBRARIES})
+
+    pkg_check_modules(GTK3 REQUIRED gtk+-3.0)
+    target_include_directories(anyar_core PUBLIC ${GTK3_INCLUDE_DIRS})
+    target_link_libraries(anyar_core PUBLIC ${GTK3_LIBRARIES})
+elseif(WIN32)
+    # Phase 7: WebView2 — webview/webview auto-detects via macros.h
+    # find_package(WebView2 REQUIRED)
+elseif(APPLE)
+    # Phase 7: WKWebView — webview/webview auto-detects via macros.h
+    # target_link_libraries(anyar_core PUBLIC "-framework WebKit")
+endif()

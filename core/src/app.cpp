@@ -16,7 +16,10 @@
 
 namespace anyar {
 
-// ── Snap Environment Sanitisation ───────────────────────────────────────────
+// ── Platform-Specific Initialization ────────────────────────────────────────
+
+#ifdef __linux__
+// Snap Environment Sanitisation (Linux-only)
 //
 // When the process is launched from a snap-confined host (e.g. VS Code snap),
 // several GTK/GLib environment variables point into the snap's private
@@ -29,7 +32,7 @@ namespace anyar {
 //
 // We remove the offending variables early, before any GTK/WebKit code runs.
 
-static void sanitise_snap_env() {
+static void platform_init() {
     static const char* snap_gtk_vars[] = {
         "GTK_EXE_PREFIX",
         "GTK_PATH",
@@ -46,12 +49,16 @@ static void sanitise_snap_env() {
         }
     }
 }
+#else
+// No-op on other platforms (Windows/macOS init will go here in Phase 7)
+static void platform_init() {}
+#endif
 
 App::App() : App(AppConfig{}) {}
 
 App::App(AppConfig config) : config_(std::move(config)) {
-    // Sanitise snap environment before GTK/WebKit init
-    sanitise_snap_env();
+    // Platform-specific initialization (snap env cleanup on Linux, etc.)
+    platform_init();
 
     // Default dist path
     if (config_.dist_path.empty()) {

@@ -1,13 +1,15 @@
 <script>
   /**
-   * EntryList — Displays a list of key entries in the center panel.
-   * Each row shows title, username, URL, and expiry status.
+   * EntryList — Table view of key entries (KeePass-style).
+   * Columns: Title, Username, Password (masked), URL, Notes.
+   * Single-click selects a row, double-click opens the detail modal.
    */
 
   let {
     entries = [],
     selectedEntryId = null,
     onselect = null,
+    onopen = null,
     ondelete = null,
   } = $props();
 
@@ -40,6 +42,11 @@
     }
   }
 
+  function truncate(str, len = 40) {
+    if (!str) return '';
+    return str.length > len ? str.slice(0, len) + '…' : str;
+  }
+
   // Close any context menu when clicking elsewhere
   function handleWindowClick() {
     contextId = null;
@@ -49,68 +56,231 @@
 <svelte:window onclick={handleWindowClick} />
 
 {#if entries.length === 0}
-  <div class="flex-1 flex items-center justify-center p-4" style="color: var(--text-muted);">
-    <p class="text-sm text-center opacity-60">No entries in this group</p>
+  <div class="flex-1 flex items-center justify-center p-8" style="color: var(--text-muted);">
+    <div class="text-center">
+      <svg class="w-12 h-12 mx-auto mb-3 opacity-30" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
+              d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z" />
+      </svg>
+      <p class="text-sm">No entries in this group</p>
+      <p class="text-xs mt-1 opacity-50">Press Ctrl+N to create one</p>
+    </div>
   </div>
 {:else}
-  {#each entries as entry (entry.id)}
-    {@const selected = selectedEntryId === entry.id}
-    {@const expired = isExpired(entry.expiresAt)}
-    {@const expiring = isExpiringSoon(entry.expiresAt)}
-  
-    <div class="relative">
-      <button
-        class="w-full text-left px-3 py-3 flex items-center gap-3 transition-colors"
-        style="background: {selected ? 'var(--accent-dim)' : 'transparent'};
-               border-bottom: 1px solid var(--border);"
-        onclick={() => onselect && onselect(entry.id)}
-        oncontextmenu={(e) => handleContextMenu(e, entry.id)}
-      >
-        <!-- Icon placeholder -->
-        <div class="w-9 h-9 rounded-lg flex items-center justify-center shrink-0 text-sm font-semibold"
-             style="background: {selected ? 'var(--accent)' : 'var(--surface-3)'}; color: {selected ? 'white' : 'var(--text-dim)'};">
-          {entry.title ? entry.title[0].toUpperCase() : '?'}
-        </div>
+  <table class="entry-table w-full">
+    <thead>
+      <tr>
+        <th class="text-left">Title</th>
+        <th class="text-left">Username</th>
+        <th class="text-left">Password</th>
+        <th class="text-left">URL</th>
+        <th class="text-left">Notes</th>
+      </tr>
+    </thead>
+    <tbody>
+      {#each entries as entry (entry.id)}
+        {@const selected = selectedEntryId === entry.id}
+        {@const expired = isExpired(entry.expiresAt)}
+        {@const expiring = isExpiringSoon(entry.expiresAt)}
 
-        <!-- Entry info -->
-        <div class="flex-1 min-w-0">
-          <div class="flex items-center gap-2">
-            <span class="text-[13px] font-medium truncate" style="color: {selected ? 'var(--accent)' : 'var(--text)'};">
-              {entry.title || 'Untitled'}
+        <tr
+          class="entry-row"
+          class:selected
+          onclick={() => onselect && onselect(entry.id)}
+          ondblclick={() => onopen && onopen(entry.id)}
+          oncontextmenu={(e) => handleContextMenu(e, entry.id)}
+          role="row"
+          tabindex="0"
+        >
+          <td class="title-cell">
+            <div class="flex items-center gap-2">
+              <div class="entry-icon" class:selected>
+                {entry.title ? entry.title[0].toUpperCase() : '?'}
+              </div>
+              <span class="truncate font-medium" style="color: {selected ? 'var(--accent)' : 'var(--text)'};">
+                {entry.title || 'Untitled'}
+              </span>
+              {#if expired}
+                <span class="badge-expired">EXP</span>
+              {:else if expiring}
+                <span class="badge-expiring">EXP</span>
+              {/if}
+            </div>
+          </td>
+          <td>
+            <span class="truncate" style="color: var(--text-dim);">{entry.username || ''}</span>
+          </td>
+          <td>
+            <span class="font-mono text-xs" style="color: var(--text-muted); letter-spacing: 2px;">
+              {entry.password ? '••••••••' : ''}
             </span>
-            {#if expired}
-              <span class="text-[10px] px-1.5 py-0.5 rounded font-medium" style="background: var(--danger-dim); color: var(--danger);">EXPIRED</span>
-            {:else if expiring}
-              <span class="text-[10px] px-1.5 py-0.5 rounded font-medium" style="background: var(--warning-dim); color: var(--warning);">EXPIRING</span>
-            {/if}
-          </div>
-          <div class="flex items-center gap-2 mt-0.5">
-            {#if entry.username}
-              <span class="text-xs truncate" style="color: var(--text-dim);">{entry.username}</span>
-            {/if}
-            {#if entry.url}
-              <span class="text-xs truncate" style="color: var(--text-muted);">{domainFromUrl(entry.url)}</span>
-            {/if}
-          </div>
-        </div>
-      </button>
+          </td>
+          <td>
+            <span class="truncate text-xs" style="color: var(--text-muted);">
+              {domainFromUrl(entry.url)}
+            </span>
+          </td>
+          <td>
+            <span class="truncate text-xs" style="color: var(--text-muted);">
+              {truncate(entry.notes, 30)}
+            </span>
+          </td>
+        </tr>
 
-      <!-- Context menu -->
-      {#if contextId === entry.id}
-        <div class="absolute right-2 top-2 z-50 py-1 rounded-lg shadow-lg text-xs"
-             style="background: var(--surface-3); border: 1px solid var(--border); min-width: 120px;">
-          <button class="w-full text-left px-3 py-1.5 hover:bg-white/5 transition-colors"
-                  style="color: var(--text-dim);"
-                  onclick={(e) => { e.stopPropagation(); contextId = null; onselect && onselect(entry.id); }}>
-            Edit
-          </button>
-          <button class="w-full text-left px-3 py-1.5 hover:bg-white/5 transition-colors"
-                  style="color: var(--danger);"
-                  onclick={(e) => { e.stopPropagation(); contextId = null; ondelete && ondelete(entry.id); }}>
-            Delete
-          </button>
-        </div>
-      {/if}
-    </div>
-  {/each}
+        <!-- Context menu -->
+        {#if contextId === entry.id}
+          <tr class="context-row">
+            <td colspan="5">
+              <div class="context-menu">
+                <button class="context-item"
+                        onclick={(e) => { e.stopPropagation(); contextId = null; onopen && onopen(entry.id); }}>
+                  Open
+                </button>
+                <button class="context-item danger"
+                        onclick={(e) => { e.stopPropagation(); contextId = null; ondelete && ondelete(entry.id); }}>
+                  Delete
+                </button>
+              </div>
+            </td>
+          </tr>
+        {/if}
+      {/each}
+    </tbody>
+  </table>
 {/if}
+
+<style>
+  .entry-table {
+    border-collapse: collapse;
+    table-layout: fixed;
+    font-size: 13px;
+  }
+
+  .entry-table thead th {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    padding: 8px 12px;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-muted);
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    white-space: nowrap;
+  }
+
+  /* Column widths */
+  .entry-table th:nth-child(1) { width: 25%; }
+  .entry-table th:nth-child(2) { width: 18%; }
+  .entry-table th:nth-child(3) { width: 14%; }
+  .entry-table th:nth-child(4) { width: 20%; }
+  .entry-table th:nth-child(5) { width: 23%; }
+
+  .entry-row {
+    cursor: pointer;
+    transition: background 0.1s;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .entry-row:hover {
+    background: rgba(255, 255, 255, 0.03);
+  }
+
+  .entry-row.selected {
+    background: var(--accent-dim);
+  }
+
+  .entry-row td {
+    padding: 8px 12px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 0;
+  }
+
+  .title-cell {
+    overflow: visible !important;
+  }
+
+  .entry-icon {
+    width: 26px;
+    height: 26px;
+    border-radius: 6px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    font-size: 12px;
+    font-weight: 600;
+    background: var(--surface-3);
+    color: var(--text-dim);
+  }
+
+  .entry-icon.selected {
+    background: var(--accent);
+    color: white;
+  }
+
+  .badge-expired {
+    font-size: 9px;
+    padding: 1px 5px;
+    border-radius: 3px;
+    font-weight: 600;
+    background: var(--danger-dim);
+    color: var(--danger);
+    flex-shrink: 0;
+  }
+
+  .badge-expiring {
+    font-size: 9px;
+    padding: 1px 5px;
+    border-radius: 3px;
+    font-weight: 600;
+    background: var(--warning-dim);
+    color: var(--warning);
+    flex-shrink: 0;
+  }
+
+  .context-row {
+    background: transparent;
+  }
+
+  .context-row td {
+    padding: 0;
+    position: relative;
+  }
+
+  .context-menu {
+    position: absolute;
+    right: 12px;
+    top: -4px;
+    z-index: 50;
+    padding: 4px 0;
+    border-radius: 8px;
+    background: var(--surface-3);
+    border: 1px solid var(--border);
+    min-width: 120px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  }
+
+  .context-item {
+    display: block;
+    width: 100%;
+    text-align: left;
+    padding: 6px 12px;
+    font-size: 12px;
+    color: var(--text-dim);
+    transition: background 0.1s;
+    background: transparent;
+  }
+
+  .context-item:hover {
+    background: rgba(255, 255, 255, 0.05);
+  }
+
+  .context-item.danger {
+    color: var(--danger);
+  }
+</style>

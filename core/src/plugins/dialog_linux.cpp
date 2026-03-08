@@ -1,5 +1,5 @@
 #include <anyar/plugins/dialog_plugin.h>
-#include <anyar/gtk_dispatch.h>
+#include <anyar/main_thread.h>
 
 #include <gtk/gtk.h>
 #include <string>
@@ -46,7 +46,7 @@ void DialogPlugin::initialize(PluginContext& ctx) {
         std::string defPath = args.value("defaultPath", "");
         json filters        = args.value("filters", json::array());
 
-        return run_on_gtk_main([&]() -> json {
+        return run_on_main_thread([&]() -> json {
             GtkFileChooserAction action = directory
                 ? GTK_FILE_CHOOSER_ACTION_SELECT_FOLDER
                 : GTK_FILE_CHOOSER_ACTION_OPEN;
@@ -106,7 +106,7 @@ void DialogPlugin::initialize(PluginContext& ctx) {
         std::string defPath = args.value("defaultPath", "");
         json filters        = args.value("filters", json::array());
 
-        return run_on_gtk_main([&]() -> json {
+        return run_on_main_thread([&]() -> json {
             GtkWidget* dialog = gtk_file_chooser_dialog_new(
                 title.c_str(), nullptr, GTK_FILE_CHOOSER_ACTION_SAVE,
                 "_Cancel", GTK_RESPONSE_CANCEL,
@@ -157,7 +157,7 @@ void DialogPlugin::initialize(PluginContext& ctx) {
         std::string message = args.at("message").get<std::string>();
         std::string kind    = args.value("kind", "info");
 
-        return run_on_gtk_main([&]() -> json {
+        return run_on_main_thread([&]() -> json {
             GtkMessageType msg_type = GTK_MESSAGE_INFO;
             if (kind == "warning") msg_type = GTK_MESSAGE_WARNING;
             else if (kind == "error") msg_type = GTK_MESSAGE_ERROR;
@@ -181,7 +181,7 @@ void DialogPlugin::initialize(PluginContext& ctx) {
         std::string message = args.at("message").get<std::string>();
         std::string kind    = args.value("kind", "info");
 
-        return run_on_gtk_main([&]() -> json {
+        return run_on_main_thread([&]() -> json {
             GtkMessageType msg_type = GTK_MESSAGE_QUESTION;
             if (kind == "warning") msg_type = GTK_MESSAGE_WARNING;
             else if (kind == "error") msg_type = GTK_MESSAGE_ERROR;

@@ -20,6 +20,10 @@
   let searchQuery = $state('');
   let searchMode = $state(false);
 
+  // Modal state for entry detail popup
+  let showEntryModal = $state(false);
+  let modalEntryId = $state(null);
+
   // Unlock dialog state
   let showUnlock = $state(false);
   let unlockMode = $state('open');  // 'open' | 'new' | 'reopen'
@@ -156,6 +160,8 @@
       entries = [];
       selectedEntry = null;
       selectedEntryId = null;
+      showEntryModal = false;
+      modalEntryId = null;
       searchQuery = '';
       searchMode = false;
       statusMsg = '';
@@ -201,7 +207,18 @@
   // ── Entry operations ──────────────────────────────────────────────────────
   function handleSelectEntry(id) {
     selectedEntryId = id;
+  }
+
+  function handleOpenEntry(id) {
+    selectedEntryId = id;
+    modalEntryId = id;
     loadEntry(id);
+    showEntryModal = true;
+  }
+
+  function handleCloseModal() {
+    showEntryModal = false;
+    modalEntryId = null;
   }
 
   async function handleCreateEntry() {
@@ -210,7 +227,7 @@
       const res = await invoke('ks:create_entry', { groupId: gid, title: 'New Entry' });
       dbDirty = true;
       await loadEntries();
-      handleSelectEntry(res.id);
+      handleOpenEntry(res.id);
     } catch (e) { errorMsg = e.message; }
   }
 
@@ -219,7 +236,7 @@
       await invoke('ks:update_entry', data);
       dbDirty = true;
       await loadEntries();
-      if (selectedEntryId === data.id) await loadEntry(data.id);
+      if (modalEntryId === data.id) await loadEntry(data.id);
     } catch (e) { errorMsg = e.message; }
   }
 
@@ -230,6 +247,10 @@
       if (selectedEntryId === id) {
         selectedEntryId = null;
         selectedEntry = null;
+      }
+      if (modalEntryId === id) {
+        showEntryModal = false;
+        modalEntryId = null;
       }
       await loadEntries();
     } catch (e) { errorMsg = e.message; }
@@ -301,7 +322,7 @@
   {/if}
 
   {#if dbOpen}
-    <!-- Three-panel layout -->
+    <!-- Two-panel layout -->
     <div class="flex-1 flex min-h-0">
       <!-- Left sidebar: groups -->
       <aside class="flex flex-col shrink-0" style="width: 240px; background: var(--surface); border-right: 1px solid var(--border);">
@@ -345,8 +366,8 @@
         </div>
       </aside>
 
-      <!-- Center: entry list -->
-      <section class="flex flex-col shrink-0" style="width: 320px; border-right: 1px solid var(--border);">
+      <!-- Right: entry table -->
+      <section class="flex-1 min-w-0 flex flex-col">
         <div class="px-4 py-2.5 text-xs font-semibold uppercase tracking-wider flex items-center justify-between"
              style="color: var(--text-muted); border-bottom: 1px solid var(--border);">
           <span>
@@ -358,41 +379,49 @@
               {groups.find(g => g.id === selectedGroupId)?.name || 'Entries'}
             {/if}
           </span>
-          <span class="text-[11px] font-normal" style="color: var(--text-muted);">{entries.length}</span>
+          <span class="text-[11px] font-normal" style="color: var(--text-muted);">{entries.length} entries</span>
         </div>
-        <div class="flex-1 overflow-y-auto">
+        <div class="flex-1 overflow-auto">
           <EntryList
             {entries}
             {selectedEntryId}
             onselect={handleSelectEntry}
+            onopen={handleOpenEntry}
             ondelete={handleDeleteEntry}
           />
         </div>
       </section>
+    </div>
 
-      <!-- Right: entry detail -->
-      <section class="flex-1 min-w-0 flex flex-col overflow-y-auto" style="background: var(--bg); border-left: 1px solid var(--border);">
-        {#if selectedEntry}
+    <!-- Entry detail modal -->
+    {#if showEntryModal && selectedEntry}
+      <div class="fixed inset-0 z-50 flex items-center justify-center" style="background: rgba(0,0,0,0.6); backdrop-filter: blur(4px);"
+           onclick={(e) => { if (e.target === e.currentTarget) handleCloseModal(); }}
+           onkeydown={(e) => { if (e.key === 'Escape') handleCloseModal(); }}
+           role="dialog"
+           tabindex="-1">
+        <div class="relative w-full max-w-2xl max-h-[85vh] overflow-y-auto rounded-xl shadow-2xl"
+             style="background: var(--surface); border: 1px solid var(--border);">
+          <!-- Close button -->
+          <button
+            class="absolute top-3 right-3 z-10 w-8 h-8 flex items-center justify-center rounded-lg hover:bg-white/10 transition-colors"
+            style="color: var(--text-muted);"
+            onclick={handleCloseModal}
+            title="Close (Esc)"
+          >
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
           <EntryDetail
             entry={selectedEntry}
             onupdate={handleUpdateEntry}
             ondelete={() => handleDeleteEntry(selectedEntry.id)}
             onrefresh={() => loadEntry(selectedEntry.id)}
           />
-        {:else}
-          <div class="flex-1 flex items-center justify-center" style="color: var(--text-muted);">
-            <div class="text-center">
-              <svg class="w-12 h-12 mx-auto mb-3 opacity-30" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
-                      d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z" />
-              </svg>
-              <p class="text-sm">Select an entry to view details</p>
-              <p class="text-xs mt-1 opacity-50">or press Ctrl+N to create one</p>
-            </div>
-          </div>
-        {/if}
-      </section>
-    </div>
+        </div>
+      </div>
+    {/if}
   {:else}
     <!-- Welcome / empty state -->
     <div class="flex-1 w-full flex items-center justify-center">

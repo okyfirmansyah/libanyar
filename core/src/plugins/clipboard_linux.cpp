@@ -1,5 +1,5 @@
 #include <anyar/plugins/clipboard_plugin.h>
-#include <anyar/gtk_dispatch.h>
+#include <anyar/main_thread.h>
 
 #include <gtk/gtk.h>
 #include <stdexcept>
@@ -12,7 +12,7 @@ void ClipboardPlugin::initialize(PluginContext& ctx) {
 
     // ── clipboard:read ──────────────────────────────────────────────────────
     cmds.add("clipboard:read", [](const json& /*args*/) -> json {
-        return run_on_gtk_main([]() -> json {
+        return run_on_main_thread([]() -> json {
             GtkClipboard* cb = gtk_clipboard_get(GDK_SELECTION_CLIPBOARD);
             gchar* text = gtk_clipboard_wait_for_text(cb);
 
@@ -30,7 +30,7 @@ void ClipboardPlugin::initialize(PluginContext& ctx) {
     cmds.add("clipboard:write", [](const json& args) -> json {
         std::string text = args.at("text").get<std::string>();
 
-        return run_on_gtk_main([&text]() -> json {
+        return run_on_main_thread([&text]() -> json {
             GtkClipboard* cb = gtk_clipboard_get(GDK_SELECTION_CLIPBOARD);
             gtk_clipboard_set_text(cb, text.c_str(), static_cast<gint>(text.size()));
             // Store so it persists after the app closes
