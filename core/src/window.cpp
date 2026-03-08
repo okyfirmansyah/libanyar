@@ -35,18 +35,19 @@ struct Window::Impl {
 #endif
 
     Impl(const WindowCreateOptions& opts, int port)
-        : server_port(port), label(opts.label), closable(opts.closable)
+        : server_port(port), label(opts.label), closable(opts.closable),
+          stored_width(opts.width), stored_height(opts.height),
+          stored_hint(opts.resizable ? WEBVIEW_HINT_NONE : WEBVIEW_HINT_FIXED),
+          needs_show(true)
     {
         wv = webview_create(opts.debug ? 1 : 0, nullptr);
         if (!wv) {
             throw std::runtime_error("Failed to create webview instance");
         }
         webview_set_title(wv, opts.title.c_str());
-        webview_set_size(wv, opts.width, opts.height,
-                         opts.resizable ? WEBVIEW_HINT_NONE : WEBVIEW_HINT_FIXED);
-
-        // Connect platform-specific close signals
-        connect_close_signals();
+        // NOTE: Do NOT call webview_set_size() or connect_close_signals() here.
+        // For child windows, we defer showing until all setup (parent, modal,
+        // IPC binding) is complete.  Call show_window() after setup.
 
         // Apply initial options
         if (opts.always_on_top) {
@@ -68,14 +69,32 @@ struct Window::Impl {
         connect_close_signals();
     }
 
+    // Show the window (set size + realize + connect close signals).
+    // Must be called on the main thread after all setup is done.
+    void show_window() {
+        if (!wv || !needs_show) return;
+        needs_show = false;
+        webview_set_size(wv, stored_width, stored_height, stored_hint);
+        connect_close_signals();
+    }
+
     ~Impl() {
-        if (wv) {
-            // Disconnect our signal handlers before destroying
+        if (wv && !destroyed) {
+            // Normal path: Window is being deleted without the GTK
+            // "destroy" signal having fired (e.g. shared_ptr dropped).
             disconnect_close_signals();
             webview_destroy(wv);
             wv = nullptr;
         }
+        // If destroyed == true, the GTK "destroy" signal already fired;
+        // the library handled cleanup and we set wv = nullptr there.
     }
+
+    // Deferred-show state for WindowCreateOptions constructor
+    int stored_width = 800;
+    int stored_height = 600;
+    webview_hint_t stored_hint = WEBVIEW_HINT_NONE;
+    bool needs_show = false;
 
     Impl(const Impl&) = delete;
     Impl& operator=(const Impl&) = delete;
@@ -118,10 +137,22 @@ struct Window::Impl {
             G_CALLBACK(+[](GtkWidget*, gpointer user_data) {
                 auto* self = static_cast<Impl*>(user_data);
                 self->destroyed = true;
-                self->delete_event_handler_id = 0; // signal already disconnected
+                self->wv = nullptr;  // library handles cleanup — prevent double-destroy in ~Impl
+                self->delete_event_handler_id = 0;
                 self->destroy_handler_id = 0;
+                // IMPORTANT: Defer the on_close callback to avoid re-entrant destruction.
+                // Calling on_close() directly would drop the last shared_ptr → ~Impl
+                // → webview_destroy → deplete_run_loop_event_queue → re-entrant event
+                // processing INSIDE the "destroy" signal handler.
                 if (self->on_close) {
-                    self->on_close();
+                    auto* cb = new Window::CloseHandler(std::move(self->on_close));
+                    self->on_close = nullptr;
+                    g_idle_add(+[](gpointer data) -> gboolean {
+                        auto* fn = static_cast<Window::CloseHandler*>(data);
+                        (*fn)();
+                        delete fn;
+                        return G_SOURCE_REMOVE;
+                    }, cb);
                 }
             }),
             this);
@@ -302,6 +333,10 @@ void Window::destroy() {
 
 bool Window::is_destroyed() const {
     return impl_->destroyed;
+}
+
+void Window::show() {
+    impl_->show_window();
 }
 
 // ── Webview Operations ──────────────────────────────────────────────────────

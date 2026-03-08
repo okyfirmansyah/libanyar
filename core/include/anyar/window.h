@@ -52,6 +52,12 @@ public:
     /// Returns true if the native window has been destroyed.
     bool is_destroyed() const;
 
+    /// Show the window on screen (set size + realize).
+    /// Call this AFTER all setup (parent, modal, IPC, etc.) is complete.
+    /// For main window this is called automatically; for child windows
+    /// it must be called explicitly from WindowManager::create().
+    void show();
+
     // ── Webview Operations ──────────────────────────────────────────────
 
     /// Evaluate JavaScript in the webview

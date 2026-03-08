@@ -52,10 +52,15 @@ std::string WindowManager::create(const WindowCreateOptions& opts, int port) {
         windows_[opts.label] = window;
     }
 
-    // Notify creation callback
+    // Notify creation callback (setup_native_ipc binds IPC + scripts here)
     if (on_created_) {
         on_created_(*window, opts);
     }
+
+    // NOW show the window — all setup (parent, modal, IPC, scripts) is done.
+    // This calls webview_set_size → window_show() → gtk_container_add +
+    // gtk_widget_show, making the window visible with all configuration applied.
+    window->show();
 
     return opts.label;
 }
