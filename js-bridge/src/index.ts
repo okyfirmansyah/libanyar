@@ -21,13 +21,29 @@ export {
   getLabel,
   onWindowClosed,
   onWindowCreated,
+  setCloseConfirmation,
 } from './modules/window';
 
 export type {
   WindowOptions,
   WindowInfo,
   CloseRequestedEvent,
+  CloseConfirmationOptions,
 } from './modules/window';
+
+// ── Dialog ─────────────────────────────────────────────────────────────────
+import * as dialog from './modules/dialog';
+export { dialog };
+
+export type {
+  DialogFilter,
+  OpenDialogOptions,
+  SaveDialogOptions,
+  MessageDialogOptions,
+  MessageDialogButtons,
+  MessageDialogResult,
+  ConfirmDialogOptions,
+} from './modules/dialog';
 
 // ── Types ──────────────────────────────────────────────────────────────────
 export type {
@@ -50,6 +66,7 @@ import {
   listWindows,
   getLabel,
 } from './modules/window';
+import * as _dialog from './modules/dialog';
 
 if (typeof window !== 'undefined') {
   (window as any).__anyar__ = {
@@ -66,5 +83,6 @@ if (typeof window !== 'undefined') {
     closeAll,
     listWindows,
     getLabel,
+    dialog: _dialog,
   };
 }

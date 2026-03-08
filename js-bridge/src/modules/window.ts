@@ -186,3 +186,41 @@ export function onWindowCreated(
 ): UnlistenFn {
   return listen('window:created', handler);
 }
+
+// ── Close confirmation ─────────────────────────────────────────────────────
+
+export interface CloseConfirmationOptions {
+  /** Window label (defaults to current window). */
+  label?: string;
+  /** Whether to enable or disable the close confirmation. */
+  enabled: boolean;
+  /** Message shown in the confirmation dialog. */
+  message?: string;
+  /** Title of the confirmation dialog. */
+  title?: string;
+}
+
+/**
+ * Enable or disable a native close-confirmation dialog on a window.
+ *
+ * When enabled, the user will see an Ok/Cancel dialog before the window
+ * can be closed via the X button or Alt+F4.
+ *
+ * @example
+ * ```ts
+ * // Enable close guard on the current window
+ * setCloseConfirmation({
+ *   enabled: true,
+ *   message: 'You have unsaved changes.\nClose anyway?',
+ * });
+ *
+ * // Disable it later
+ * setCloseConfirmation({ enabled: false });
+ * ```
+ */
+export async function setCloseConfirmation(
+  opts: CloseConfirmationOptions,
+): Promise<void> {
+  const label = opts.label ?? getLabel();
+  await invoke('window:set-close-confirmation', { ...opts, label });
+}

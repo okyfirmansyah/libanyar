@@ -152,32 +152,135 @@ void DialogPlugin::initialize(PluginContext& ctx) {
     });
 
     // ── dialog:message ──────────────────────────────────────────────────────
+    // Flexible message dialog modeled after Tauri v2.4+.
+    //
+    // Args:
+    //   message   (string, required)
+    //   title     (string, default "Message")
+    //   kind      ("info"|"warning"|"error", default "info")
+    //   buttons   (string preset OR object with custom labels)
+    //
+    // Preset strings: "Ok", "OkCancel", "YesNo", "YesNoCancel"
+    // Custom objects:
+    //   { "ok": "Save" }                                    → Ok
+    //   { "ok": "Accept", "cancel": "Decline" }             → OkCancel
+    //   { "yes": "Allow", "no": "Deny" }                    → YesNo
+    //   { "yes": "Allow", "no": "Deny", "cancel": "Skip" } → YesNoCancel
+    //
+    // Returns the button string: "Ok", "Cancel", "Yes", "No"
     cmds.add("dialog:message", [](const json& args) -> json {
         std::string title   = args.value("title", "Message");
         std::string message = args.at("message").get<std::string>();
         std::string kind    = args.value("kind", "info");
+        json buttons_arg    = args.value("buttons", json("Ok"));
+
+        // Determine button preset and optional custom labels
+        enum ButtonPreset { BP_OK, BP_OK_CANCEL, BP_YES_NO, BP_YES_NO_CANCEL };
+        ButtonPreset preset = BP_OK;
+
+        // Custom label storage (empty = use GTK defaults)
+        std::string lbl_ok, lbl_cancel, lbl_yes, lbl_no;
+
+        if (buttons_arg.is_string()) {
+            std::string s = buttons_arg.get<std::string>();
+            if (s == "OkCancel")       preset = BP_OK_CANCEL;
+            else if (s == "YesNo")     preset = BP_YES_NO;
+            else if (s == "YesNoCancel") preset = BP_YES_NO_CANCEL;
+            // else default "Ok"
+        } else if (buttons_arg.is_object()) {
+            if (buttons_arg.contains("yes")) {
+                lbl_yes = buttons_arg["yes"].get<std::string>();
+                lbl_no  = buttons_arg.value("no", std::string("No"));
+                if (buttons_arg.contains("cancel")) {
+                    lbl_cancel = buttons_arg["cancel"].get<std::string>();
+                    preset = BP_YES_NO_CANCEL;
+                } else {
+                    preset = BP_YES_NO;
+                }
+            } else {
+                lbl_ok = buttons_arg.value("ok", std::string("OK"));
+                if (buttons_arg.contains("cancel")) {
+                    lbl_cancel = buttons_arg["cancel"].get<std::string>();
+                    preset = BP_OK_CANCEL;
+                } else {
+                    preset = BP_OK;
+                }
+            }
+        }
 
         return run_on_main_thread([&]() -> json {
             GtkMessageType msg_type = GTK_MESSAGE_INFO;
             if (kind == "warning") msg_type = GTK_MESSAGE_WARNING;
             else if (kind == "error") msg_type = GTK_MESSAGE_ERROR;
+            else if (preset == BP_YES_NO || preset == BP_YES_NO_CANCEL)
+                msg_type = GTK_MESSAGE_QUESTION;
 
+            // We always use GTK_BUTTONS_NONE and add buttons manually so we
+            // can apply custom labels.
             GtkWidget* dialog = gtk_message_dialog_new(
-                nullptr, GTK_DIALOG_MODAL, msg_type, GTK_BUTTONS_OK,
+                nullptr, GTK_DIALOG_MODAL, msg_type, GTK_BUTTONS_NONE,
                 "%s", message.c_str());
             gtk_window_set_title(GTK_WINDOW(dialog), title.c_str());
 
-            gtk_dialog_run(GTK_DIALOG(dialog));
+            auto* dlg = GTK_DIALOG(dialog);
+
+            switch (preset) {
+            case BP_OK:
+                gtk_dialog_add_button(dlg,
+                    lbl_ok.empty() ? "OK" : lbl_ok.c_str(),
+                    GTK_RESPONSE_OK);
+                break;
+
+            case BP_OK_CANCEL:
+                gtk_dialog_add_button(dlg,
+                    lbl_cancel.empty() ? "Cancel" : lbl_cancel.c_str(),
+                    GTK_RESPONSE_CANCEL);
+                gtk_dialog_add_button(dlg,
+                    lbl_ok.empty() ? "OK" : lbl_ok.c_str(),
+                    GTK_RESPONSE_OK);
+                break;
+
+            case BP_YES_NO:
+                gtk_dialog_add_button(dlg,
+                    lbl_no.empty() ? "No" : lbl_no.c_str(),
+                    GTK_RESPONSE_NO);
+                gtk_dialog_add_button(dlg,
+                    lbl_yes.empty() ? "Yes" : lbl_yes.c_str(),
+                    GTK_RESPONSE_YES);
+                break;
+
+            case BP_YES_NO_CANCEL:
+                gtk_dialog_add_button(dlg,
+                    lbl_cancel.empty() ? "Cancel" : lbl_cancel.c_str(),
+                    GTK_RESPONSE_CANCEL);
+                gtk_dialog_add_button(dlg,
+                    lbl_no.empty() ? "No" : lbl_no.c_str(),
+                    GTK_RESPONSE_NO);
+                gtk_dialog_add_button(dlg,
+                    lbl_yes.empty() ? "Yes" : lbl_yes.c_str(),
+                    GTK_RESPONSE_YES);
+                break;
+            }
+
+            gint result = gtk_dialog_run(dlg);
             gtk_widget_destroy(dialog);
             pump_gtk();
 
-            return nullptr;
+            switch (result) {
+            case GTK_RESPONSE_YES:    return json("Yes");
+            case GTK_RESPONSE_NO:     return json("No");
+            case GTK_RESPONSE_OK:     return json("Ok");
+            case GTK_RESPONSE_CANCEL: return json("Cancel");
+            default:                  return json("Cancel"); // window closed
+            }
         });
     });
 
-    // ── dialog:confirm ──────────────────────────────────────────────────────
-    cmds.add("dialog:confirm", [](const json& args) -> json {
-        std::string title   = args.value("title", "Confirm");
+    // ── dialog:ask ──────────────────────────────────────────────────────────
+    // Convenience: Yes/No question → boolean (true = Yes).
+    // Equivalent to Tauri's ask().
+    cmds.add("dialog:ask", [](const json& args) -> json {
+        std::string title   = args.value("title", "Question");
         std::string message = args.at("message").get<std::string>();
         std::string kind    = args.value("kind", "info");
 
@@ -196,6 +299,40 @@ void DialogPlugin::initialize(PluginContext& ctx) {
             pump_gtk();
 
             return result == GTK_RESPONSE_YES;
+        });
+    });
+
+    // ── dialog:confirm ──────────────────────────────────────────────────────
+    // Convenience: Ok/Cancel confirmation → boolean (true = Ok).
+    // Equivalent to Tauri's confirm().
+    // Supports optional okLabel / cancelLabel for custom button text.
+    cmds.add("dialog:confirm", [](const json& args) -> json {
+        std::string title      = args.value("title", "Confirm");
+        std::string message    = args.at("message").get<std::string>();
+        std::string kind       = args.value("kind", "info");
+        std::string okLabel    = args.value("okLabel", std::string("OK"));
+        std::string cancelLabel= args.value("cancelLabel", std::string("Cancel"));
+
+        return run_on_main_thread([&]() -> json {
+            GtkMessageType msg_type = GTK_MESSAGE_QUESTION;
+            if (kind == "warning") msg_type = GTK_MESSAGE_WARNING;
+            else if (kind == "error") msg_type = GTK_MESSAGE_ERROR;
+
+            GtkWidget* dialog = gtk_message_dialog_new(
+                nullptr, GTK_DIALOG_MODAL, msg_type, GTK_BUTTONS_NONE,
+                "%s", message.c_str());
+            gtk_window_set_title(GTK_WINDOW(dialog), title.c_str());
+
+            gtk_dialog_add_button(GTK_DIALOG(dialog),
+                cancelLabel.c_str(), GTK_RESPONSE_CANCEL);
+            gtk_dialog_add_button(GTK_DIALOG(dialog),
+                okLabel.c_str(), GTK_RESPONSE_OK);
+
+            gint result = gtk_dialog_run(GTK_DIALOG(dialog));
+            gtk_widget_destroy(dialog);
+            pump_gtk();
+
+            return result == GTK_RESPONSE_OK;
         });
     });
 }

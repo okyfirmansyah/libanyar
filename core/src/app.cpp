@@ -455,6 +455,37 @@ void App::register_window_commands() {
         // This command is a fallback / validation.
         return {{"label", args.value("_caller_label", "main")}};
     });
+
+    // window:set-close-confirmation — show a native confirm dialog before close
+    //
+    // When enabled, the GTK delete-event handler will show an Ok/Cancel dialog.
+    // If the user clicks Cancel, the close is prevented.
+    //
+    // Args:
+    //   label    (string)  — target window label
+    //   enabled  (bool)    — true to enable, false to disable
+    //   message  (string?) — confirmation message (default: "You have unsaved changes.\nClose anyway?")
+    //   title    (string?) — dialog title (default: "Confirm Close")
+    commands_.add("window:set-close-confirmation", [this](const json& args) -> json {
+        std::string label   = args.at("label").get<std::string>();
+        bool enabled        = args.at("enabled").get<bool>();
+        std::string message = args.value("message",
+            std::string("You have unsaved changes.\nClose anyway?"));
+        std::string title   = args.value("title", std::string("Confirm Close"));
+
+        run_on_main_thread([this, label, enabled, message, title]() {
+            Window* win = window_mgr_.get(label);
+            if (!win) return;
+
+            if (!enabled) {
+                win->set_close_confirmation("", "");
+            } else {
+                win->set_close_confirmation(message, title);
+            }
+        });
+
+        return json{{"ok", true}};
+    });
 }
 
 // ── Native IPC Setup ────────────────────────────────────────────────────────

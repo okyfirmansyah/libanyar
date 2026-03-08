@@ -4,7 +4,7 @@
 /// @brief Native dialog plugin for LibAnyar.
 ///
 /// Provides IPC commands for showing native file open/save dialogs and
-/// message/confirm dialogs. Uses GTK3 native dialogs on Linux.
+/// message/confirm/ask dialogs.  Uses GTK3 native dialogs on Linux.
 ///
 /// ## Registered Commands
 ///
@@ -12,8 +12,20 @@
 /// |------------------|------|---------|
 /// | `dialog:open`    | `title?`, `multiple?`, `directory?`, `defaultPath?`, `filters?` | `string[]` or `null` (cancelled) |
 /// | `dialog:save`    | `title?`, `defaultPath?`, `filters?` | `string` or `null` (cancelled) |
-/// | `dialog:message` | **`message`**, `title?`, `kind?` (`"info"`, `"warning"`, `"error"`) | `null` |
-/// | `dialog:confirm` | **`message`**, `title?`, `kind?` | `bool` (`true` = Yes) |
+/// | `dialog:message` | **`message`**, `title?`, `kind?`, `buttons?` | `string` ("Ok", "Cancel", "Yes", "No") |
+/// | `dialog:ask`     | **`message`**, `title?`, `kind?` | `bool` (`true` = Yes) |
+/// | `dialog:confirm` | **`message`**, `title?`, `kind?`, `okLabel?`, `cancelLabel?` | `bool` (`true` = Ok) |
+///
+/// ### `buttons` parameter for `dialog:message`
+///
+/// Preset strings: `"Ok"`, `"OkCancel"`, `"YesNo"`, `"YesNoCancel"`
+///
+/// Custom label objects:
+/// ```json
+/// { "ok": "Save" }
+/// { "ok": "Accept", "cancel": "Decline" }
+/// { "yes": "Allow", "no": "Deny", "cancel": "Skip" }
+/// ```
 ///
 /// ## Frontend Usage
 /// ```js
@@ -28,11 +40,20 @@
 /// // Save dialog
 /// const path = await dialog.save({ defaultPath: 'output.txt' });
 ///
-/// // Message box
-/// await dialog.message({ message: 'Done!', kind: 'info' });
+/// // Message box (Ok button, returns "Ok")
+/// await dialog.message('Done!');
+/// await dialog.message('File not found', { title: 'Error', kind: 'error' });
 ///
-/// // Confirm dialog
-/// const yes = await dialog.confirm({ message: 'Delete this?' });
+/// // Yes/No question (returns boolean)
+/// const yes = await dialog.ask('Delete this entry?', { kind: 'warning' });
+///
+/// // Ok/Cancel confirmation (returns boolean)
+/// const ok = await dialog.confirm('Discard unsaved changes?');
+///
+/// // Custom buttons
+/// const result = await dialog.message('Save changes?', {
+///   buttons: { yes: 'Save', no: 'Discard', cancel: 'Cancel' },
+/// });
 /// ```
 
 #include <anyar/plugin.h>

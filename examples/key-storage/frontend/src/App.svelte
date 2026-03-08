@@ -1,6 +1,6 @@
 <script>
   import { invoke, listen, emit, isNativeIpc } from '@libanyar/api';
-  import { createWindow, closeWindow, onWindowClosed } from '@libanyar/api';
+  import { createWindow, closeWindow, onWindowClosed, setCloseConfirmation } from '@libanyar/api';
   import GroupTree from './GroupTree.svelte';
   import EntryList from './EntryList.svelte';
   import EntryDetail from './EntryDetail.svelte';
@@ -12,6 +12,18 @@
   let dbPath = $state('');
   let dbDirty = $state(false);
   let dbLocked = $state(false);
+
+  // ── Close confirmation ─────────────────────────────────────────────────────
+  // Enable native close-confirmation dialog when the database has unsaved changes.
+  $effect(() => {
+    if (dbOpen) {
+      setCloseConfirmation({
+        enabled: dbDirty,
+        message: 'You have unsaved changes.\nClose without saving?',
+        title: 'Unsaved Changes',
+      });
+    }
+  });
 
   let groups = $state([]);
   let selectedGroupId = $state(null);  // null = show all entries

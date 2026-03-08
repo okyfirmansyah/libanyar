@@ -490,6 +490,39 @@ void Window::set_on_close_requested(CloseRequestedHandler handler) {
     impl_->on_close_requested = std::move(handler);
 }
 
+void Window::set_close_confirmation(const std::string& message,
+                                    const std::string& title) {
+#ifdef __linux__
+    if (message.empty()) {
+        // Disable: remove the close-requested handler
+        impl_->on_close_requested = nullptr;
+        return;
+    }
+
+    // Capture copies for the lambda
+    std::string msg = message;
+    std::string ttl = title;
+
+    impl_->on_close_requested = [msg, ttl]() -> bool {
+        GtkWidget* dlg = gtk_message_dialog_new(
+            nullptr,
+            static_cast<GtkDialogFlags>(GTK_DIALOG_MODAL | GTK_DIALOG_DESTROY_WITH_PARENT),
+            GTK_MESSAGE_WARNING,
+            GTK_BUTTONS_NONE,
+            "%s", msg.c_str());
+        gtk_window_set_title(GTK_WINDOW(dlg), ttl.c_str());
+        gtk_dialog_add_button(GTK_DIALOG(dlg), "Cancel", GTK_RESPONSE_CANCEL);
+        gtk_dialog_add_button(GTK_DIALOG(dlg), "Close", GTK_RESPONSE_OK);
+
+        gint result = gtk_dialog_run(GTK_DIALOG(dlg));
+        gtk_widget_destroy(dlg);
+        while (gtk_events_pending()) gtk_main_iteration();
+
+        return result == GTK_RESPONSE_OK;
+    };
+#endif
+}
+
 // ── Native IPC ──────────────────────────────────────────────────────────────
 
 void Window::bind(const std::string& name, BindCallback callback) {

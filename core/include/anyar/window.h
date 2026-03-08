@@ -125,6 +125,14 @@ public:
     using CloseRequestedHandler = std::function<bool()>;
     void set_on_close_requested(CloseRequestedHandler handler);
 
+    /// Enable or disable a native close-confirmation dialog.
+    ///
+    /// When enabled, the user will see a warning dialog with "Cancel" and
+    /// "Close" buttons before the window can be closed via the X button
+    /// or Alt+F4.  Pass empty strings to disable.
+    void set_close_confirmation(const std::string& message,
+                                const std::string& title);
+
     // ── Native IPC (webview_bind / webview_return) ──────────────────────
 
     /// Bind a native C++ function as a global JS function `window.<name>(...)`,
