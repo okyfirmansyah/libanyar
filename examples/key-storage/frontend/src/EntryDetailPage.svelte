@@ -45,7 +45,7 @@
         e.preventDefault();
         handleCancel();
       }
-      if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+      if (e.key === 'Enter' && e.target?.tagName !== 'TEXTAREA') {
         e.preventDefault();
         handleSave();
       }
@@ -393,7 +393,7 @@
     <!-- Footer with Save / Cancel -->
     <footer class="dialog-footer">
       <div class="footer-hint">
-        <kbd>Ctrl+Enter</kbd> Save · <kbd>Esc</kbd> Cancel
+        <kbd>Enter</kbd> Save · <kbd>Esc</kbd> Cancel
       </div>
       <div class="footer-actions">
         <button class="btn btn-secondary btn-sm" onclick={handleCancel}>

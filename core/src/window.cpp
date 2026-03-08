@@ -360,8 +360,37 @@ void Window::destroy() {
     if (impl_->wv && !impl_->destroyed) {
         impl_->disconnect_close_signals();
         impl_->destroyed = true;
+
+#ifdef __linux__
+        // The GTK "destroy" signal handler (now disconnected above) normally
+        // re-enables the parent and defers the on_close callback.  Since we
+        // disconnected it, we must do both manually before webview_destroy()
+        // so that the parent window remains responsive.
+        if (impl_->is_modal && impl_->parent_window) {
+            gtk_widget_set_sensitive(
+                GTK_WIDGET(impl_->parent_window), TRUE);
+            impl_->parent_window = nullptr;
+        }
+#endif
+
         webview_destroy(impl_->wv);
         impl_->wv = nullptr;
+
+#ifdef __linux__
+        // Defer the on_close callback to avoid re-entrant destruction:
+        // on_close → windows_.erase() could drop the last shared_ptr →
+        // ~Impl while we are still inside Window::destroy().
+        if (impl_->on_close) {
+            auto* cb = new CloseHandler(std::move(impl_->on_close));
+            impl_->on_close = nullptr;
+            g_idle_add(+[](gpointer data) -> gboolean {
+                auto* fn = static_cast<CloseHandler*>(data);
+                (*fn)();
+                delete fn;
+                return G_SOURCE_REMOVE;
+            }, cb);
+        }
+#endif
     }
 }
 
