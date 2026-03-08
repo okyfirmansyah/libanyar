@@ -237,7 +237,7 @@ LibAnyar ships with these plugins (auto-registered):
 | Plugin | Commands | Description |
 |--------|----------|-------------|
 | `FsPlugin` | `fs:readFile`, `fs:writeFile`, `fs:readDir`, `fs:exists`, `fs:mkdir`, `fs:remove`, `fs:metadata` | File system operations |
-| `DialogPlugin` | `dialog:open`, `dialog:save`, `dialog:message`, `dialog:confirm` | Native GTK3 dialogs |
+| `DialogPlugin` | `dialog:open`, `dialog:save`, `dialog:message`, `dialog:ask`, `dialog:confirm` | Native GTK3 dialogs ([Dialog Guide](dialogs.md)) |
 | `ShellPlugin` | `shell:openUrl`, `shell:openPath`, `shell:execute` | External programs & URLs |
 | `ClipboardPlugin` | `clipboard:read`, `clipboard:write` | System clipboard access |
 | `DbPlugin` | `db:open`, `db:close`, `db:query`, `db:exec`, `db:batch` | SQLite/PostgreSQL databases |

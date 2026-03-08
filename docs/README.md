@@ -5,6 +5,8 @@
 - [Getting Started](getting-started.md) — Installation, prerequisites, and first build
 - [Building Your First App](building-first-app.md) — Step-by-step tutorial
 - [Writing Plugins](writing-plugins.md) — Create custom C++ plugins
+- [Dialog Guide](dialogs.md) — Native message, file open/save, and confirmation dialogs
+- [Multi-Window Guide](multi-window.md) — Creating, managing, and communicating between windows
 - [Database Integration](database-integration.md) — SQLite and PostgreSQL guide
 
 ## Reference
