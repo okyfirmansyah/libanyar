@@ -1,5 +1,6 @@
 <script>
-  import { invoke } from '@libanyar/api';
+  import { invoke, listen, emit, isNativeIpc } from '@libanyar/api';
+  import { createWindow, closeWindow, onWindowClosed } from '@libanyar/api';
   import GroupTree from './GroupTree.svelte';
   import EntryList from './EntryList.svelte';
   import EntryDetail from './EntryDetail.svelte';
@@ -31,6 +32,47 @@
 
   let errorMsg = $state('');
   let statusMsg = $state('');
+
+  // ── Cross-window event listeners (native mode) ────────────────────────────
+  // When the entry-detail child window saves/deletes, refresh the main list.
+  $effect(() => {
+    const unlistenUpdated = listen('entry:updated', (msg) => {
+      dbDirty = true;
+      loadEntries();
+      // If this entry is also the selected one in the CSS fallback, refresh it
+      if (selectedEntry && msg.payload?.id === selectedEntry.id) {
+        loadEntry(selectedEntry.id);
+      }
+    });
+
+    const unlistenDeleted = listen('entry:deleted', (msg) => {
+      dbDirty = true;
+      const deletedId = msg.payload?.id;
+      if (selectedEntryId === deletedId) {
+        selectedEntryId = null;
+        selectedEntry = null;
+      }
+      if (modalEntryId === deletedId) {
+        showEntryModal = false;
+        modalEntryId = null;
+      }
+      loadEntries();
+    });
+
+    // When a child window is closed, clean up any UI state referencing it
+    const unlistenClosed = onWindowClosed((msg) => {
+      const label = msg.payload?.label;
+      if (label && label.startsWith('entry-')) {
+        // The entry modal child was closed — nothing to clean up in main
+      }
+    });
+
+    return () => {
+      unlistenUpdated();
+      unlistenDeleted();
+      unlistenClosed();
+    };
+  });
 
   // ── Data loading ──────────────────────────────────────────────────────────
   async function loadGroups() {
@@ -209,11 +251,39 @@
     selectedEntryId = id;
   }
 
-  function handleOpenEntry(id) {
+  /**
+   * Open an entry detail view.
+   * - In native mode: open a child modal GTK window at /#/entry/:id
+   * - In browser/dev mode: fall back to the CSS overlay modal
+   */
+  async function handleOpenEntry(id) {
     selectedEntryId = id;
-    modalEntryId = id;
-    loadEntry(id);
-    showEntryModal = true;
+
+    if (isNativeIpc()) {
+      // Native mode — open a real GTK modal child window
+      try {
+        await createWindow({
+          label: `entry-${id}`,
+          title: `Entry Detail`,
+          url: `/#/entry/${id}`,
+          parent: 'main',
+          modal: true,
+          width: 550,
+          height: 700,
+          resizable: true,
+          center: true,
+          closable: true,
+        });
+      } catch (e) {
+        // Window might already be open — that's fine, just log
+        console.warn('[key-storage] Could not open entry window:', e.message || e);
+      }
+    } else {
+      // Browser/dev fallback — CSS overlay modal
+      modalEntryId = id;
+      loadEntry(id);
+      showEntryModal = true;
+    }
   }
 
   function handleCloseModal() {

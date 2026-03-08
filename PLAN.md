@@ -12,7 +12,7 @@
 | 4 | [Database Integration](#phase-4-database-integration) | ✅ Complete | 1-2 weeks |
 | 4b | [Test Suite](#phase-4b-test-suite) | ✅ Complete | 1 week |
 | 4c | [Hybrid IPC (Native + HTTP Fallback)](#phase-4c-hybrid-ipc) | ✅ Complete | 1 day |
-| 4d | [Multi-Window & Child Windows](#phase-4d-multi-window--child-windows) | 🔲 Not Started | 2-3 weeks |
+| 4d | [Multi-Window & Child Windows](#phase-4d-multi-window--child-windows) | ✅ Complete | 2-3 weeks |
 | 4e | [Platform Abstraction Refactor](#phase-4e-platform-abstraction-refactor) | ✅ Complete | 3-5 days |
 | 5 | [CLI Tool](#phase-5-cli-tool) | 🔲 Not Started | 2-3 weeks |
 | 6 | [Polish & Documentation](#phase-6-polish--documentation) | 🔲 Not Started | Ongoing |
@@ -569,8 +569,8 @@ Linux implementation (`window_linux.cpp`, inside `Window::Impl`):
 - Child window navigates to `http://127.0.0.1:<port>/popup.html`
 - Useful when popup needs minimal bundle size
 
-- [ ] Document both approaches in `docs/writing-plugins.md` or new `docs/multi-window.md`
-- [ ] Key-storage example: use Approach A — `/#/entry-detail/:id` route for modal window
+- [x] Document both approaches in `docs/multi-window.md`
+- [x] Key-storage example: use Approach A — `/#/entry/:id` route for modal window
 
 ### 4d.8 Event System Enhancements
 
@@ -591,25 +591,25 @@ Linux implementation (`window_linux.cpp`, inside `Window::Impl`):
 
 > Refactor the key-storage entry detail from CSS overlay to a native modal window, demonstrating the multi-window system.
 
-- [ ] Add URL-based routing to key-storage frontend (e.g., svelte-routing or hash router)
-- [ ] Create `/#/entry/:id` route that renders `EntryDetail.svelte` standalone
-- [ ] On double-click entry in main window:
+- [x] Add URL-based routing to key-storage frontend (hash router in main.js)
+- [x] Create `/#/entry/:id` route that renders `EntryDetailPage.svelte` standalone
+- [x] On double-click entry in main window:
   ```typescript
-  import { createWindow } from '@libanyar/api/window';
+  import { createWindow } from '@libanyar/api';
   await createWindow({
     label: `entry-${id}`,
-    title: entry.title,
+    title: 'Entry Detail',
     url: `/#/entry/${id}`,
     parent: 'main',
     modal: true,
-    width: 500,
-    height: 600,
-    resizable: false,
+    width: 550,
+    height: 700,
+    resizable: true,
     center: true,
   });
   ```
-- [ ] Entry detail window: on save/delete → emit event to main window → close self
-- [ ] Keep CSS overlay as fallback for `anyar dev` (browser mode where native windows unavailable)
+- [x] Entry detail window: on save/delete → emit event to main window → close self
+- [x] Keep CSS overlay as fallback for `anyar dev` (browser mode where native windows unavailable)
 
 ### Phase 4d Deliverable
 > LibAnyar apps can create multiple native windows — top-level, transient child, or modal. Frontend developers use `createWindow()` / `closeWindow()` from JS. Events can be sent to specific windows. The key-storage example demonstrates a native modal entry editor.
