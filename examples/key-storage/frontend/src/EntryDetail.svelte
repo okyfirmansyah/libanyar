@@ -164,43 +164,43 @@
 </script>
 
 {#if entry}
-<div class="p-8 max-w-2xl mx-auto w-full">
+<div class="p-6 w-full">
   <!-- Header: icon + title -->
-  <div class="flex items-start gap-5 mb-8 pb-6" style="border-bottom: 1px solid var(--border);">
+  <div class="flex items-start gap-4 mb-6 pb-5" style="border-bottom: 1px solid var(--border);">
     <!-- Icon -->
     <button
-      class="w-16 h-16 rounded-xl flex items-center justify-center shrink-0 transition-colors overflow-hidden"
-      style="background: var(--surface-2); border: 2px dashed var(--border-light);"
+      class="w-12 h-12 rounded-lg flex items-center justify-center shrink-0 transition-colors overflow-hidden"
+      style="background: var(--surface-2); border: 1px dashed var(--border-light);"
       onclick={handleIconUpload}
       title="Upload icon"
     >
       {#if iconUrl}
-        <img src={iconUrl} alt="" class="w-full h-full object-cover rounded-xl" />
+        <img src={iconUrl} alt="" class="w-full h-full object-cover rounded-lg" />
       {:else}
-        <span class="text-2xl font-bold" style="color: var(--text-muted);">
+        <span class="text-lg font-semibold" style="color: var(--text-muted);">
           {entry.title ? entry.title[0].toUpperCase() : '?'}
         </span>
       {/if}
     </button>
 
-    <div class="flex-1 min-w-0 pt-1">
+    <div class="flex-1 min-w-0 pt-0.5">
       <input
         type="text"
         value={entry.title}
         placeholder="Entry title"
-        class="w-full text-xl font-semibold bg-transparent border-none p-0 focus:ring-0"
+        class="w-full text-lg font-semibold bg-transparent border-none p-0 focus:ring-0"
         style="color: var(--text); outline: none;"
         onblur={(e) => handleBlur('title', e)}
         onkeydown={(e) => handleKeydown('title', e)}
       />
-      <p class="text-xs mt-1" style="color: var(--text-muted);">
+      <p class="text-[11px] mt-0.5" style="color: var(--text-muted);">
         Created {entry.createdAt} &middot; Updated {entry.updatedAt}
       </p>
     </div>
 
     <!-- Delete -->
     <button
-      class="btn btn-danger btn-sm mt-1"
+      class="btn btn-danger btn-xs mt-0.5"
       onclick={ondelete}
       title="Delete entry"
     >
@@ -209,10 +209,10 @@
   </div>
 
   <!-- Fields -->
-  <div class="space-y-6">
+  <div class="space-y-5">
     <!-- URL -->
     <div>
-      <label class="text-xs font-medium uppercase tracking-wider mb-1.5 block" style="color: var(--text-muted);">Website / URL</label>
+      <label class="text-[10.5px] font-medium uppercase tracking-wider mb-1.5 block" style="color: var(--text-muted);">Website / URL</label>
       <div class="flex items-center gap-2">
         <input
           type="text"
@@ -235,7 +235,7 @@
 
     <!-- Username -->
     <div>
-      <label class="text-xs font-medium uppercase tracking-wider mb-1.5 block" style="color: var(--text-muted);">Username</label>
+      <label class="text-[10.5px] font-medium uppercase tracking-wider mb-1.5 block" style="color: var(--text-muted);">Username</label>
       <div class="flex items-center gap-2">
         <input
           type="text"
@@ -258,7 +258,7 @@
 
     <!-- Password -->
     <div>
-      <label class="text-xs font-medium uppercase tracking-wider mb-1.5 block" style="color: var(--text-muted);">Password</label>
+      <label class="text-[10.5px] font-medium uppercase tracking-wider mb-1.5 block" style="color: var(--text-muted);">Password</label>
       <div class="flex items-center gap-2">
         <div class="flex-1 relative">
           <input
@@ -306,7 +306,7 @@
 
     <!-- Expiration -->
     <div>
-      <label class="text-xs font-medium uppercase tracking-wider mb-1.5 block" style="color: var(--text-muted);">Expiration Date</label>
+      <label class="text-[10.5px] font-medium uppercase tracking-wider mb-1.5 block" style="color: var(--text-muted);">Expiration Date</label>
       <input
         type="datetime-local"
         value={entry.expiresAt ? entry.expiresAt.replace(' ', 'T').slice(0, 16) : ''}
@@ -320,7 +320,7 @@
 
     <!-- Notes -->
     <div>
-      <label class="text-xs font-medium uppercase tracking-wider mb-1.5 block" style="color: var(--text-muted);">Notes</label>
+      <label class="text-[10.5px] font-medium uppercase tracking-wider mb-1.5 block" style="color: var(--text-muted);">Notes</label>
       <textarea
         value={entry.notes}
         placeholder="Additional notes..."
@@ -334,7 +334,7 @@
     <!-- Attachments -->
     <div>
       <div class="flex items-center justify-between mb-2">
-        <label class="text-xs font-medium uppercase tracking-wider" style="color: var(--text-muted);">Attachments</label>
+        <label class="text-[10.5px] font-medium uppercase tracking-wider" style="color: var(--text-muted);">Attachments</label>
         <button
           class="btn btn-ghost btn-xs"
           onclick={handleAttachmentUpload}

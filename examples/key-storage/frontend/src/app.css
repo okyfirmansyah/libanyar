@@ -119,16 +119,16 @@ button {
 }
 .btn-xs svg { width: 12px; height: 12px; }
 
-/* Primary — gradient accent with glow */
+/* Primary — solid accent, no gradient */
 .btn-primary {
-  background: linear-gradient(135deg, var(--gradient-start), var(--gradient-end));
-  color: #fff;
-  box-shadow: 0 1px 2px rgba(0,0,0,0.4);
+  background: var(--accent);
+  color: var(--bg);
+  font-weight: 600;
 }
 .btn-primary:hover {
-  box-shadow: 0 2px 12px var(--accent-glow), 0 1px 2px rgba(0,0,0,0.3);
+  background: var(--accent-hover);
 }
-.btn-primary:active { opacity: 0.9; }
+.btn-primary:active { opacity: 0.85; }
 
 /* Secondary — subtle surface */
 .btn-secondary {
@@ -183,8 +183,7 @@ button {
   color: var(--accent);
 }
 .btn-accent-ghost:hover {
-  background: rgba(0,225,201,0.18);
-  box-shadow: 0 0 6px var(--accent-glow);
+  background: rgba(0,225,201,0.16);
 }
 
 /* Input base */
@@ -212,24 +211,89 @@ input::placeholder, textarea::placeholder {
   color: var(--text);
 }
 
-/* ── Save button pulse animation ────────────────────────────────────────── */
+/* ── Save button pulse — subtle opacity only ────────────────────────────── */
 @keyframes save-pulse {
-  0%, 100% {
-    background: transparent;
-    box-shadow: 0 0 0 0 transparent;
-    color: var(--warning);
-    opacity: 0.55;
-  }
-  50% {
-    background: var(--warning-dim);
-    box-shadow: 0 0 14px 3px rgba(210, 181, 91, 0.35);
-    color: #e0ca7a;
-    opacity: 1;
-  }
+  0%, 100% { opacity: 0.5; }
+  50% { opacity: 1; }
 }
 
 .save-pulse {
   color: var(--warning) !important;
-  animation: save-pulse 1.8s ease-in-out infinite;
+  animation: save-pulse 2.4s ease-in-out infinite;
   border-radius: 8px;
+}
+
+/* ── Sheet overlay + panel ──────────────────────────────────────────────── */
+.sheet-overlay {
+  animation: sheet-fade-in 0.2s ease;
+}
+.sheet-panel {
+  animation: sheet-slide-in 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+@keyframes sheet-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes sheet-slide-in {
+  from { transform: translateX(100%); }
+  to { transform: translateX(0); }
+}
+
+/* ── Separator ──────────────────────────────────────────────────────────── */
+.separator {
+  height: 1px;
+  background: var(--border);
+  border: none;
+  margin: 0;
+}
+.separator-vertical {
+  width: 1px;
+  align-self: stretch;
+  background: var(--border);
+}
+
+/* ── Badge (pill) ───────────────────────────────────────────────────────── */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 7px;
+  border-radius: 9999px;
+  letter-spacing: 0.02em;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+.badge-danger {
+  background: var(--danger-dim);
+  color: var(--danger);
+}
+.badge-warning {
+  background: var(--warning-dim);
+  color: var(--warning);
+}
+.badge-success {
+  background: rgba(34, 170, 102, 0.12);
+  color: var(--success);
+}
+.badge-muted {
+  background: var(--surface-2);
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+}
+
+/* ── Kbd (keyboard shortcut) ────────────────────────────────────────────── */
+.kbd {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+  font-size: 10.5px;
+  line-height: 1;
+  padding: 3px 6px;
+  border-radius: 5px;
+  background: var(--surface-2);
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+  box-shadow: 0 1px 0 var(--border);
 }

@@ -110,20 +110,22 @@
 
     <!-- Context menu dropdown -->
     {#if contextId === group.id}
-      <div class="ml-6 mb-1 py-1 rounded-lg text-xs"
-           style="background: var(--surface-3); border: 1px solid var(--border);">
-        <button class="w-full text-left px-3 py-1.5 hover:bg-white/5 transition-colors"
+      <div class="ml-6 mb-1 py-1 px-1 rounded-lg text-xs"
+           style="background: var(--surface-2); border: 1px solid var(--border); box-shadow: 0 8px 30px rgba(0,0,0,0.4);">
+        <button class="w-full text-left px-2.5 py-1.5 rounded-md hover:bg-white/[0.06] transition-colors"
                 style="color: var(--text-dim);"
                 onclick={() => { contextId = null; oncreate && oncreate(group.id); }}>
           New sub-group
         </button>
-        <button class="w-full text-left px-3 py-1.5 hover:bg-white/5 transition-colors"
+        <button class="w-full text-left px-2.5 py-1.5 rounded-md hover:bg-white/[0.06] transition-colors"
                 style="color: var(--text-dim);"
                 onclick={() => { contextId = null; startRename(group); }}>
           Rename
         </button>
-        <button class="w-full text-left px-3 py-1.5 hover:bg-white/5 transition-colors"
+        <button class="w-full text-left px-2.5 py-1.5 rounded-md transition-colors"
                 style="color: var(--danger);"
+                onmouseenter={(e) => e.currentTarget.style.background = 'var(--danger-dim)'}
+                onmouseleave={(e) => e.currentTarget.style.background = 'transparent'}
                 onclick={() => { contextId = null; ondelete && ondelete(group.id); }}>
           Delete
         </button>

@@ -67,9 +67,7 @@
 
   {#if dbOpen}
     <!-- Separator -->
-    <div class="w-px h-5 mx-1.5" style="background: var(--border);"></div>
-
-    <!-- Entry operations -->
+    <div class="separator-vertical mx-1.5" style="height: 20px;"></div>
     <div class="flex items-center gap-1">
       <button class="toolbar-btn" onclick={oncreateentry} title="New entry (Ctrl+N)">
         <svg class="w-[18px] h-[18px]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -81,7 +79,7 @@
     </div>
 
     <!-- Separator -->
-    <div class="w-px h-5 mx-1.5" style="background: var(--border);"></div>
+    <div class="separator-vertical mx-1.5" style="height: 20px;"></div>
 
     <!-- Search -->
     <div class="relative flex-1 max-w-xs">
@@ -145,17 +143,7 @@
 <style>
   :global(.toolbar-header) {
     position: relative;
-    border-bottom: none;
-  }
-  :global(.toolbar-header::after) {
-    content: '';
-    position: absolute;
-    bottom: 0;
-    left: 0;
-    right: 0;
-    height: 2px;
-    background: linear-gradient(90deg, var(--gradient-start), var(--gradient-end));
-    opacity: 0.6;
+    border-bottom: 1px solid var(--border);
   }
   :global(.toolbar-btn) {
     display: flex;

@@ -438,8 +438,8 @@
     <div class="flex-1 flex min-h-0">
       <!-- Left sidebar: groups -->
       <aside class="flex flex-col shrink-0" style="width: 240px; background: var(--surface); border-right: 1px solid var(--border);">
-        <div class="px-4 py-3 text-[12px] font-semibold uppercase tracking-wider flex items-center justify-between"
-             style="color: var(--text-muted); border-bottom: 1px solid var(--border); border-left: 2px solid var(--accent);">
+        <div class="px-4 py-3 text-[11px] font-semibold uppercase tracking-wider flex items-center justify-between"
+             style="color: var(--text-muted); border-bottom: 1px solid var(--border);">
           <span>Groups</span>
           <button
             class="w-6 h-6 flex items-center justify-center rounded-md hover:bg-white/5 transition-colors"
@@ -480,7 +480,7 @@
 
       <!-- Right: entry table -->
       <section class="flex-1 min-w-0 flex flex-col">
-        <div class="px-4 py-3 text-[12px] font-semibold uppercase tracking-wider flex items-center justify-between"
+        <div class="px-4 py-3 text-[11px] font-semibold uppercase tracking-wider flex items-center justify-between"
              style="color: var(--text-muted); border-bottom: 1px solid var(--border);">
           <span>
             {#if searchMode}
@@ -491,7 +491,7 @@
               {groups.find(g => g.id === selectedGroupId)?.name || 'Entries'}
             {/if}
           </span>
-          <span class="text-[12px] font-normal" style="color: var(--text-muted);">{entries.length} entries</span>
+          <span class="badge badge-muted">{entries.length}</span>
         </div>
         <div class="flex-1 overflow-auto">
           <EntryList
@@ -505,26 +505,37 @@
       </section>
     </div>
 
-    <!-- Entry detail modal -->
+    <!-- Entry detail sheet (slide-in from right) -->
     {#if showEntryModal && selectedEntry}
-      <div class="fixed inset-0 z-50 flex items-center justify-center" style="background: rgba(0,0,0,0.6); backdrop-filter: blur(4px);"
+      <!-- svelte-ignore a11y_no_static_element_interactions -->
+      <div class="fixed inset-0 z-50 sheet-overlay"
+           style="background: rgba(0,0,0,0.35);"
            onclick={(e) => { if (e.target === e.currentTarget) handleCloseModal(); }}
            onkeydown={(e) => { if (e.key === 'Escape') handleCloseModal(); }}
            role="dialog"
            tabindex="-1">
-        <div class="relative w-full max-w-2xl max-h-[85vh] overflow-y-auto rounded-xl shadow-2xl"
-             style="background: var(--surface); border: 1px solid var(--border);">
-          <!-- Close button -->
-          <button
-            class="absolute top-3 right-3 z-10 w-8 h-8 flex items-center justify-center rounded-lg hover:bg-white/10 transition-colors"
-            style="color: var(--text-muted);"
-            onclick={handleCloseModal}
-            title="Close (Esc)"
-          >
-            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
-            </svg>
-          </button>
+        <!-- svelte-ignore a11y_click_events_have_key_events -->
+        <!-- svelte-ignore a11y_no_static_element_interactions -->
+        <div class="absolute right-0 top-0 bottom-0 w-full max-w-lg overflow-y-auto sheet-panel"
+             style="background: var(--surface); border-left: 1px solid var(--border);"
+             onclick={(e) => e.stopPropagation()}>
+          <!-- Sheet header -->
+          <div class="sticky top-0 z-10 flex items-center justify-between px-6 py-3"
+               style="background: var(--surface); border-bottom: 1px solid var(--border);">
+            <span class="text-xs font-medium uppercase tracking-wider" style="color: var(--text-muted);">Entry Detail</span>
+            <button
+              class="w-7 h-7 flex items-center justify-center rounded-md transition-colors"
+              style="color: var(--text-muted); background: transparent;"
+              onmouseenter={(e) => e.currentTarget.style.background = 'rgba(255,255,255,0.06)'}
+              onmouseleave={(e) => e.currentTarget.style.background = 'transparent'}
+              onclick={handleCloseModal}
+              title="Close (Esc)"
+            >
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
           <EntryDetail
             entry={selectedEntry}
             onupdate={handleUpdateEntry}
@@ -537,17 +548,17 @@
   {:else}
     <!-- Welcome / empty state -->
     <div class="flex-1 w-full flex items-center justify-center">
-      <div class="flex flex-col items-center text-center max-w-sm">
-        <div class="w-20 h-20 mx-auto mb-6 rounded-2xl flex items-center justify-center"
-             style="background: var(--accent-dim);">
-          <svg class="w-10 h-10" style="color: var(--accent);" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <div class="flex flex-col items-center text-center max-w-md px-8">
+        <div class="w-14 h-14 mx-auto mb-5 rounded-xl flex items-center justify-center"
+             style="background: var(--surface-2); border: 1px solid var(--border);">
+          <svg class="w-7 h-7" style="color: var(--text-muted);" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
                   d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
           </svg>
         </div>
-        <h2 class="text-xl font-semibold mb-2">Secure Key Storage</h2>
-        <p class="text-sm mb-6" style="color: var(--text-dim);">
-          Create a new encrypted vault or open an existing one to manage your credentials securely.
+        <h2 class="text-lg font-semibold mb-1.5" style="color: var(--text);">Key Storage</h2>
+        <p class="text-[13px] mb-8 leading-relaxed" style="color: var(--text-muted);">
+          Create a new encrypted vault or open an existing one<br />to manage your credentials.
         </p>
         <div class="flex gap-3 justify-center">
           <button class="btn btn-primary" onclick={handleNew}>
@@ -556,37 +567,46 @@
             </svg>
             New Vault
           </button>
-          <button class="btn btn-secondary" onclick={handleOpen}>
+          <button class="btn btn-outline" onclick={handleOpen}>
             <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 19a2 2 0 01-2-2V7a2 2 0 012-2h4l2 2h4a2 2 0 012 2v1M5 19h14a2 2 0 002-2v-5a2 2 0 00-2-2H9a2 2 0 00-2 2v5a2 2 0 01-2 2z" />
             </svg>
             Open Vault
           </button>
         </div>
+        <div class="flex items-center gap-4 mt-6">
+          <span class="flex items-center gap-1.5 text-[11px]" style="color: var(--text-muted);">
+            <span class="kbd">Ctrl+Shift+N</span> New
+          </span>
+          <span class="flex items-center gap-1.5 text-[11px]" style="color: var(--text-muted);">
+            <span class="kbd">Ctrl+O</span> Open
+          </span>
+        </div>
       </div>
     </div>
   {/if}
 
   <!-- Status bar -->
-  <footer class="shrink-0 flex items-center justify-between status-footer"
-          style="background: var(--surface); border-top: 1px solid var(--border); color: var(--text-dim); font-size: 13px; padding: 8px 20px;">
-    <div class="flex items-center gap-3">
+  <footer class="shrink-0 flex items-center justify-between"
+          style="background: var(--surface); border-top: 1px solid var(--border); color: var(--text-dim); font-size: 12px; padding: 6px 16px;">
+    <div class="flex items-center gap-2.5">
       {#if dbOpen}
-        <span class="flex items-center gap-1">
-          <span class="w-2 h-2 rounded-full" style="background: {dbDirty ? 'var(--gold)' : 'var(--success)'};"></span>
-          {dbDirty ? 'Unsaved changes' : 'Saved'}
-        </span>
-        <span style="color: var(--border);">|</span>
-        <span>{fileName(dbPath)}</span>
+        {#if dbDirty}
+          <span class="badge badge-warning">Unsaved</span>
+        {:else}
+          <span class="badge badge-success">Saved</span>
+        {/if}
+        <span class="separator-vertical" style="height: 14px;"></span>
+        <span style="color: var(--text-muted);">{fileName(dbPath)}</span>
       {:else}
-        <span>No vault open</span>
+        <span style="color: var(--text-muted);">No vault open</span>
       {/if}
     </div>
-    <div>
+    <div class="flex items-center gap-2">
       {#if statusMsg}
-        <span>{statusMsg}</span>
+        <span style="color: var(--text-dim);">{statusMsg}</span>
       {:else}
-        <span>AES-256-GCM + PBKDF2</span>
+        <span class="badge badge-muted">AES-256-GCM</span>
       {/if}
     </div>
   </footer>

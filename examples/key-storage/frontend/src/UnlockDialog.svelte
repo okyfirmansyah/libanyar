@@ -82,9 +82,9 @@
   <div class="w-full max-w-sm px-6">
     <!-- Lock icon -->
     <div class="flex flex-col items-center mb-6">
-      <div class="w-16 h-16 rounded-2xl flex items-center justify-center mb-4"
-           style="background: var(--accent-dim);">
-        <svg class="w-8 h-8" style="color: var(--accent);" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <div class="w-12 h-12 rounded-xl flex items-center justify-center mb-4"
+           style="background: var(--surface-2); border: 1px solid var(--border);">
+        <svg class="w-6 h-6" style="color: var(--text-muted);" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           {#if mode === 'new'}
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
                   d="M12 4v16m8-8H4" />
@@ -94,7 +94,7 @@
           {/if}
         </svg>
       </div>
-      <h2 class="text-lg font-semibold" style="color: var(--text);">{titleText}</h2>
+      <h2 class="text-base font-semibold" style="color: var(--text);">{titleText}</h2>
       <p class="text-xs mt-1" style="color: var(--text-muted);">{subtitleText}</p>
       {#if path}
         <p class="text-[11px] mt-2 px-3 py-1 rounded-md truncate max-w-[300px]"

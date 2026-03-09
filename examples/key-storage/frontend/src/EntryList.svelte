@@ -58,12 +58,12 @@
 {#if entries.length === 0}
   <div class="h-full flex items-center justify-center p-8" style="color: var(--text-muted);">
     <div class="flex flex-col items-center text-center">
-      <svg class="w-12 h-12 mb-3 opacity-30" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <svg class="w-10 h-10 mb-3 opacity-20" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
               d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z" />
       </svg>
-      <p class="text-sm">No entries in this group</p>
-      <p class="text-xs mt-1 opacity-50">Press Ctrl+N to create one</p>
+      <p class="text-[13px] mb-1" style="color: var(--text-muted);">No entries</p>
+      <p class="text-xs opacity-40 flex items-center gap-1"><span class="kbd">Ctrl+N</span> to create one</p>
     </div>
   </div>
 {:else}
@@ -101,9 +101,9 @@
                 {entry.title || 'Untitled'}
               </span>
               {#if expired}
-                <span class="badge-expired">EXP</span>
+                <span class="badge badge-danger">EXP</span>
               {:else if expiring}
-                <span class="badge-expiring">EXP</span>
+                <span class="badge badge-warning">EXP</span>
               {/if}
             </div>
           </td>
@@ -185,11 +185,12 @@
   }
 
   .entry-row:hover {
-    background: rgba(0, 225, 201, 0.04);
+    background: rgba(255, 255, 255, 0.02);
   }
 
   .entry-row.selected {
-    background: var(--accent-dim);
+    background: rgba(0, 225, 201, 0.04);
+    box-shadow: inset 2px 0 0 var(--accent);
   }
 
   .entry-row td {
@@ -212,21 +213,23 @@
     align-items: center;
     justify-content: center;
     flex-shrink: 0;
-    font-size: 13px;
+    font-size: 12px;
     font-weight: 600;
-    background: var(--secondary-dim);
-    color: var(--secondary);
+    background: var(--surface-2);
+    color: var(--text-muted);
+    border: 1px solid var(--border);
   }
 
   .entry-icon.selected {
     background: var(--accent);
-    color: #0A0A0A;
+    color: var(--bg);
+    border-color: var(--accent);
   }
 
   .badge-expired {
     font-size: 10px;
-    padding: 2px 6px;
-    border-radius: 3px;
+    padding: 2px 7px;
+    border-radius: 9999px;
     font-weight: 600;
     background: var(--danger-dim);
     color: var(--danger);
@@ -235,8 +238,8 @@
 
   .badge-expiring {
     font-size: 10px;
-    padding: 2px 6px;
-    border-radius: 3px;
+    padding: 2px 7px;
+    border-radius: 9999px;
     font-weight: 600;
     background: var(--warning-dim);
     color: var(--warning);
@@ -257,30 +260,33 @@
     right: 12px;
     top: -4px;
     z-index: 50;
-    padding: 4px 0;
+    padding: 4px;
     border-radius: 8px;
-    background: var(--surface-3);
+    background: var(--surface-2);
     border: 1px solid var(--border);
-    min-width: 120px;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+    min-width: 130px;
+    box-shadow: 0 8px 30px rgba(0, 0, 0, 0.4);
   }
 
   .context-item {
     display: block;
     width: 100%;
     text-align: left;
-    padding: 6px 12px;
-    font-size: 12px;
+    padding: 7px 10px;
+    font-size: 12.5px;
     color: var(--text-dim);
     transition: background 0.1s;
     background: transparent;
+    border-radius: 5px;
   }
 
   .context-item:hover {
-    background: rgba(255, 255, 255, 0.05);
+    background: rgba(255, 255, 255, 0.06);
+    color: var(--text);
   }
 
-  .context-item.danger {
+  .context-item.danger:hover {
+    background: var(--danger-dim);
     color: var(--danger);
   }
 </style>
