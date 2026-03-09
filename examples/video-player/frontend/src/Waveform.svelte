@@ -25,8 +25,8 @@
 
     ws = WaveSurfer.create({
       container: wsContainer,
-      waveColor: 'rgba(226, 182, 50, 0.35)',
-      progressColor: 'rgba(226, 182, 50, 0.75)',
+      waveColor: 'rgba(210, 181, 91, 0.35)',
+      progressColor: 'rgba(210, 181, 91, 0.75)',
       cursorColor: 'rgba(255, 255, 255, 0.6)',
       cursorWidth: 1,
       height: 64,

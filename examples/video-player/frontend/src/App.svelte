@@ -156,7 +156,7 @@
       disabled={loading}
       class="px-4 py-1.5 text-white text-sm font-medium rounded-lg transition-all disabled:opacity-50 cursor-pointer"
       style="background: linear-gradient(135deg, #0072F0, #00E1C9);"
-      onmouseenter={(e) => e.target.style.boxShadow = '0 2px 12px rgba(0,225,201,0.2)'}
+      onmouseenter={(e) => e.target.style.boxShadow = '0 2px 12px rgba(0,225,201,0.15)'}
       onmouseleave={(e) => e.target.style.boxShadow = 'none'}
     >
       {loading ? 'Loading…' : 'Open File'}

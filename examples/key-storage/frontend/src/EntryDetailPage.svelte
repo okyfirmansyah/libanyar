@@ -581,7 +581,7 @@
 
   @keyframes copy-flash {
     0% {
-      background: rgba(0, 225, 201, 0.20);
+      background: rgba(0, 225, 201, 0.15);
       box-shadow: 0 0 12px 3px var(--accent-glow);
       color: var(--accent);
     }

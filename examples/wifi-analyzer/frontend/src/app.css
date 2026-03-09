@@ -11,7 +11,7 @@
   --accent:       #00E1C9;
   --accent-hover: #00C8B3;
   --accent-dim:   rgba(0, 225, 201, 0.12);
-  --accent-glow:  rgba(0, 225, 201, 0.20);
+  --accent-glow:  rgba(0, 225, 201, 0.15);
 
   --secondary:      #0072F0;
   --secondary-dim:  rgba(0, 114, 240, 0.12);
@@ -19,9 +19,9 @@
   --gradient:     linear-gradient(135deg, #0072F0, #00E1C9);
   --gradient-h:   linear-gradient(90deg, #0072F0, #00E1C9);
 
-  --success:      #22c55e;
+  --success:      #22AA66;
   --danger:       #E92C37;
-  --warning:      #E2B632;
+  --warning:      #D2B55B;
 
   --text:         #F8F9FA;
   --text-dim:     #9CA3AF;

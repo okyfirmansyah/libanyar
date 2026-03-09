@@ -126,8 +126,8 @@
         },
         {
           label: 'Audio',
-          stroke: '#E2B632',
-          fill: 'rgba(226, 182, 50, 0.12)',
+          stroke: '#D2B55B',
+          fill: 'rgba(210, 181, 91, 0.12)',
           width: 1.5,
           paths: uPlot.paths.bars({ size: [0.3, 100] }),
         },

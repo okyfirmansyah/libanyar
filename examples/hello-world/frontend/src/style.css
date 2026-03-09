@@ -4,13 +4,13 @@
   --border: #2E2E2E;
   --primary: #00E1C9;
   --primary-hover: #00C8B3;
-  --primary-glow: rgba(0, 225, 201, 0.20);
+  --primary-glow: rgba(0, 225, 201, 0.15);
   --secondary: #0072F0;
   --text: #F8F9FA;
   --text-dim: #9CA3AF;
-  --success: #00E1C9;
+  --success: #22AA66;
   --danger: #E92C37;
-  --warning: #E2B632;
+  --warning: #D2B55B;
   --radius: 12px;
   --gradient: linear-gradient(135deg, #0072F0, #00E1C9);
 }
@@ -65,12 +65,12 @@ header h1 {
 }
 
 .status.connected {
-  background: rgba(0, 225, 201, 0.12);
+  background: rgba(34, 170, 102, 0.12);
   color: var(--success);
 }
 
 .status.pending {
-  background: rgba(226, 182, 50, 0.12);
+  background: rgba(210, 181, 91, 0.12);
   color: var(--warning);
 }
 
