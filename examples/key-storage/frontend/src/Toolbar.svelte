@@ -37,8 +37,8 @@
   }
 </script>
 
-<header class="shrink-0 flex items-center gap-2 px-3 py-2.5"
-        style="background: var(--surface); border-bottom: 1px solid var(--border); box-shadow: 0 1px 0 0 var(--gold-dim);">
+<header class="shrink-0 flex items-center gap-2 px-3 py-2.5 toolbar-header"
+        style="background: var(--surface);">
   <!-- File operations - always visible -->
   <div class="flex items-center gap-1">
     <button class="toolbar-btn" onclick={onnew} title="New vault (Ctrl+Shift+N)">
@@ -143,6 +143,20 @@
 </header>
 
 <style>
+  :global(.toolbar-header) {
+    position: relative;
+    border-bottom: none;
+  }
+  :global(.toolbar-header::after) {
+    content: '';
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 2px;
+    background: linear-gradient(90deg, var(--gradient-start), var(--gradient-end));
+    opacity: 0.6;
+  }
   :global(.toolbar-btn) {
     display: flex;
     align-items: center;

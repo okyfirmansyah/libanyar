@@ -581,19 +581,19 @@
 
   @keyframes copy-flash {
     0% {
-      background: rgba(226, 179, 64, 0.25);
-      box-shadow: 0 0 12px 3px rgba(226, 179, 64, 0.4);
-      color: #f5d060;
+      background: rgba(0, 225, 201, 0.20);
+      box-shadow: 0 0 12px 3px var(--accent-glow);
+      color: var(--accent);
     }
     100% {
       background: transparent;
       box-shadow: 0 0 0 0 transparent;
-      color: var(--gold);
+      color: var(--accent);
     }
   }
 
   .copy-glow {
-    color: var(--gold) !important;
+    color: var(--accent) !important;
     animation: copy-flash 0.8s ease-out forwards;
   }
   .generate-btn {
@@ -601,7 +601,8 @@
     background: var(--accent-dim);
   }
   .generate-btn:hover {
-    background: rgba(124,107,246,0.22);
+    background: rgba(0,225,201,0.18);
+    box-shadow: 0 0 6px var(--accent-glow);
   }
 
   /* ── Password ───────────────────────────────────────────────────────── */
@@ -687,16 +688,15 @@
     opacity: 0.6;
   }
   .save-active {
-    background: var(--accent) !important;
+    background: linear-gradient(135deg, var(--gradient-start), var(--gradient-end)) !important;
     color: #fff !important;
     border-color: var(--accent) !important;
-    box-shadow: 0 1px 4px rgba(124,107,246,0.35),
+    box-shadow: 0 1px 4px var(--accent-glow),
                 inset 0 1px 0 rgba(255,255,255,0.08);
     opacity: 1;
   }
   .save-active:hover {
-    background: var(--accent-hover) !important;
-    box-shadow: 0 2px 8px rgba(124,107,246,0.45),
+    box-shadow: 0 2px 12px var(--accent-glow),
                 inset 0 1px 0 rgba(255,255,255,0.08);
   }
 </style>

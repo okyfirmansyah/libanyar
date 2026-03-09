@@ -6,15 +6,22 @@
 //   video:open      { path }         → { url, duration, width, height, videoCodec, audioCodec, ... }
 //   video:bitrate   { step? }        → { timestamps[], videoBps[], audioBps[] }
 //   video:waveform  { samples? }     → { peaks[] }
+//   video:play      {}               → { ok }
+//   video:pause     {}               → { ok }
+//   video:seek      { time }         → { ok }
+//   video:sync      { time }         → { ok }
 //   video:close     {}               → {}
 //
-// WebSocket endpoints:
-//   /video/frames                    → Binary RGBA frame stream
-//     Client text msgs:  { "cmd": "play"|"pause"|"seek"|"stop", "time"?: number }
-//     Server binary msgs: 20-byte header (w:u32 h:u32 pts:f64 frame#:u32) + RGBA pixels
-//     Server text msgs:   { "event": "ready"|"ended"|"error", ... }
+// Events:
+//   buffer:ready    { name, pool, url, size, metadata }  — per-frame notification
+//   video:ended     {}                                   — end of stream
+//   video:ready     { width, height, fps }               — first frame decoded
+//
+// Shared Memory:
+//   Pool "video-frames" (3 buffers) served via anyar-shm:// URI scheme
 
 #include <anyar/plugin.h>
+#include <anyar/shared_buffer.h>
 
 #include <boost/fiber/mutex.hpp>
 #include <boost/fiber/condition_variable.hpp>
@@ -26,7 +33,7 @@ struct AVFormatContext;
 struct AVCodecContext;
 struct SwsContext;
 
-namespace asyik { class websocket; }
+namespace anyar { class EventBus; }
 
 namespace videoplayer {
 
@@ -88,11 +95,17 @@ private:
     // Service pointer for launching async fibres after initialization
     asyik::service_ptr service_;
 
-    // ── Frame-streaming state (decode loop ↔ control fiber) ─────────────────
+    // Event bus for emitting events to frontend
+    anyar::EventBus* events_ = nullptr;
+
+    // ── Frame-streaming state (decode loop ↔ control commands) ───────────
     bool   streaming_    = false;   // decode-loop fibre alive
     bool   playing_      = false;   // actively pushing frames
     double pending_seek_ = -1.0;    // next seek target (–1 = none)
     double audio_time_   = -1.0;    // audio clock from frontend (–1 = no sync)
+
+    // SharedBufferPool for zero-copy frame delivery
+    std::unique_ptr<anyar::SharedBufferPool> frame_pool_;
 
     // ── Internal helpers ────────────────────────────────────────────────────
     void open_file(const std::string& path);
@@ -101,7 +114,7 @@ private:
     void compute_waveform(int num_samples);
     void register_stream_route();
     void stop_streaming();
-    void run_decode_loop(std::shared_ptr<asyik::websocket> ws);
+    void run_decode_loop();
 };
 
 } // namespace videoplayer

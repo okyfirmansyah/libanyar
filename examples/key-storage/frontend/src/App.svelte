@@ -439,7 +439,7 @@
       <!-- Left sidebar: groups -->
       <aside class="flex flex-col shrink-0" style="width: 240px; background: var(--surface); border-right: 1px solid var(--border);">
         <div class="px-4 py-3 text-[12px] font-semibold uppercase tracking-wider flex items-center justify-between"
-             style="color: var(--text-muted); border-bottom: 1px solid var(--border); border-left: 2px solid var(--gold);">
+             style="color: var(--text-muted); border-bottom: 1px solid var(--border); border-left: 2px solid var(--accent);">
           <span>Groups</span>
           <button
             class="w-6 h-6 flex items-center justify-center rounded-md hover:bg-white/5 transition-colors"
@@ -568,7 +568,7 @@
   {/if}
 
   <!-- Status bar -->
-  <footer class="shrink-0 flex items-center justify-between"
+  <footer class="shrink-0 flex items-center justify-between status-footer"
           style="background: var(--surface); border-top: 1px solid var(--border); color: var(--text-dim); font-size: 13px; padding: 8px 20px;">
     <div class="flex items-center gap-3">
       {#if dbOpen}

@@ -1,12 +1,12 @@
 # LibAnyar — Mini Video Player Example
 
-A desktop video player that demonstrates the **flexibility of HTML/JS frontend rendering** combined with the **power of C++ multimedia processing** via FFmpeg. Unlike browser-based players that rely on the `<video>` element, this example performs all video decoding in C++ and streams raw RGBA frames over WebSocket to a Canvas-based renderer — proving that even pixel-level rendering pipelines work seamlessly in the LibAnyar architecture.
+A desktop video player that demonstrates the **flexibility of HTML/JS frontend rendering** combined with the **power of C++ multimedia processing** via FFmpeg. Unlike browser-based players that rely on the `<video>` element, this example performs all video decoding in C++ and delivers raw RGBA frames via **SharedBuffer** (POSIX shared memory, zero-copy on Linux) to a **WebGL** renderer — proving that even pixel-level rendering pipelines work seamlessly in the LibAnyar architecture.
 
 ## Features
 
-- **Canvas-based video rendering** — C++ FFmpeg decode → swscale RGBA → WebSocket binary push → `canvas.putImageData()` at ~60 fps
+- **WebGL video rendering** — C++ FFmpeg decode → swscale RGBA → SharedBufferPool (mmap) → `anyar-shm://` fetch (zero-copy) → WebGL `texImage2D` at ~60 fps
 - **Audio-driven synchronisation** — Hidden `<audio>` element acts as the master clock; a `requestAnimationFrame` loop sends sync messages to C++ so the pre-decoded frame pool dispatches the correct frame
-- **Pre-decoded frame pool** — C++ maintains a circular buffer of 5 decoded frames, eliminating decode latency during playback
+- **Pre-decoded frame pool** — C++ maintains a `SharedBufferPool` of 5 slots backed by POSIX shared memory, eliminating decode latency during playback
 - **Audio waveform** — Pre-computed in C++ (FFmpeg decode → resample → peak extraction), rendered with [wavesurfer.js](https://wavesurfer.xyz/)
 - **Bitrate monitoring** — Per-bucket video/audio bitrate analysis computed in C++ (FFmpeg packet iteration), visualised with [uPlot](https://github.com/leeoniya/uPlot)
 - **Auto-hiding overlay panel** — Waveform and bitrate chart slide in/out during playback with smooth transitions; video frame always fills the available space
@@ -22,14 +22,15 @@ A desktop video player that demonstrates the **flexibility of HTML/JS frontend r
 │  │ App.svelte (layout + state orchestration)          │ │
 │  │  ┌──────────────┐  ┌────────┐  ┌───────────────┐  │ │
 │  │  │ VideoPlayer   │  │Waveform│  │ BitrateChart  │  │ │
-│  │  │ (Canvas RGBA) │  │(ws.js) │  │ (uPlot)       │  │ │
+│  │  │ (WebGL RGBA)  │  │(ws.js) │  │ (uPlot)       │  │ │
 │  │  └──────┬────────┘  └───┬────┘  └──────┬────────┘  │ │
 │  │         │               │               │           │ │
-│  │  WebSocket binary  @libanyar/api (invoke)           │ │
+│  │  SharedBuffer IPC   @libanyar/api (invoke/listen)   │ │
 │  └─────────┼───────────────┼───────────────┼───────────┘ │
 └────────────┼───────────────┼───────────────┼─────────────┘
              │               │               │
-    WS /video/frames    HTTP/JSON IPC    HTTP /video/stream
+     anyar-shm:// fetch  HTTP/JSON IPC   HTTP /video/stream
+   + buffer:ready events     │               │
              │               │               │
 ┌────────────┴───────────────┴───────────────┴─────────────┐
 │  C++ Backend (LibAnyar Core + VideoPlugin)                │
@@ -39,39 +40,40 @@ A desktop video player that demonstrates the **flexibility of HTML/JS frontend r
 │  ├── video:bitrate  — packet-level bitrate analysis       │
 │  ├── video:waveform — audio decode + peak extraction      │
 │  ├── video:close    — cleanup resources                   │
-│  ├── /video/frames  — WS: binary RGBA frame push +       │
-│  │                    play/pause/seek/sync commands        │
+│  ├── video:play     — start/resume SharedBuffer delivery  │
+│  ├── video:pause    — pause frame delivery                │
+│  ├── video:seek     — seek + flush pool + re-decode       │
+│  ├── video:sync     — audio clock update for frame select │
+│  ├── video:pool-release — release buffer after render     │
 │  └── /video/stream  — HTTP: audio-only file streaming     │
 │                       (used by <audio> element)           │
 │                                                           │
 │  Frame decode pipeline:                                   │
 │    av_read_frame → avcodec_send/receive → sws_scale →     │
-│    5-frame circular pool → WS binary dispatch             │
+│    SharedBufferPool (5 slots, mmap) → buffer:ready event  │
+│    → anyar-shm:// zero-copy fetch → WebGL texImage2D     │
 │                                                           │
 │  Built-in: DialogPlugin (native GTK file picker)          │
 └───────────────────────────────────────────────────────────┘
 ```
 
-### Binary Frame Format (little-endian)
-
-| Offset | Type    | Field        |
-|--------|---------|--------------|
-| 0–3    | uint32  | width        |
-| 4–7    | uint32  | height       |
-| 8–15   | float64 | pts (seconds)|
-| 16–19  | uint32  | frame_number |
-| 20+    | uint8[] | RGBA pixels  |
-
-### WebSocket Commands (JSON text frames, `/video/frames`)
+### IPC Commands
 
 | Command | Direction | Fields | Description |
 |---------|-----------|--------|-------------|
-| `play`  | JS → C++  | —      | Start decode + dispatch loop |
-| `pause` | JS → C++  | —      | Stop dispatch, hold position |
-| `seek`  | JS → C++  | `time` | Seek to timestamp, flush pool |
-| `sync`  | JS → C++  | `time` | Audio clock update for frame selection |
-| `ready` | C++ → JS  | —      | First frame decoded, ready to play |
-| `ended` | C++ → JS  | —      | End of stream reached |
+| `video:play` | JS → C++ | — | Start decode + SharedBuffer dispatch loop |
+| `video:pause` | JS → C++ | — | Pause dispatch, hold position |
+| `video:seek` | JS → C++ | `time` | Seek to timestamp, flush pool, re-decode |
+| `video:sync` | JS → C++ | `time` | Audio clock update for frame selection |
+| `video:pool-release` | JS → C++ | `name` | Release a SharedBuffer slot after rendering |
+
+### Events (C++ → JS via EventBus)
+
+| Event | Payload | Description |
+|-------|---------|-------------|
+| `buffer:ready` | `{pool, name, url, metadata: {width, height, pts, frame}}` | New RGBA frame available in shared memory |
+| `video:ready` | `{width, height}` | First frame decoded, ready to play |
+| `video:ended` | `{}` | End of stream reached |
 
 ## Requirements
 
@@ -166,8 +168,8 @@ cd build/examples/video-player
 | Styling | Tailwind CSS 4 | Utility-first CSS |
 | Waveform | wavesurfer.js 7 | Audio waveform rendering |
 | Chart | uPlot 1.6 | Lightweight time-series chart |
-| IPC | @libanyar/api | JS ↔ C++ command bridge |
-| Backend | LibAnyar Core | App framework, HTTP/WS server, WebView |
+| IPC | @libanyar/api | JS ↔ C++ command bridge + SharedBuffer IPC |
+| Backend | LibAnyar Core | App framework, HTTP server, SharedBuffer, WebView |
 | Multimedia | FFmpeg 4.x | Video decode, swscale RGBA, bitrate analysis, audio decode |
 | UI Toolkit | GTK 3 / WebKitGTK | Native window + embedded browser |
 
@@ -190,7 +192,7 @@ examples/video-player/
         ├── main.js             # Svelte mount
         ├── app.css             # Global styles + dark theme
         ├── App.svelte          # Main layout, transport controls, auto-hide panel
-        ├── VideoPlayer.svelte  # Canvas RGBA renderer + WebSocket frame receiver
+        ├── VideoPlayer.svelte  # WebGL RGBA renderer + SharedBuffer frame receiver
         ├── Waveform.svelte     # wavesurfer.js wrapper
         └── BitrateChart.svelte # uPlot bitrate chart
 ```

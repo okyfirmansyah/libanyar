@@ -14,6 +14,19 @@
   let seekTarget = $state(null);   // { time, id } — set by waveform/chart clicks
   let loading = $state(false);
   let errorMsg = $state('');
+  let gpuRenderer = $state('');
+
+  // Detect GPU renderer used by WebGL (runs once)
+  try {
+    const c = document.createElement('canvas');
+    const g = c.getContext('webgl') || c.getContext('experimental-webgl');
+    if (g) {
+      const dbg = g.getExtension('WEBGL_debug_renderer_info');
+      gpuRenderer = dbg
+        ? g.getParameter(dbg.UNMASKED_RENDERER_WEBGL)
+        : g.getParameter(g.RENDERER);
+    }
+  } catch (_) { /* ignore */ }
 
   // Chart plot-area geometry (from BitrateChart) used to align waveform
   let chartPlotLeft = $state(0);
@@ -21,7 +34,6 @@
 
   // Bottom panel auto-hide during playback
   let playing = $state(false);       // bound from VideoPlayer
-  let vpConnected = $state(false);   // bound from VideoPlayer
   let vpTogglePlay = $state(null);   // function ref from VideoPlayer
   let panelVisible = $state(true);   // show/hide bottom panel
   let panelHideTimer = null;
@@ -131,18 +143,21 @@
 
 <main class="h-screen flex flex-col overflow-hidden" style="background: var(--bg); color: var(--text);">
   <!-- Header -->
-  <header class="flex items-center gap-4 px-6 py-3 shrink-0" style="border-bottom: 1px solid var(--border);">
+  <header class="flex items-center gap-4 px-6 py-3 shrink-0 relative" style="border-bottom: none;">
+    <!-- Gradient bottom border -->
+    <div class="absolute bottom-0 left-0 right-0 h-[2px]" style="background: linear-gradient(90deg, #0072F0, #00E1C9); opacity: 0.6;"></div>
+
     <h1 class="text-base font-semibold tracking-tight whitespace-nowrap">
-      <span style="color: var(--accent);">LibAnyar</span> Video Player
+      <span style="background: linear-gradient(135deg, #0072F0, #00E1C9); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">LibAnyar</span> Video Player
     </h1>
 
     <button
       onclick={openFile}
       disabled={loading}
-      class="px-4 py-1.5 text-white text-sm font-medium rounded-lg transition-colors disabled:opacity-50 cursor-pointer"
-      style="background: var(--accent);"
-      onmouseenter={(e) => e.target.style.background = 'var(--accent-hover)'}
-      onmouseleave={(e) => e.target.style.background = 'var(--accent)'}
+      class="px-4 py-1.5 text-white text-sm font-medium rounded-lg transition-all disabled:opacity-50 cursor-pointer"
+      style="background: linear-gradient(135deg, #0072F0, #00E1C9);"
+      onmouseenter={(e) => e.target.style.boxShadow = '0 2px 12px rgba(0,225,201,0.2)'}
+      onmouseleave={(e) => e.target.style.boxShadow = 'none'}
     >
       {loading ? 'Loading…' : 'Open File'}
     </button>
@@ -164,7 +179,7 @@
 
   <!-- Error -->
   {#if errorMsg}
-    <div class="px-6 py-2 text-sm" style="background: rgba(239,68,68,0.1); color: var(--danger);">
+    <div class="px-6 py-2 text-sm" style="background: rgba(233,44,55,0.1); color: var(--danger);">
       {errorMsg}
     </div>
   {/if}
@@ -186,7 +201,6 @@
           bind:currentTime
           bind:duration
           bind:playing
-          bind:connected={vpConnected}
           {seekTarget}
           ontoggleplay={(fn) => vpTogglePlay = fn}
         />
@@ -199,7 +213,6 @@
       >
         <button
           onclick={() => vpTogglePlay && vpTogglePlay()}
-          disabled={!vpConnected}
           class="text-white text-lg font-medium cursor-pointer w-8 h-8 flex items-center justify-center rounded"
           style="background: rgba(255,255,255,0.15);"
         >
@@ -210,13 +223,9 @@
           {fmtTime(currentTime)} / {fmtTime(duration)}
         </span>
 
-        {#if !vpConnected}
-          <span class="text-yellow-400 text-xs ml-auto">Connecting…</span>
-        {:else}
-          <span class="text-xs ml-auto" style="color: rgba(255,255,255,0.3);">
-            {videoInfo?.width}×{videoInfo?.height} raw RGBA
-          </span>
-        {/if}
+        <span class="text-xs ml-auto" style="color: rgba(255,255,255,0.3);">
+          {videoInfo?.width}×{videoInfo?.height} SharedBuffer WebGL{gpuRenderer ? ` · ${gpuRenderer}` : ''}
+        </span>
       </div>
 
       <!-- Bottom panel: absolutely positioned overlay, slides up/down -->

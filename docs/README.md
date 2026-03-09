@@ -8,6 +8,7 @@
 - [Dialog Guide](dialogs.md) — Native message, file open/save, and confirmation dialogs
 - [Multi-Window Guide](multi-window.md) — Creating, managing, and communicating between windows
 - [Database Integration](database-integration.md) — SQLite and PostgreSQL guide
+- [Shared Memory & WebGL Canvas](shared-memory-webgl.md) — Zero-copy binary IPC and WebGL rendering
 
 ## Reference
 

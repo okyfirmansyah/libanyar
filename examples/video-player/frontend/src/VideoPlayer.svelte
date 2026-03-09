@@ -1,33 +1,31 @@
 <script>
   /**
-   * VideoPlayer — Canvas-based renderer for raw RGBA frames from C++ backend.
+   * VideoPlayer — WebGL renderer for raw frames from C++ SharedBuffer.
    *
    * Architecture:
-   *   C++ FFmpeg decode → swscale RGBA → WebSocket binary push →
-   *   JavaScript ArrayBuffer → ImageData → canvas.putImageData
+   *   C++ FFmpeg decode → [optional swscale] → SharedBufferPool (mmap) →
+   *   anyar-shm:// fetch (zero-copy) → WebGL texImage2D → drawFrame
+   *
+   * When the decoded pixel format is directly supported by the WebGL
+   * renderer (yuv420, nv12, nv21, rgba, rgb, grayscale), swscale is
+   * skipped entirely — saving CPU and bandwidth.
    *
    * Data-flow:
    *   currentTime  (bindable, OUT)  frame PTS → parent
    *   duration     (bindable, OUT)  audio metadata → parent
-   *   seekTarget   (prop, IN)       parent → WS seek command
+   *   seekTarget   (prop, IN)       parent → video:seek command
    *   videoInfo    (prop, IN)       probe result from video:open
    *   audioSrc     (prop, IN)       HTTP URL for audio playback
-   *
-   * Binary frame format (little-endian):
-   *   bytes  0–3   uint32  width
-   *   bytes  4–7   uint32  height
-   *   bytes  8–15  float64 pts (seconds)
-   *   bytes 16–19  uint32  frame_number
-   *   bytes 20+    uint8[] RGBA pixel data
    */
 
-  import { getBaseUrl } from '@libanyar/api';
+  import { invoke, listen } from '@libanyar/api';
+  import { fetchBuffer } from '@libanyar/api/modules/buffer';
+  import { createFrameRenderer } from '@libanyar/api/modules/canvas';
 
   let {
     currentTime = $bindable(0),
     duration    = $bindable(0),
     playing     = $bindable(false),
-    connected   = $bindable(false),
     seekTarget  = null,
     videoInfo   = null,
     audioSrc    = '',
@@ -36,7 +34,7 @@
 
   let canvasEl  = $state(null);
   let audioEl   = $state(null);
-  let ws        = $state(null);
+  let renderer  = $state(null);
 
   // Track which seekTarget id we've already applied
   let appliedSeekId = 0;
@@ -48,110 +46,93 @@
   let seekTimer = null;
   let seekPending = null;
 
-  // ── WebSocket connection (reconnects when videoInfo changes) ───────────
+  // ── Initialize WebGL renderer + event listeners ────────────────────────
+  //
+  // The renderer is NOT created immediately — we wait for the first
+  // buffer:ready event so we know the actual pixel format (yuv420, rgba,
+  // etc.).  If the format or resolution changes mid-stream the renderer
+  // is destroyed and recreated automatically.
   $effect(() => {
-    if (!videoInfo) return;
+    if (!videoInfo || !canvasEl) return;
 
-    const base = getBaseUrl().replace(/^http/, 'ws');
-    const url  = base + '/video/frames';
-    const socket = new WebSocket(url);
-    socket.binaryType = 'arraybuffer';
+    /** @type {ReturnType<typeof createFrameRenderer> | null} */
+    let r = null;
+    let currentFmt = '';
+    let rw = videoInfo.width;
+    let rh = videoInfo.height;
 
-    socket.onopen = () => {
-      ws = socket;
-      connected = true;
-      playing = false;
-    };
+    // Listen for buffer:ready events from the video plugin's SharedBufferPool.
+    // We handle fetch + render manually (instead of createBufferRenderer) so
+    // that the finally block ALWAYS releases the buffer back to the pool,
+    // even when the fetch or render fails — preventing pool starvation.
+    const unlistenBuffer = listen('buffer:ready', async (event) => {
+      if (event.pool !== 'video-frames') return;
+      try {
+        const data = await fetchBuffer(event.url);
 
-    socket.onmessage = (e) => {
-      if (e.data instanceof ArrayBuffer) {
-        renderFrame(e.data);
-      } else {
-        try {
-          const evt = JSON.parse(e.data);
-          if (evt.event === 'ended') {
-            playing = false;
-            if (audioEl) audioEl.pause();
-            stopPlayLoop();
-          } else if (evt.event === 'ready') {
-            // First frame available — seek to 0 for poster
-            socket.send(JSON.stringify({ cmd: 'seek', time: 0 }));
-          }
-        } catch { /* ignore malformed text */ }
+        const meta = event.metadata;
+        const fmt = (meta && meta.format) ? meta.format : 'rgba';
+        const newW = (meta && typeof meta.width === 'number') ? meta.width : rw;
+        const newH = (meta && typeof meta.height === 'number') ? meta.height : rh;
+
+        // (Re)create renderer on first frame, format change, or resolution change
+        if (!r || fmt !== currentFmt || newW !== rw || newH !== rh) {
+          if (r) r.destroy();
+          rw = newW;
+          rh = newH;
+          currentFmt = fmt;
+          r = createFrameRenderer({
+            canvas: canvasEl,
+            width: rw,
+            height: rh,
+            format: currentFmt,
+          });
+          renderer = r;
+        }
+
+        r.drawFrame(data);
+
+        // Update PTS for timeline (only when paused — during playback
+        // the audio element is the master clock).
+        if (meta && typeof meta.pts === 'number') {
+          if (!playing) currentTime = meta.pts;
+        }
+      } catch (err) {
+        console.error('[VideoPlayer] Frame fetch/render error:', err);
+      } finally {
+        // Always release the buffer back to the plugin's pool so the
+        // C++ decode loop can reuse the slot.
+        invoke('video:pool-release', { name: event.name }).catch(() => {});
       }
-    };
+    });
 
-    socket.onclose = () => {
-      connected = false;
-      ws = null;
+    // Listen for video:ended event
+    const unlistenEnded = listen('video:ended', () => {
       playing = false;
-    };
-
-    socket.onerror = () => {
-      connected = false;
-    };
+      if (audioEl) audioEl.pause();
+      stopPlayLoop();
+    });
 
     return () => {
       stopPlayLoop();
       if (seekTimer) { clearTimeout(seekTimer); seekTimer = null; }
-      socket.close();
-      ws = null;
-      connected = false;
-      playing = false;
+      unlistenBuffer();
+      unlistenEnded();
+      if (r) { r.destroy(); r = null; }
+      renderer = null;
     };
   });
 
-  // ── Render a binary RGBA frame to the canvas ──────────────────────────
-  function renderFrame(buffer) {
-    if (!canvasEl || buffer.byteLength < 20) return;
-
-    const view = new DataView(buffer);
-    const w   = view.getUint32(0, true);
-    const h   = view.getUint32(4, true);
-    const pts = view.getFloat64(8, true);
-    // const frameNum = view.getUint32(16, true);
-
-    const expectedSize = 20 + w * h * 4;
-    if (buffer.byteLength < expectedSize) return;
-
-    if (canvasEl.width !== w || canvasEl.height !== h) {
-      canvasEl.width  = w;
-      canvasEl.height = h;
-    }
-
-    const ctx  = canvasEl.getContext('2d');
-    const rgba = new Uint8ClampedArray(buffer, 20, w * h * 4);
-    const img  = new ImageData(rgba, w, h);
-    ctx.putImageData(img, 0, 0);
-
-    // During playback the audio element is the master clock;
-    // only update currentTime from frame PTS when paused (seek preview).
-    if (!playing) {
-      currentTime = pts;
-    }
-  }
-
   // ── Play loop: audio-driven timeline + sync messages to C++ ─────────
-  //
-  // When playing, a requestAnimationFrame loop:
-  //   1. Drives the timeline display from audioEl.currentTime
-  //   2. Sends { cmd:"sync", time } to C++ so the decode loop knows
-  //      which pre-decoded frame to dispatch next.
   function startPlayLoop() {
     stopPlayLoop();
     function tick() {
       if (playing) {
-        // Always read the best available time and send sync to C++,
-        // even while the audio element is buffering after a distant
-        // seek.  Without this, C++ starves for sync messages and
-        // the video decode loop stalls.
         const t = (audioEl && !audioEl.paused)
           ? audioEl.currentTime
-          : currentTime;          // fallback while buffering
+          : currentTime;
         currentTime = t;
-        if (ws && connected) {
-          ws.send(JSON.stringify({ cmd: 'sync', time: t }));
-        }
+        invoke('video:sync', { time: t }).catch(() => {});
       }
       playRafId = requestAnimationFrame(tick);
     }
@@ -167,11 +148,8 @@
 
   // ── Transport controls ────────────────────────────────────────────────
   function play() {
-    if (!ws || !connected) return;
-    ws.send(JSON.stringify({ cmd: 'play' }));
+    invoke('video:play').catch(() => {});
     playing = true;
-    // Start the sync loop IMMEDIATELY so C++ gets audio_time_
-    // updates right away — don't wait for the audio promise.
     startPlayLoop();
     if (audioEl) {
       audioEl.currentTime = currentTime;
@@ -180,21 +158,13 @@
   }
 
   function pause() {
-    if (!ws || !connected) return;
-    ws.send(JSON.stringify({ cmd: 'pause' }));
+    invoke('video:pause').catch(() => {});
     playing = false;
     if (audioEl) audioEl.pause();
     stopPlayLoop();
   }
 
   function seek(time) {
-    if (!ws || !connected) return;
-
-    // Update UI and audio immediately so the user sees the response,
-    // but debounce the actual C++ seek command.  When clicks arrive
-    // faster than ~80 ms, only the LAST target is sent, preventing
-    // the decoder from being hammered with overlapping seek+fast-
-    // forward cycles that cause mmco / reference-frame confusion.
     currentTime = time;
     if (audioEl) audioEl.currentTime = time;
 
@@ -204,11 +174,10 @@
       seekTimer = null;
       const t = seekPending;
       seekPending = null;
-      if (!ws || !connected) return;
-      ws.send(JSON.stringify({ cmd: 'seek', time: t }));
+      invoke('video:seek', { time: t }).catch(() => {});
       if (audioEl && playing) audioEl.play().catch(() => {});
       if (playing) {
-        ws.send(JSON.stringify({ cmd: 'sync', time: t }));
+        invoke('video:sync', { time: t }).catch(() => {});
       }
     }, 80);
   }
@@ -226,7 +195,7 @@
   // ── External seek (waveform / chart click) ────────────────────────────
   $effect(() => {
     const st = seekTarget;
-    if (!st || !st.id || st.id === appliedSeekId || !ws || !connected) return;
+    if (!st || !st.id || st.id === appliedSeekId) return;
     appliedSeekId = st.id;
     seek(st.time);
   });

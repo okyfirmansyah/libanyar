@@ -2,13 +2,14 @@
 #include <anyar/main_thread.h>
 
 #include <algorithm>
+#include <mutex>
 #include <stdexcept>
 
 namespace anyar {
 
 std::string WindowManager::create(const WindowCreateOptions& opts, int port) {
     {
-        std::lock_guard<std::mutex> lock(mutex_);
+        std::lock_guard<boost::fibers::mutex> lock(mutex_);
         if (windows_.count(opts.label)) {
             throw std::runtime_error(
                 "Window label already exists: " + opts.label);
@@ -37,7 +38,7 @@ std::string WindowManager::create(const WindowCreateOptions& opts, int port) {
         std::string lbl = label;
         WindowClosedCallback notify;
         {
-            std::lock_guard<std::mutex> lock(mutex_);
+            std::lock_guard<boost::fibers::mutex> lock(mutex_);
             windows_.erase(lbl);
             notify = on_closed_;
         }
@@ -48,7 +49,7 @@ std::string WindowManager::create(const WindowCreateOptions& opts, int port) {
 
     // Register in map
     {
-        std::lock_guard<std::mutex> lock(mutex_);
+        std::lock_guard<boost::fibers::mutex> lock(mutex_);
         windows_[opts.label] = window;
     }
 
@@ -66,7 +67,7 @@ std::string WindowManager::create(const WindowCreateOptions& opts, int port) {
 }
 
 Window* WindowManager::get(const std::string& label) {
-    std::lock_guard<std::mutex> lock(mutex_);
+    std::lock_guard<boost::fibers::mutex> lock(mutex_);
     auto it = windows_.find(label);
     if (it != windows_.end()) {
         return it->second.get();
@@ -75,7 +76,7 @@ Window* WindowManager::get(const std::string& label) {
 }
 
 std::vector<std::string> WindowManager::labels() const {
-    std::lock_guard<std::mutex> lock(mutex_);
+    std::lock_guard<boost::fibers::mutex> lock(mutex_);
     std::vector<std::string> result;
     result.reserve(windows_.size());
     for (auto& [label, _] : windows_) {
@@ -85,14 +86,14 @@ std::vector<std::string> WindowManager::labels() const {
 }
 
 size_t WindowManager::count() const {
-    std::lock_guard<std::mutex> lock(mutex_);
+    std::lock_guard<boost::fibers::mutex> lock(mutex_);
     return windows_.size();
 }
 
 void WindowManager::close(const std::string& label) {
     std::shared_ptr<Window> window;
     {
-        std::lock_guard<std::mutex> lock(mutex_);
+        std::lock_guard<boost::fibers::mutex> lock(mutex_);
         auto it = windows_.find(label);
         if (it == windows_.end()) return;
         window = it->second;
@@ -106,7 +107,7 @@ void WindowManager::close(const std::string& label) {
 void WindowManager::close_all() {
     std::vector<std::shared_ptr<Window>> to_close;
     {
-        std::lock_guard<std::mutex> lock(mutex_);
+        std::lock_guard<boost::fibers::mutex> lock(mutex_);
         for (auto& [_, win] : windows_) {
             to_close.push_back(win);
         }
@@ -122,7 +123,7 @@ void WindowManager::close_all() {
 void WindowManager::remove(const std::string& label) {
     WindowClosedCallback notify;
     {
-        std::lock_guard<std::mutex> lock(mutex_);
+        std::lock_guard<boost::fibers::mutex> lock(mutex_);
         windows_.erase(label);
         notify = on_closed_;
     }
@@ -132,12 +133,12 @@ void WindowManager::remove(const std::string& label) {
 }
 
 void WindowManager::set_on_window_closed(WindowClosedCallback cb) {
-    std::lock_guard<std::mutex> lock(mutex_);
+    std::lock_guard<boost::fibers::mutex> lock(mutex_);
     on_closed_ = std::move(cb);
 }
 
 void WindowManager::set_on_window_created(WindowCreatedCallback cb) {
-    std::lock_guard<std::mutex> lock(mutex_);
+    std::lock_guard<boost::fibers::mutex> lock(mutex_);
     on_created_ = std::move(cb);
 }
 

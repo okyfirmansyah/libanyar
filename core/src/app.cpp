@@ -1,5 +1,6 @@
 #include <anyar/app.h>
 #include <anyar/main_thread.h>
+#include <anyar/shared_buffer.h>
 
 #include <anyar/plugins/fs_plugin.h>
 #include <anyar/plugins/dialog_plugin.h>
@@ -11,6 +12,7 @@
 #include <libasyik/http.hpp>
 
 #include <cstdlib>
+#include <cstring>
 #include <filesystem>
 #include <iostream>
 #include <random>
@@ -167,6 +169,9 @@ void App::start_server() {
     // ── Register window management commands ─────────────────────────────
     register_window_commands();
 
+    // ── Register shared buffer commands ──────────────────────────────────
+    register_buffer_commands();
+
     // ── Auto-register built-in plugins ─────────────────────────────────────
     std::vector<std::shared_ptr<IAnyarPlugin>> builtins;
     builtins.push_back(std::make_shared<FsPlugin>());
@@ -213,6 +218,10 @@ void App::start_server() {
 // ── Run ─────────────────────────────────────────────────────────────────────
 
 int App::run() {
+    // Register the anyar-shm:// URI scheme BEFORE any webview is created.
+    // This must happen on the main thread, before start_server().
+    register_shm_uri_scheme();
+
     start_server();
 
     std::cout << "[LibAnyar] Server listening on http://"
@@ -484,6 +493,243 @@ void App::register_window_commands() {
             }
         });
 
+        return json{{"ok", true}};
+    });
+}
+
+// ── Shared Buffer Commands ──────────────────────────────────────────────────
+
+void App::register_buffer_commands() {
+    // buffer:create — Create a named shared buffer
+    //   name   (string)  — unique buffer name
+    //   size   (number)  — byte size
+    // Returns: { name, size, url }
+    commands_.add("buffer:create", [this](const json& args) -> json {
+        std::string name = args.at("name").get<std::string>();
+        size_t size = args.at("size").get<size_t>();
+
+        auto buf = SharedBuffer::create(name, size);
+        if (!buf) {
+            throw std::runtime_error("Failed to create shared buffer: " + name);
+        }
+
+        return json{
+            {"name", buf->name()},
+            {"size", buf->size()},
+            {"url", "anyar-shm://" + buf->name()}
+        };
+    });
+
+    // buffer:write — Write base64-encoded data into a shared buffer
+    //   name   (string)  — buffer name
+    //   data   (string)  — base64-encoded payload
+    //   offset (number?) — byte offset (default 0)
+    commands_.add("buffer:write", [this](const json& args) -> json {
+        std::string name = args.at("name").get<std::string>();
+        std::string data_b64 = args.at("data").get<std::string>();
+        size_t offset = args.value("offset", 0);
+
+        auto buf = SharedBufferRegistry::instance().get(name);
+        if (!buf) {
+            throw std::runtime_error("Buffer not found: " + name);
+        }
+
+        // Decode base64
+        // Use a simple base64 decode (Boost.Beast has one)
+        auto decoded = json::from_cbor(
+            json::to_cbor(json::binary_t(
+                std::vector<uint8_t>(data_b64.begin(), data_b64.end()))));
+        // Actually, we'll accept raw binary from the CBOR path.
+        // For now, use a simple base64 decoder:
+        static const std::string b64chars =
+            "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+        std::vector<uint8_t> out;
+        out.reserve(data_b64.size() * 3 / 4);
+        int val = 0, valb = -8;
+        for (unsigned char c : data_b64) {
+            if (c == '=') break;
+            auto pos = b64chars.find(c);
+            if (pos == std::string::npos) continue;
+            val = (val << 6) + static_cast<int>(pos);
+            valb += 6;
+            if (valb >= 0) {
+                out.push_back(static_cast<uint8_t>((val >> valb) & 0xFF));
+                valb -= 8;
+            }
+        }
+
+        if (offset + out.size() > buf->size()) {
+            throw std::runtime_error("Write exceeds buffer size");
+        }
+        std::memcpy(buf->data() + offset, out.data(), out.size());
+
+        return json{{"ok", true}, {"bytes_written", out.size()}};
+    });
+
+    // buffer:destroy — Destroy a shared buffer
+    //   name (string) — buffer name
+    commands_.add("buffer:destroy", [this](const json& args) -> json {
+        std::string name = args.at("name").get<std::string>();
+        SharedBufferRegistry::instance().remove(name);
+        return json{{"ok", true}};
+    });
+
+    // buffer:list — List all active shared buffers
+    commands_.add("buffer:list", [this](const json& args) -> json {
+        auto names = SharedBufferRegistry::instance().names();
+        json list = json::array();
+        for (auto& n : names) {
+            auto buf = SharedBufferRegistry::instance().get(n);
+            if (buf) {
+                list.push_back(json{
+                    {"name", buf->name()},
+                    {"size", buf->size()},
+                    {"url", "anyar-shm://" + buf->name()}
+                });
+            }
+        }
+        return json{{"buffers", list}};
+    });
+
+    // buffer:notify — Emit a buffer-ready event to the frontend
+    //   name     (string)  — buffer name
+    //   metadata (object?) — arbitrary metadata to send with notification
+    commands_.add("buffer:notify", [this](const json& args) -> json {
+        std::string name = args.at("name").get<std::string>();
+        json metadata = args.value("metadata", json::object());
+
+        auto buf = SharedBufferRegistry::instance().get(name);
+        if (!buf) {
+            throw std::runtime_error("Buffer not found: " + name);
+        }
+
+        json payload = {
+            {"name", name},
+            {"url", "anyar-shm://" + name},
+            {"size", buf->size()},
+            {"metadata", metadata}
+        };
+        events_.emit("buffer:ready", payload);
+
+        return json{{"ok", true}};
+    });
+
+    // ── Pool commands ──────────────────────────────────────────────────────
+
+    // buffer:pool-create — Create a shared buffer pool
+    //   name        (string) — base name for the pool
+    //   bufferSize  (number) — size of each buffer in bytes
+    //   count       (number?) — number of buffers (default 3)
+    commands_.add("buffer:pool-create", [this](const json& args) -> json {
+        std::string name = args.at("name").get<std::string>();
+        size_t buffer_size = args.at("bufferSize").get<size_t>();
+        size_t count = args.value("count", 3);
+
+        if (buffer_pools_.count(name)) {
+            throw std::runtime_error("Pool already exists: " + name);
+        }
+
+        auto pool = std::make_unique<SharedBufferPool>(name, buffer_size, count);
+        json buffers = json::array();
+        for (size_t i = 0; i < count; ++i) {
+            std::string buf_name = name + "_" + std::to_string(i);
+            auto buf = SharedBufferRegistry::instance().get(buf_name);
+            if (buf) {
+                buffers.push_back(json{
+                    {"name", buf->name()},
+                    {"size", buf->size()},
+                    {"url", "anyar-shm://" + buf->name()}
+                });
+            }
+        }
+
+        buffer_pools_[name] = std::move(pool);
+
+        return json{
+            {"name", name},
+            {"bufferSize", buffer_size},
+            {"count", count},
+            {"buffers", buffers}
+        };
+    });
+
+    // buffer:pool-destroy — Destroy a shared buffer pool
+    //   name (string) — pool base name
+    commands_.add("buffer:pool-destroy", [this](const json& args) -> json {
+        std::string name = args.at("name").get<std::string>();
+        auto it = buffer_pools_.find(name);
+        if (it == buffer_pools_.end()) {
+            throw std::runtime_error("Pool not found: " + name);
+        }
+        buffer_pools_.erase(it);
+        return json{{"ok", true}};
+    });
+
+    // buffer:pool-acquire — Acquire a writable buffer from the pool (C++ side)
+    //   name (string) — pool base name
+    // Returns: { name, url, size } of the acquired buffer
+    commands_.add("buffer:pool-acquire", [this](const json& args) -> json {
+        std::string name = args.at("name").get<std::string>();
+        auto it = buffer_pools_.find(name);
+        if (it == buffer_pools_.end()) {
+            throw std::runtime_error("Pool not found: " + name);
+        }
+
+        SharedBuffer& buf = it->second->acquire_write();
+        return json{
+            {"name", buf.name()},
+            {"size", buf.size()},
+            {"url", "anyar-shm://" + buf.name()}
+        };
+    });
+
+    // buffer:pool-release-write — Release a written buffer and notify frontend
+    //   pool     (string) — pool base name
+    //   name     (string) — buffer name
+    //   metadata (object?) — metadata to include in notification
+    commands_.add("buffer:pool-release-write", [this](const json& args) -> json {
+        std::string pool_name = args.at("pool").get<std::string>();
+        std::string buf_name = args.at("name").get<std::string>();
+        json metadata = args.value("metadata", json::object());
+
+        auto it = buffer_pools_.find(pool_name);
+        if (it == buffer_pools_.end()) {
+            throw std::runtime_error("Pool not found: " + pool_name);
+        }
+
+        auto buf = SharedBufferRegistry::instance().get(buf_name);
+        if (!buf) {
+            throw std::runtime_error("Buffer not found: " + buf_name);
+        }
+
+        it->second->release_write(*buf, metadata.dump());
+
+        // Emit buffer:ready event
+        json payload = {
+            {"name", buf_name},
+            {"pool", pool_name},
+            {"url", "anyar-shm://" + buf_name},
+            {"size", buf->size()},
+            {"metadata", metadata}
+        };
+        events_.emit("buffer:ready", payload);
+
+        return json{{"ok", true}};
+    });
+
+    // buffer:pool-release-read — Consumer releases a buffer back to the pool
+    //   pool (string) — pool base name
+    //   name (string) — buffer name to release
+    commands_.add("buffer:pool-release-read", [this](const json& args) -> json {
+        std::string pool_name = args.at("pool").get<std::string>();
+        std::string buf_name = args.at("name").get<std::string>();
+
+        auto it = buffer_pools_.find(pool_name);
+        if (it == buffer_pools_.end()) {
+            throw std::runtime_error("Pool not found: " + pool_name);
+        }
+
+        it->second->release_read(buf_name);
         return json{{"ok", true}};
     });
 }

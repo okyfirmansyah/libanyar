@@ -1,26 +1,42 @@
 @import "tailwindcss";
 
 :root {
-  --bg: #0e0e11;
-  --surface: #151518;
-  --surface-2: #1e1e23;
-  --surface-3: #27272d;
-  --border: #2e2e36;
-  --border-light: #40404a;
-  --accent: #7c6bf6;
-  --accent-hover: #6a58e6;
-  --accent-dim: rgba(124, 107, 246, 0.14);
-  --text: #ededf0;
-  --text-dim: #a8a8b4;
-  --text-muted: #6e6e7a;
-  --success: #34d399;
-  --danger: #f87171;
-  --danger-dim: rgba(248, 113, 113, 0.12);
-  --warning: #fbbf24;
-  --warning-dim: rgba(251, 191, 36, 0.12);
-  --gold: #e2b340;
-  --gold-dim: rgba(226, 179, 64, 0.10);
-  --gold-glow: rgba(226, 179, 64, 0.35);
+  /* ── Core Palette — Void-black + Electric Cyan ────────────────────── */
+  --bg: #0A0A0A;
+  --surface: #1A1A1A;
+  --surface-2: #222222;
+  --surface-3: #2A2A2A;
+  --border: #2E2E2E;
+  --border-light: #3E3E3E;
+
+  /* Brand */
+  --accent: #00E1C9;
+  --accent-hover: #00C8B3;
+  --accent-dim: rgba(0, 225, 201, 0.12);
+  --accent-glow: rgba(0, 225, 201, 0.20);
+  --secondary: #0072F0;
+  --secondary-dim: rgba(0, 114, 240, 0.12);
+
+  /* Gradient endpoints */
+  --gradient-start: #0072F0;
+  --gradient-end: #00E1C9;
+
+  /* Semantic */
+  --danger: #E92C37;
+  --danger-dim: rgba(233, 44, 55, 0.12);
+  --warning: #E2B632;
+  --warning-dim: rgba(226, 182, 50, 0.12);
+  --success: #00E1C9;
+
+  /* Text */
+  --text: #F8F9FA;
+  --text-dim: #9CA3AF;
+  --text-muted: #6B7280;
+
+  /* Legacy aliases kept for compatibility */
+  --gold: #E2B632;
+  --gold-dim: rgba(226, 182, 50, 0.10);
+  --gold-glow: rgba(226, 182, 50, 0.35);
 }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -32,7 +48,7 @@ html {
 }
 
 body {
-  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
+  font-family: 'Inter', 'Space Grotesk', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
   font-size: 14px;
   line-height: 1.5;
   background: var(--bg);
@@ -103,15 +119,14 @@ button {
 }
 .btn-xs svg { width: 12px; height: 12px; }
 
-/* Primary — solid accent */
+/* Primary — gradient accent with glow */
 .btn-primary {
-  background: var(--accent);
+  background: linear-gradient(135deg, var(--gradient-start), var(--gradient-end));
   color: #fff;
-  box-shadow: 0 1px 2px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.08);
+  box-shadow: 0 1px 2px rgba(0,0,0,0.4);
 }
 .btn-primary:hover {
-  background: var(--accent-hover);
-  box-shadow: 0 2px 6px rgba(124,107,246,0.3), inset 0 1px 0 rgba(255,255,255,0.08);
+  box-shadow: 0 2px 12px var(--accent-glow), 0 1px 2px rgba(0,0,0,0.3);
 }
 .btn-primary:active { opacity: 0.9; }
 
@@ -150,15 +165,16 @@ button {
   color: var(--text);
 }
 
-/* Destructive — soft red */
+/* Destructive — soft red with glow on hover */
 .btn-danger {
   background: var(--danger-dim);
   color: var(--danger);
-  border-color: rgba(248,113,113,0.2);
+  border-color: rgba(233,44,55,0.2);
 }
 .btn-danger:hover {
-  background: rgba(248,113,113,0.18);
-  border-color: rgba(248,113,113,0.35);
+  background: rgba(233,44,55,0.18);
+  border-color: rgba(233,44,55,0.35);
+  box-shadow: 0 0 8px rgba(233,44,55,0.15);
 }
 
 /* Accent ghost — transparent with accent text */
@@ -167,7 +183,8 @@ button {
   color: var(--accent);
 }
 .btn-accent-ghost:hover {
-  background: rgba(124,107,246,0.22);
+  background: rgba(0,225,201,0.18);
+  box-shadow: 0 0 6px var(--accent-glow);
 }
 
 /* Input base */
@@ -200,19 +217,19 @@ input::placeholder, textarea::placeholder {
   0%, 100% {
     background: transparent;
     box-shadow: 0 0 0 0 transparent;
-    color: var(--gold);
+    color: var(--warning);
     opacity: 0.55;
   }
   50% {
-    background: rgba(226, 179, 64, 0.18);
-    box-shadow: 0 0 14px 3px var(--gold-glow);
+    background: var(--warning-dim);
+    box-shadow: 0 0 14px 3px rgba(226, 182, 50, 0.35);
     color: #f5d060;
     opacity: 1;
   }
 }
 
 .save-pulse {
-  color: var(--gold) !important;
+  color: var(--warning) !important;
   animation: save-pulse 1.8s ease-in-out infinite;
   border-radius: 8px;
 }

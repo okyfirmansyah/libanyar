@@ -76,6 +76,26 @@
         "types": "./dist/cjs/react.d.ts",
         "default": "./dist/cjs/react.js"
       }
+    },
+    "./buffer": {
+      "import": {
+        "types": "./dist/esm/modules/buffer.d.ts",
+        "default": "./dist/esm/modules/buffer.js"
+      },
+      "require": {
+        "types": "./dist/cjs/modules/buffer.d.ts",
+        "default": "./dist/cjs/modules/buffer.js"
+      }
+    },
+    "./canvas": {
+      "import": {
+        "types": "./dist/esm/modules/canvas.d.ts",
+        "default": "./dist/esm/modules/canvas.js"
+      },
+      "require": {
+        "types": "./dist/cjs/modules/canvas.d.ts",
+        "default": "./dist/cjs/modules/canvas.js"
+      }
     }
   },
   "files": [

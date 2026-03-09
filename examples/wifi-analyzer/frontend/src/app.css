@@ -1,0 +1,43 @@
+@import "tailwindcss";
+
+:root {
+  /* ── Palette: Void-Black + Electric Cyan ── */
+  --bg:           #0A0A0A;
+  --surface:      #1A1A1A;
+  --surface-2:    #222222;
+  --surface-3:    #2A2A2A;
+  --border:       #2E2E2E;
+
+  --accent:       #00E1C9;
+  --accent-hover: #00C8B3;
+  --accent-dim:   rgba(0, 225, 201, 0.12);
+  --accent-glow:  rgba(0, 225, 201, 0.20);
+
+  --secondary:      #0072F0;
+  --secondary-dim:  rgba(0, 114, 240, 0.12);
+
+  --gradient:     linear-gradient(135deg, #0072F0, #00E1C9);
+  --gradient-h:   linear-gradient(90deg, #0072F0, #00E1C9);
+
+  --success:      #22c55e;
+  --danger:       #E92C37;
+  --warning:      #E2B632;
+
+  --text:         #F8F9FA;
+  --text-dim:     #9CA3AF;
+  --text-muted:   #6B7280;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  min-height: 100vh;
+  -webkit-font-smoothing: antialiased;
+}
+
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: var(--bg); }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }

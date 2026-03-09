@@ -18,6 +18,7 @@ A lightweight C++ desktop application framework that leverages web frontend tech
 | Built-in DB | ❌ | ❌ | ❌ Plugin | ✅ **SQLite+PostgreSQL** |
 | Native IPC | Custom | ❌ | ✅ webview msg | ✅ **webview_bind** |
 | HTTP/WS Fallback | ❌ | ❌ | ❌ | ✅ **Built-in** |
+| Zero-copy Binary IPC | ❌ | ❌ | ❌ | ✅ **Shared Memory** |
 
 ## Architecture
 
@@ -27,6 +28,7 @@ A lightweight C++ desktop application framework that leverages web frontend tech
 ├─────────────────────────────────────────┤
 │    @libanyar/api  (JS Bridge)           │
 │  ★ Native IPC (webview_bind, ~0.01ms)  │
+│  ★ Shared Memory (anyar-shm://, 0-copy)│
 │  ○ HTTP/WS fallback (browser dev mode) │
 ├─────────────────────────────────────────┤
 │      OS WebView (WebKit/WebView2)       │
@@ -34,6 +36,7 @@ A lightweight C++ desktop application framework that leverages web frontend tech
 │         LibAnyar Core (C++17)           │
 │   IPC Router │ Commands │ Event Bus     │
 │   Window Mgr │ Plugins  │ Native APIs   │
+│   SharedBuffer │ BufferPool │ WebGL     │
 ├─────────────────────────────────────────┤
 │        LibAsyik (Foundation)            │
 │  HTTP/WS Server │ SOCI/SQL │ Fibers    │
@@ -99,12 +102,45 @@ cd examples/hello-world
 ./hello_world
 ```
 
+## Shared Memory IPC & WebGL Canvas
+
+LibAnyar provides **zero-copy binary data transfer** between C++ and the webview frontend — ideal for video frames, LiDAR point clouds, image processing, or any large binary payload.
+
+| Feature | Description |
+|---|---|
+| `@libanyar/api/buffer` | Shared memory buffers with `anyar-shm://` custom URI scheme |
+| `@libanyar/api/canvas` | WebGL frame renderer (RGBA, RGB, BGRA, Grayscale, YUV420, NV12, NV21) |
+| `SharedBufferPool` | Lock-free ring buffer pool for streaming (e.g. 30fps video) |
+| Zero-copy | C++ writes to mmap'd memory → JS reads via `fetch()` — no serialization |
+
+```cpp
+// C++ — write pixels into shared memory
+auto buf = anyar::SharedBuffer::create("frame", width * height * 4);
+std::memcpy(buf->data(), pixels, buf->size());
+app.emit("buffer:ready", {{"name", "frame"}, {"url", "anyar-shm://frame"}});
+```
+
+```ts
+// JS — fetch and render with WebGL (zero-copy on Linux)
+import { createBufferRenderer } from '@libanyar/api/canvas';
+
+const { destroy } = createBufferRenderer({
+  canvas: '#viewport',
+  width: 1920, height: 1080,
+  format: 'rgba',
+  pool: 'video-frames',
+});
+```
+
+See the [Shared Memory & WebGL Guide](docs/shared-memory-webgl.md) for full API reference.
+
 ## Project Status
 
 ✅ **Phase 1** — Core prototype (Linux): HTTP/WS server, webview, IPC, event bus, plugin infrastructure
 ✅ **Phase 2** — `@libanyar/api` TypeScript bridge: invoke, listen, emit, React hooks, module APIs
 ✅ **Phase 3** — Native APIs & plugins: file system, dialogs (GTK3), shell/subprocess, clipboard
 ✅ **Phase 4** — Database integration: SQLite & PostgreSQL via LibAsyik SOCI pool, parameterized queries, transactions
+✅ **Phase 4f** — Shared Memory IPC & WebGL Canvas: zero-copy binary transfer, buffer pools, RGBA/YUV420 rendering
 
 See [PLAN.md](PLAN.md) for full roadmap.
 

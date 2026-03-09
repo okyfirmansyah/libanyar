@@ -16,6 +16,7 @@ add_library(anyar_core STATIC
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     target_sources(anyar_core PRIVATE
         src/main_thread_linux.cpp
+        src/shared_buffer_linux.cpp
         src/plugins/dialog_linux.cpp
         src/plugins/clipboard_linux.cpp
         src/plugins/shell_linux.cpp
@@ -131,6 +132,9 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     pkg_check_modules(GTK3 REQUIRED gtk+-3.0)
     target_include_directories(anyar_core PUBLIC ${GTK3_INCLUDE_DIRS})
     target_link_libraries(anyar_core PUBLIC ${GTK3_LIBRARIES})
+
+    # POSIX shared memory (shm_open, shm_unlink)
+    target_link_libraries(anyar_core PUBLIC rt)
 elseif(WIN32)
     # Phase 7: WebView2 — webview/webview auto-detects via macros.h
     # find_package(WebView2 REQUIRED)

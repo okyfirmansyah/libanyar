@@ -8,6 +8,7 @@
 #include <anyar/event_bus.h>
 #include <anyar/ipc_router.h>
 #include <anyar/plugin.h>
+#include <anyar/shared_buffer.h>
 #include <anyar/types.h>
 #include <anyar/window.h>
 #include <anyar/window_manager.h>
@@ -15,6 +16,7 @@
 #include <libasyik/service.hpp>
 #include <libasyik/http.hpp>
 
+#include <map>
 #include <memory>
 #include <string>
 #include <thread>
@@ -84,6 +86,7 @@ private:
     void start_server();
     void setup_native_ipc(Window* window);
     void register_window_commands();
+    void register_buffer_commands();
     int find_available_port();
 
     AppConfig config_;
@@ -103,6 +106,9 @@ private:
 
     /// Per-window native event sink IDs (label → sink id)
     std::map<std::string, uint64_t> native_event_sinks_;
+
+    /// Active shared buffer pools (base_name → pool)
+    std::map<std::string, std::unique_ptr<SharedBufferPool>> buffer_pools_;
 
     std::vector<std::shared_ptr<IAnyarPlugin>> plugins_;
 };

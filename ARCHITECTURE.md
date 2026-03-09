@@ -8,6 +8,7 @@
 2. [System Architecture](#system-architecture)
 3. [Component Details](#component-details)
    - [Window Behavior — Native App Feel](#5a-window-behavior--native-app-feel)
+   - [Shared Memory IPC & WebGL Canvas](#2d-shared-memory-ipc-channel-binary-data)
 4. [IPC Protocol](#ipc-protocol)
 5. [Threading & Concurrency Model](#threading--concurrency-model)
 6. [Platform Abstraction](#platform-abstraction)
@@ -23,6 +24,7 @@ LibAnyar is a C++17 desktop application framework that combines:
 - **OS-native webviews** for rendering web-based UI (React, Vue, Svelte, etc.)
 - **Native IPC** via `webview_bind`/`webview_return` for Tauri-class command latency (~0.01ms)
 - **LibAsyik** as the core runtime for HTTP serving, WebSocket fallback, SQL database access, and fiber-based concurrency
+- **Zero-copy shared memory IPC** via POSIX `shm_open` + `anyar-shm://` custom URI scheme for high-throughput binary data
 - **Thin native API wrappers** for platform features (dialogs, tray, clipboard, etc.)
 
 ### Design Principles
@@ -51,6 +53,10 @@ LibAnyar is a C++17 desktop application framework that combines:
 │    │    invoke(cmd, args)  → window.__anyar_ipc__()   │     │
 │    │    listen(event, fn)  → __anyar_dispatch_event__  │     │
 │    │    emit(event, data)  → invoke('anyar:emit_event')│    │
+│    │                                                  │     │
+│    │  ★ Binary: Shared Memory (anyar-shm://, 0-copy)  │     │
+│    │    fetchBuffer(name)  → fetch('anyar-shm://name')│     │
+│    │    FrameRenderer      → WebGL RGBA/YUV420 render │     │
 │    │                                                  │     │
 │    │  ○ Fallback: HTTP/WebSocket (browser dev, ~1ms)  │     │
 │    │    invoke(cmd, args)  → POST /__anyar__/invoke   │     │
@@ -84,6 +90,12 @@ LibAnyar is a C++17 desktop application framework that combines:
 │  │  - pub/sub   │ │  - webview   │ │  - IAnyarPlugin  │     │
 │  │  - channels  │ │  - multi-win │ │  - dlopen/DLL    │     │
 │  │  - WS fanout │ │  - lifecycle │ │  - static link   │     │
+│  └──────────────┘ └──────────────┘ └─────────────────┘     │
+│                                                             │
+│  ┌──────────────┐ ┌──────────────┐ ┌─────────────────┐     │
+│  │ SharedBuffer  │ │ BufferPool   │ │ SHM URI Scheme  │     │
+│  │  - mmap'd mem │ │  - ring buf  │ │  - anyar-shm:// │     │
+│  │  - zero-copy  │ │  - lock-free │ │  - CORS enabled │     │
 │  └──────────────┘ └──────────────┘ └─────────────────┘     │
 │                                                             │
 │  Native API Wrappers:                                       │
@@ -193,6 +205,67 @@ The LibAsyik HTTP server remains active regardless of IPC mode:
 - **Static file serving** (`serve_static("/")`) — serves the bundled frontend `dist/`
 - **Content streaming** — video/audio with `Range` header support
 - **Plugin HTTP routes** — any plugin that needs raw HTTP (e.g., thumbnail endpoints)
+
+#### 2d. Shared Memory IPC Channel (Binary Data)
+
+For high-throughput binary data (video frames, images, point clouds), LibAnyar provides a **zero-copy shared memory** channel that bypasses JSON serialization entirely.
+
+**Architecture:**
+
+```
+C++ (producer)                          WebView (consumer)
+┌──────────────┐                       ┌──────────────────────┐
+│ SharedBuffer  │  POSIX shm_open()    │  fetch('anyar-shm://')│
+│  - shm_open   │  ───────────────►   │  → ArrayBuffer        │
+│  - mmap       │  (zero-copy on      │  → texImage2D (WebGL) │
+│  - memcpy     │   same process)     │  → drawFrame()        │
+└──────────────┘                       └──────────────────────┘
+       │                                         ▲
+       │  emit("buffer:ready",                   │
+       │    {name, url, ...})                     │
+       └──── ► native event push ─────────────────┘
+```
+
+**SharedBuffer** — Named shared memory region:
+- Created via `buffer:create` command (IPC) or `SharedBuffer::create()` (C++)
+- Backed by POSIX `shm_open("/anyar_<pid>_<name>")` + `mmap()`
+- C++ writes directly to `buf->data()` (raw pointer), JS reads via `fetch('anyar-shm://<name>')`
+- WebKitGTK URI scheme handler serves the mmap'd region with `g_bytes_new_static()` (no copy)
+- CORS-enabled: `webkit_security_manager_register_uri_scheme_as_cors_enabled()`
+
+**SharedBufferPool** — Lock-free ring buffer for streaming:
+- Fixed-size pool of N slots for double/triple buffering
+- Atomic state machine per slot: `FREE → WRITING → READY → READING → FREE`
+- Uses `compare_exchange_strong` — no mutexes in the hot path
+- `buffer:pool-acquire` → find next FREE slot → atomically transition to WRITING
+- `buffer:pool-release-write` → transition WRITING → READY, emit `buffer:ready`
+- `buffer:pool-release-read` → transition READING → FREE
+
+**IPC Commands (10 total):**
+
+| Command | Description |
+|---|---|
+| `buffer:create` | Create a named shared memory buffer |
+| `buffer:write` | Write base64-encoded data to a buffer |
+| `buffer:destroy` | Unmap and unlink a buffer |
+| `buffer:list` | List all active buffers |
+| `buffer:notify` | Emit `buffer:ready` event for a buffer |
+| `buffer:pool-create` | Create a ring buffer pool (N slots) |
+| `buffer:pool-destroy` | Destroy a pool and all its slots |
+| `buffer:pool-acquire` | Acquire a FREE slot for writing |
+| `buffer:pool-release-write` | Release a slot from WRITING → READY |
+| `buffer:pool-release-read` | Release a slot from READING → FREE |
+
+**JS Modules:**
+
+- `@libanyar/api/buffer` — `createBuffer()`, `fetchBuffer()`, `onBufferReady()`, pool operations
+- `@libanyar/api/canvas` — `FrameRenderer` (WebGL), supports 7 pixel formats: RGBA, RGB, BGRA, Grayscale, YUV420, NV12, NV21
+
+**Performance characteristics:**
+- Zero-copy on Linux: C++ `memcpy` to mmap → WebKitGTK reads same mmap (no serialization)
+- Suitable for 30fps+ video streaming at 1080p/4K
+- Buffer creation: ~0.1ms (one-time `shm_open` + `mmap`)
+- Frame delivery: `memcpy` to shared mem + event push (~0.05ms overhead)
 
 ### 3. CommandRegistry
 
@@ -594,6 +667,7 @@ libanyar/
 │   │   ├── ipc_router.h            # HTTP + WS IPC routing
 │   │   ├── command_registry.h      # Command dispatch
 │   │   ├── event_bus.h             # Pub/sub events
+│   │   ├── shared_buffer.h         # SharedBuffer, Pool, SHM URI scheme
 │   │   ├── plugin.h                # Plugin interface
 │   │   ├── types.h                 # Common types & aliases
 │   │   └── native/                 # Platform API wrappers
@@ -608,6 +682,7 @@ libanyar/
 │       ├── command_registry.cpp
 │       ├── event_bus.cpp
 │       ├── window.cpp
+│       ├── shared_buffer_linux.cpp  # POSIX shm + anyar-shm:// URI scheme
 │       ├── asset_server.cpp        # serve_static configuration
 │       └── platform/
 │           ├── linux/
@@ -626,6 +701,9 @@ libanyar/
 │   ├── tsconfig.json
 │   └── src/
 │       ├── index.ts                # invoke(), listen(), emit()
+│       ├── modules/
+│       │   ├── buffer.ts           # Shared memory buffer API
+│       │   └── canvas.ts           # WebGL frame renderer
 │       ├── fs.ts
 │       ├── dialog.ts
 │       ├── db.ts
@@ -651,6 +729,11 @@ libanyar/
 │   └── file-explorer/
 │
 ├── tests/
+│   ├── test_shared_buffer.cpp      # 17 Catch2 tests for SharedBuffer/Pool
+│   ├── webgl/                      # WebGL canvas E2E pixel verification
+│   │   ├── main.cpp
+│   │   ├── dist/index.html
+│   │   └── CMakeLists.txt
 │   ├── unit/
 │   └── integration/
 │

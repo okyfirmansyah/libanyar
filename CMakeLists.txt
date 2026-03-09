@@ -23,6 +23,7 @@ if(ANYAR_BUILD_EXAMPLES)
     add_subdirectory(examples/hello-world)
     add_subdirectory(examples/video-player)
     add_subdirectory(examples/key-storage)
+    add_subdirectory(examples/wifi-analyzer)
 endif()
 
 # ── CLI Tool ─────────────────────────────────────────────────────────────────

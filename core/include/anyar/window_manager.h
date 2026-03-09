@@ -12,9 +12,10 @@
 #include <functional>
 #include <map>
 #include <memory>
-#include <mutex>
 #include <string>
 #include <vector>
+
+#include <boost/fiber/mutex.hpp>
 
 namespace anyar {
 
@@ -75,7 +76,7 @@ public:
 
 private:
     std::map<std::string, std::shared_ptr<Window>> windows_;
-    mutable std::mutex mutex_;
+    mutable boost::fibers::mutex mutex_;
     WindowClosedCallback on_closed_;
     WindowCreatedCallback on_created_;
 };

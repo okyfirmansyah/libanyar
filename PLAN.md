@@ -1,6 +1,6 @@
 # LibAnyar — Implementation Plan
 
-> Last updated: 2026-03-08
+> Last updated: 2026-03-09
 
 ## Phase Overview
 
@@ -14,6 +14,7 @@
 | 4c | [Hybrid IPC (Native + HTTP Fallback)](#phase-4c-hybrid-ipc) | ✅ Complete | 1 day |
 | 4d | [Multi-Window & Child Windows](#phase-4d-multi-window--child-windows) | ✅ Complete | 2-3 weeks |
 | 4e | [Platform Abstraction Refactor](#phase-4e-platform-abstraction-refactor) | ✅ Complete | 3-5 days |
+| 4f | [Shared Memory IPC & WebGL Canvas](#phase-4f-shared-memory-ipc--webgl-canvas) | 🔲 Not Started | 2-3 weeks |
 | 5 | [CLI Tool](#phase-5-cli-tool) | 🔲 Not Started | 2-3 weeks |
 | 6 | [Polish & Documentation](#phase-6-polish--documentation) | 🔲 Not Started | Ongoing |
 | 7 | [Windows & macOS Support](#phase-7-windows--macos-support) | 🔲 Not Started | 3-4 weeks |
@@ -622,7 +623,7 @@ Linux implementation (`window_linux.cpp`, inside `Window::Impl`):
 4. **4d.3** — App integration (wire WindowManager, per-window IPC)
 5. **4d.5** — Window IPC commands
 6. **4d.8** — Event system per-window routing
-7. **4d.6** — JS bridge window module
+7. **4d.6** — JS bridge window moduleok
 8. **4d.7** — Documentation for frontend routing patterns
 9. **4d.9** — Key-storage example refactor
 
@@ -790,6 +791,294 @@ The key principle: keep all existing Linux code working unchanged, just reorgani
 > All platform-specific code is confined to platform-suffixed source files (`*_linux.cpp`, `*_win32.cpp`, `*_macos.mm`). Public headers contain zero platform includes. The codebase compiles on Linux exactly as before, but is structurally ready for Phase 7 to add Windows and macOS implementations by adding files — not modifying existing ones.
 
 ---
+
+## Phase 4f: Shared Memory IPC & WebGL Canvas
+
+> **Goal**: Provide a high-performance binary data channel using shared memory (zero-copy where possible), and a WebGL-based frame renderer that consumes it. These are two separate APIs — `@libanyar/api/buffer` (general-purpose shared memory IPC) and `@libanyar/api/canvas` (WebGL frame rendering convenience layer).
+
+### Context & Motivation
+
+The existing IPC channels in LibAnyar are optimized for JSON messages:
+- **Native IPC** (`webview_bind`/`webview_return`): JSON-string-only, ~0.01ms for small payloads
+- **WebSocket binary**: Already used by video-player example for RGBA frames, ~1-5ms for <1MB
+- **HTTP POST**: Request/response, JSON serialized
+
+For large binary payloads (video frames, images, point clouds, ML tensors), these channels become bottlenecks:
+- 1080p RGBA frame = ~8MB → WebSocket takes 3-8ms per frame (limits to ~30fps with overhead)
+- 4K RGBA frame = ~33MB → WebSocket saturates at ~8fps
+- JSON base64 encoding adds 33% overhead + CPU cost
+
+Shared memory eliminates the copy entirely: C++ writes directly to a memory region that JS can read as an `ArrayBuffer`.
+
+### Benchmark & Industry Research
+
+Research was conducted across the Tauri/wry ecosystem and WebKit documentation:
+
+**Tauri/wry findings (as of 2025-2026):**
+1. **Tauri IPC is slow for big payloads** — Users report ~100ms for 12MB via `IPC::Response`, ~200ms for 3MB via JSON events ([tauri#13405](https://github.com/tauri-apps/tauri/issues/13405))
+2. **SharedArrayBuffer does NOT help** — It only shares memory between JS main thread and Web Workers, not between the native backend and webview. Tauri maintainer confirmed this is a dead end ([tauri-apps/discussions#6269](https://github.com/orgs/tauri-apps/discussions/6269))
+3. **wry sync IPC / shared memory** — Still open after 4+ years, on indefinite hold because "proper shared memory primitives are not well supported across enough target platforms" ([wry#454](https://github.com/tauri-apps/wry/issues/454))
+4. **Practical workaround** — Users building LiDAR/image apps ended up using wgpu to render directly into the native window, bypassing the webview for heavy rendering
+5. **WebView2 (Windows)** has `CreateSharedBuffer` + `PostSharedBufferToScript` — true zero-copy shared memory, official API since SDK 1.0.1661.34
+6. **WebKitGTK (Linux)** — URI scheme handlers can stream binary data; JavaScriptCore API can create `ArrayBuffer` backed by native memory pointers (zero-copy)
+7. **WKWebView (macOS)** — `WKURLSchemeHandler` for binary streaming; no shared buffer equivalent to WebView2
+
+**WPE WebKit article** ([wpewebkit.org/blog/06-integrating-wpe](https://wpewebkit.org/blog/06-integrating-wpe.html)):
+- Demonstrates custom URI scheme handlers streaming binary data via `GMemoryInputStream`
+- Script message handlers for bidirectional communication
+- `webkit_user_content_manager_register_script_message_handler_with_reply()` for Promise-based IPC (WPE WebKit 2.40+, applies to WebKitGTK too)
+
+### Architecture
+
+```
+┌──────────────────────────────┐
+│  @libanyar/api/canvas        │  ← Feature 2 (WebGL frame renderer)
+│  createFrameRenderer()       │
+│  drawFrame(buffer, meta)     │
+└──────────┬───────────────────┘
+           │ uses internally
+┌──────────▼───────────────────┐
+│  @libanyar/api/buffer        │  ← Feature 1 (shared memory IPC)
+│  onSharedBuffer()            │
+│  SharedBufferHandle          │
+└──────────┬───────────────────┘
+           │ uses internally
+┌──────────▼───────────────────┐
+│  Platform shared memory      │  ← C++ core (anyar::SharedBuffer)
+│  Linux: shm_open + mmap      │
+│  Win:   CreateSharedBuffer   │
+│  macOS: shm_open + mmap      │
+└──────────────────────────────┘
+```
+
+Feature 1 (`buffer`) is a standalone general-purpose API. Feature 2 (`canvas`) is a convenience layer that consumes Feature 1 internally.
+
+### Design Decisions
+
+1. **Two-tier approach**: WebSocket binary remains the fallback (works in dev mode with external browser). Shared memory is the high-performance path (requires webview).
+
+2. **Platform-specific implementations behind uniform API**: Each platform uses its best available mechanism:
+
+   | Platform | Shared Memory Mechanism | JS Access Method | Copies |
+   |---|---|---|---|
+   | **Linux (WebKitGTK)** | `shm_open()` + `mmap()` | Custom URI scheme (`anyar-shm://`) via `webkit_web_context_register_uri_scheme()` → `fetch()` → `ArrayBuffer`. Advanced: `jsc_value_new_array_buffer()` for true zero-copy | 0-1 |
+   | **Windows (WebView2)** | `ICoreWebView2Environment12::CreateSharedBuffer()` | `PostSharedBufferToScript()` → `chrome.webview.addEventListener("sharedbufferreceived")` → `ArrayBuffer` | 0 (true zero-copy) |
+   | **macOS (WKWebView)** | `shm_open()` + `mmap()` | `WKURLSchemeHandler` → `fetch()` → `ArrayBuffer` | 1 |
+
+3. **Ring buffer protocol**: For streaming use cases (video), C++ maintains a ring of N shared buffers. A lightweight notification (via existing native IPC) tells JS which buffer index is ready. JS reads, renders, then signals release.
+
+4. **WebGL for frame rendering**: The `canvas` module handles all WebGL boilerplate — texture creation, shader compilation, fullscreen quad. Supports RGBA and YUV420 (GPU-side color conversion saves ~60% bandwidth).
+
+5. **Fallback for dev mode**: When running in an external browser (`vite dev`), shared memory is unavailable. The system falls back to WebSocket binary push, which already works.
+
+### Performance Targets
+
+| Metric | WebSocket (current) | Shared Memory (target) |
+|---|---|---|
+| 1080p RGBA (8MB) | ~3-8ms | **<0.5ms** |
+| 4K RGBA (33MB) | ~15-40ms | **<1ms** |
+| Max throughput | ~2 GB/s | **>10 GB/s** (memory bandwidth) |
+| CPU overhead | memcpy + WS framing | Near zero (pointer handoff) |
+
+### 4f.1 Feature 1: Shared Memory IPC — C++ Core (`anyar::SharedBuffer`)
+
+#### 4f.1.1 SharedBuffer Class (Linux Implementation)
+- [ ] Add `core/include/anyar/shared_buffer.h` — platform-neutral public API:
+  ```cpp
+  namespace anyar {
+  class SharedBuffer {
+  public:
+      static std::shared_ptr<SharedBuffer> create(const std::string& name, size_t size);
+      ~SharedBuffer();  // unmaps + unlinks
+
+      uint8_t* data();              // raw pointer to mapped memory
+      const uint8_t* data() const;
+      size_t size() const;
+      const std::string& name() const;
+
+      // Notify a specific window that buffer content is ready
+      void post_to_window(Window& window, const std::string& metadata_json);
+
+      // Notify all windows
+      void post_to_all(App& app, const std::string& metadata_json);
+  };
+  } // namespace anyar
+  ```
+- [ ] Add `core/src/shared_buffer_linux.cpp`:
+  - `create()`: `shm_open(O_CREAT|O_RDWR)` → `ftruncate(size)` → `mmap(PROT_READ|PROT_WRITE, MAP_SHARED)`
+  - Store `fd`, `ptr`, `size`, `shm_name` (auto-generated `/anyar_<pid>_<name>`)
+  - Destructor: `munmap()` + `shm_unlink()`
+  - `post_to_window()`: dispatches a lightweight event via native IPC telling JS the buffer name + metadata
+- [ ] Phase 7 adds: `shared_buffer_win32.cpp` (WebView2 `CreateSharedBuffer`), `shared_buffer_macos.cpp` (POSIX shm)
+
+#### 4f.1.2 SharedBuffer URI Scheme (Linux)
+- [ ] Register `anyar-shm://` custom URI scheme via `webkit_web_context_register_uri_scheme()` in `App` startup
+- [ ] Scheme handler: parses `anyar-shm://<buffer-name>` → looks up SharedBuffer by name → creates `GMemoryInputStream` from mapped pointer → responds with `application/octet-stream`
+- [ ] CORS headers for cross-origin fetch from `http://127.0.0.1:<port>`
+- [ ] Phase 7: Windows uses `PostSharedBufferToScript()` (no URI scheme needed); macOS uses `WKURLSchemeHandler`
+
+#### 4f.1.3 SharedBufferPool (Ring Buffer for Streaming)
+- [ ] Add `core/include/anyar/shared_buffer_pool.h`:
+  ```cpp
+  namespace anyar {
+  class SharedBufferPool {
+  public:
+      SharedBufferPool(const std::string& base_name, size_t buffer_size, size_t count = 3);
+
+      // Producer side (C++)
+      SharedBuffer& acquire_write();   // get next writable buffer (blocks if all in use)
+      void release_write(SharedBuffer& buf, const std::string& metadata_json, Window& window);
+
+      // Consumer side (called by JS via IPC)
+      void release_read(const std::string& buffer_name);  // JS signals it's done reading
+  };
+  } // namespace anyar
+  ```
+- [ ] Implement with atomic index + semaphore/condition_variable for back-pressure
+- [ ] Prevents producer from overwriting a buffer JS hasn't finished reading
+
+#### 4f.1.4 IPC Commands for Buffer Management
+- [ ] `buffer:create` — create a named shared buffer (returns name + size)
+- [ ] `buffer:release` — JS signals it has finished reading a buffer
+- [ ] `buffer:destroy` — cleanup a named buffer
+- [ ] `buffer:list` — list active shared buffers (for debugging)
+- [ ] Register commands in `App::register_builtin_commands()`
+
+### 4f.2 Feature 1: Shared Memory IPC — JS Bridge (`@libanyar/api/buffer`)
+
+#### 4f.2.1 Buffer Module
+- [ ] Add `js-bridge/src/modules/buffer.ts`:
+  ```typescript
+  export interface SharedBufferHandle {
+      name: string;
+      size: number;
+      metadata: Record<string, any>;
+      getBuffer(): Promise<ArrayBuffer>;  // fetches from anyar-shm:// or receives from shared buffer event
+      release(): void;                    // signals C++ the buffer can be reused
+  }
+
+  // Subscribe to buffer-ready notifications from C++
+  export function onSharedBuffer(
+      name: string,
+      handler: (handle: SharedBufferHandle) => void
+  ): UnlistenFn;
+
+  // One-shot: request a buffer's current content
+  export function fetchBuffer(name: string): Promise<ArrayBuffer>;
+  ```
+- [ ] `getBuffer()` implementation:
+  - Native mode: `fetch("anyar-shm://<name>")` → `response.arrayBuffer()` (Linux/macOS); or direct `ArrayBuffer` from shared buffer event (Windows)
+  - Fallback mode (external browser): `invoke("buffer:read", {name})` → base64 decode (slow but functional)
+- [ ] `release()`: calls `invoke("buffer:release", {name})` to signal C++ the buffer is free
+- [ ] Export from `@libanyar/api` main entry point
+
+#### 4f.2.2 Platform Detection & Fallback
+- [ ] Detect if `anyar-shm://` scheme is available (native webview mode)
+- [ ] If not (dev server in browser), fall back to WebSocket binary or HTTP fetch
+- [ ] Transparent to consumer code — same `onSharedBuffer()` API regardless of transport
+
+### 4f.3 Feature 2: WebGL Canvas Renderer (`@libanyar/api/canvas`)
+
+#### 4f.3.1 Frame Renderer Module
+- [ ] Add `js-bridge/src/modules/canvas.ts`:
+  ```typescript
+  export interface FrameRendererOptions {
+      format: 'rgba' | 'yuv420' | 'rgb' | 'nv12';
+      fragmentShader?: string;   // custom GLSL override
+      flipY?: boolean;           // default false
+      premultiplyAlpha?: boolean;
+  }
+
+  export interface FrameRenderer {
+      drawFrame(buffer: ArrayBuffer, meta: { width: number; height: number }): void;
+      resize(width: number, height: number): void;
+      destroy(): void;
+  }
+
+  export function createFrameRenderer(
+      canvas: HTMLCanvasElement,
+      options: FrameRendererOptions
+  ): FrameRenderer;
+  ```
+
+#### 4f.3.2 WebGL Shader Pipeline
+- [ ] RGBA path: single `texImage2D()` upload → fullscreen quad with passthrough shader
+- [ ] YUV420 path: three separate textures (Y, U, V) → YUV→RGB conversion fragment shader:
+  ```glsl
+  uniform sampler2D y_tex, u_tex, v_tex;
+  varying vec2 v_uv;
+  void main() {
+      float y = texture2D(y_tex, v_uv).r;
+      float u = texture2D(u_tex, v_uv).r - 0.5;
+      float v = texture2D(v_tex, v_uv).r - 0.5;
+      gl_FragColor = vec4(
+          y + 1.402 * v,
+          y - 0.344 * u - 0.714 * v,
+          y + 1.772 * u,
+          1.0
+      );
+  }
+  ```
+- [ ] NV12 path: two textures (Y plane, interleaved UV plane)
+- [ ] Custom shader support: user provides fragment shader, renderer handles vertex + texture setup
+- [ ] Vertex shader: fullscreen quad (two triangles), UV coordinates for texture mapping
+
+#### 4f.3.3 Integration Helper
+- [ ] `createBufferRenderer()` — convenience that wires `onSharedBuffer()` to `drawFrame()` automatically:
+  ```typescript
+  export function createBufferRenderer(
+      canvas: HTMLCanvasElement,
+      bufferName: string,
+      options: FrameRendererOptions
+  ): { destroy: () => void };
+  // Internally: onSharedBuffer(name, h => { renderer.drawFrame(h.getBuffer(), h.metadata); h.release(); })
+  ```
+- [ ] Export from `@libanyar/api` main entry point and as `@libanyar/api/canvas`
+
+### 4f.4 CMake & Build Integration
+- [ ] Add `shared_buffer_linux.cpp` to `core/CMakeLists.txt` under Linux guard
+- [ ] Link `-lrt` on Linux (required for `shm_open`)
+- [ ] Phase 7 adds: `shared_buffer_win32.cpp`, `shared_buffer_macos.cpp`
+
+### 4f.5 WebSocket Binary Fallback Path
+- [ ] Ensure existing WebSocket binary push (`ws->write_basic_buffer()`) continues to work as-is
+- [ ] `onSharedBuffer()` in fallback mode listens on a dedicated WebSocket channel for binary messages with a header prefix identifying the buffer name
+- [ ] Video player example can optionally be updated to use the new buffer API, but existing WS path remains functional
+
+### 4f.6 Testing & Validation
+- [ ] Unit test: create/destroy shared buffer, write/read data integrity
+- [ ] Unit test: SharedBufferPool acquire/release cycling
+- [ ] Integration test: C++ writes frame → JS fetches via `anyar-shm://` → validates content
+- [ ] Performance test: measure latency for 8MB and 33MB buffers (target <0.5ms and <1ms)
+- [ ] Fallback test: verify WebSocket binary path works when scheme is unavailable
+
+### 4f.7 Example: SharedBuffer Video Player (Enhancement)
+- [ ] Optionally update video-player example to use `SharedBufferPool` instead of raw WebSocket
+- [ ] Add YUV420 mode: send Y/U/V planes as separate shared buffers, render with GPU shader
+- [ ] Benchmark before/after: WebSocket RGBA vs SharedBuffer YUV420
+
+### Implementation Order
+
+| Step | Task | Dependency | Platform |
+|------|------|------------|----------|
+| 1 | `shared_buffer.h` + `shared_buffer_linux.cpp` | None | Linux |
+| 2 | URI scheme handler (`anyar-shm://`) | Step 1 | Linux |
+| 3 | `SharedBufferPool` | Step 1 | All |
+| 4 | Buffer IPC commands | Step 1 | All |
+| 5 | `@libanyar/api/buffer` JS module | Steps 2, 4 | All |
+| 6 | `@libanyar/api/canvas` WebGL renderer | None (standalone) | All |
+| 7 | `createBufferRenderer()` integration | Steps 5, 6 | All |
+| 8 | Testing & benchmarks | Steps 1-7 | Linux |
+| 9 | Video player enhancement (optional) | Steps 5, 6 | Linux |
+| — | `shared_buffer_win32.cpp` | Step 1 | Phase 7 (Windows) |
+| — | `shared_buffer_macos.cpp` | Step 1 | Phase 7 (macOS) |
+
+### Phase 4f Deliverable
+> Two new LibAnyar APIs — `@libanyar/api/buffer` for zero-copy shared memory IPC and `@libanyar/api/canvas` for WebGL frame rendering — working on Linux with WebSocket fallback for dev mode. Platform-specific implementations for Windows and macOS deferred to Phase 7.
+
+---
+
+## Phase 5: CLI Tool
 
 > **Goal**: Developer-friendly CLI for scaffolding, development, and building. Linux-first — full end-to-end polishing before cross-platform.
 

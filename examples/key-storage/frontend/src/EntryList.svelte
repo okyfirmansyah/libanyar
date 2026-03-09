@@ -185,7 +185,7 @@
   }
 
   .entry-row:hover {
-    background: rgba(226, 179, 64, 0.04);
+    background: rgba(0, 225, 201, 0.04);
   }
 
   .entry-row.selected {
@@ -214,13 +214,13 @@
     flex-shrink: 0;
     font-size: 13px;
     font-weight: 600;
-    background: var(--gold-dim);
-    color: var(--gold);
+    background: var(--secondary-dim);
+    color: var(--secondary);
   }
 
   .entry-icon.selected {
     background: var(--accent);
-    color: white;
+    color: #0A0A0A;
   }
 
   .badge-expired {

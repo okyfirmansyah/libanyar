@@ -35,6 +35,14 @@ export type {
 import * as dialog from './modules/dialog';
 export { dialog };
 
+// ── Buffer ─────────────────────────────────────────────────────────────────
+import * as buffer from './modules/buffer';
+export { buffer };
+
+// ── Canvas ─────────────────────────────────────────────────────────────────
+import * as canvas from './modules/canvas';
+export { canvas };
+
 export type {
   DialogFilter,
   OpenDialogOptions,
@@ -67,6 +75,8 @@ import {
   getLabel,
 } from './modules/window';
 import * as _dialog from './modules/dialog';
+import * as _buffer from './modules/buffer';
+import * as _canvas from './modules/canvas';
 
 if (typeof window !== 'undefined') {
   (window as any).__anyar__ = {
@@ -84,5 +94,7 @@ if (typeof window !== 'undefined') {
     listWindows,
     getLabel,
     dialog: _dialog,
+    buffer: _buffer,
+    canvas: _canvas,
   };
 }

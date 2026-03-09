@@ -54,3 +54,12 @@ anyar_add_test(test_integration
     $<TARGET_OBJECTS:catch2_main>
     test_integration.cpp
 )
+
+# Core: SharedBuffer + SharedBufferPool + Buffer IPC commands
+anyar_add_test(test_shared_buffer
+    $<TARGET_OBJECTS:catch2_main>
+    test_shared_buffer.cpp
+)
+
+# ── WebGL E2E Tests (requires display) ───────────────────────────────────────
+add_subdirectory(webgl)
