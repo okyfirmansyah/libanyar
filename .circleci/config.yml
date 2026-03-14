@@ -116,7 +116,7 @@ jobs:
               -DCMAKE_BUILD_TYPE=Release \
               -DCMAKE_CXX_STANDARD=17 \
               -DLIBASYIK_ENABLE_SOCI=ON
-            make -j$(nproc)
+            make -j4
             make install
             ldconfig
 
