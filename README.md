@@ -153,14 +153,14 @@ See [PLAN.md](PLAN.md) for full roadmap.
 A minimal example showing IPC commands, events, and built-in plugins.
 
 <p align="center">
-  <img src="docs/assets/hello_world.gif" alt="Hello World Example" />
+  <img src="docs/assets/hello_world.gif" alt="Hello World Example" height="240" />
 </p>
 
 ### Local Video Player
 
 FFmpeg-powered video player with WebSocket streaming and Canvas rendering.
 <p align="center">
-  <img src="docs/assets/video-player.gif" alt="Video Player Example" />
+  <img src="docs/assets/video-player.gif" alt="Video Player Example" height="240" />
 </p>
 
 ### Secure Key Storage
@@ -168,7 +168,7 @@ FFmpeg-powered video player with WebSocket streaming and Canvas rendering.
 Encrypted password manager with AES-256-GCM, multi-window modal dialogs, and a custom plugin.
 
 <p align="center">
-  <img src="docs/assets/key-storage.gif" alt="Key Storage Example" />
+  <img src="docs/assets/key-storage.gif" alt="Key Storage Example" height="240" />
 </p>
 
 ### Wifi Analyzer
@@ -176,7 +176,7 @@ Encrypted password manager with AES-256-GCM, multi-window modal dialogs, and a c
 A desktop Wifi analyzer with real-time signal strength visualization and channel scanning.
 
 <p align="center">
-  <img src="docs/assets/wifi-analyzer.gif" alt="Wifi Analyzer Example" />
+  <img src="docs/assets/wifi-analyzer.gif" alt="Wifi Analyzer Example" height="240" />
 </p>
 
 ## License
