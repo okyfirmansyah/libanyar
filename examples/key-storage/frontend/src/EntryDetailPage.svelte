@@ -581,7 +581,7 @@
 
   @keyframes copy-flash {
     0% {
-      background: rgba(0, 225, 201, 0.15);
+      background: rgba(182, 171, 124, 0.15);
       box-shadow: 0 0 12px 3px var(--accent-glow);
       color: var(--accent);
     }
@@ -601,7 +601,7 @@
     background: var(--accent-dim);
   }
   .generate-btn:hover {
-    background: rgba(0,225,201,0.18);
+    background: rgba(182, 171, 124, 0.18);
     box-shadow: 0 0 6px var(--accent-glow);
   }
 
@@ -688,14 +688,15 @@
     opacity: 0.6;
   }
   .save-active {
-    background: linear-gradient(135deg, var(--gradient-start), var(--gradient-end)) !important;
-    color: #fff !important;
+    background: var(--accent) !important;
+    color: var(--bg) !important;
     border-color: var(--accent) !important;
     box-shadow: 0 1px 4px var(--accent-glow),
                 inset 0 1px 0 rgba(255,255,255,0.08);
     opacity: 1;
   }
   .save-active:hover {
+    background: var(--accent-hover) !important;
     box-shadow: 0 2px 12px var(--accent-glow),
                 inset 0 1px 0 rgba(255,255,255,0.08);
   }

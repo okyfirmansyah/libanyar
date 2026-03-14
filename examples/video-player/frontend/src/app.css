@@ -1,23 +1,26 @@
 @import "tailwindcss";
 
-/* ── Custom dark theme tokens — Void-black + Electric Cyan ── */
+/* ── Custom dark theme tokens — Ink-Black + Sand-Dune Brass ── */
 :root {
-  --bg: #0A0A0A;
-  --surface: #1A1A1A;
-  --surface-2: #222222;
-  --border: #2E2E2E;
-  --accent: #00E1C9;
-  --accent-hover: #00C8B3;
-  --accent-glow: rgba(0, 225, 201, 0.15);
-  --secondary: #0072F0;
-  --text: #F8F9FA;
-  --text-dim: #9CA3AF;
-  --success: #22AA66;
-  --danger: #E92C37;
-  --warning: #D2B55B;
-  --chart-video: #0072F0;
-  --chart-audio: #D2B55B;
-  --gradient: linear-gradient(135deg, #0072F0, #00E1C9);
+  --bg:           #0b1318;  /* ink-black-950 */
+  --surface:      #141718;  /* silver-950↑ */
+  --surface-2:    #1c1f21;  /* silver-900↑ */
+  --border:       #2e3236;  /* silver-800 */
+  --border-light: #3a3f43;  /* silver-700↓ */
+  --accent:       #b6ab7c;  /* sand-dune-400 */
+  --accent-hover: #c8c09d;  /* sand-dune-300 */
+  --accent-dim:   rgba(182, 171, 124, 0.12);
+  --accent-glow:  rgba(182, 171, 124, 0.15);
+  --secondary:    #6a8595;  /* blue-slate-500 */
+  --text:         #e4e6e7;  /* silver-100 */
+  --text-dim:     #a0a7ab;  /* silver-350 */
+  --text-muted:   #6e767a;  /* silver-550 */
+  --success:      #6a8595;  /* blue-slate-500 */
+  --danger:       #e71829;  /* punch-red-500 */
+  --danger-dim:   rgba(231, 24, 41, 0.12);
+  --warning:      #a3965c;  /* sand-dune-500 */
+  --chart-video:  #6a8595;  /* blue-slate-500 */
+  --chart-audio:  #a3965c;  /* sand-dune-500 */
 }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -45,3 +48,80 @@ video {
 /* uPlot overrides */
 .u-wrap { background: transparent !important; }
 .u-over { cursor: crosshair; }
+
+/* ── shadcn-inspired button system ──────────────────────────────────── */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  font-family: inherit;
+  font-weight: 500;
+  font-size: 13.5px;
+  line-height: 1;
+  white-space: nowrap;
+  border-radius: 8px;
+  padding: 9px 16px;
+  border: 1px solid transparent;
+  cursor: pointer;
+  user-select: none;
+  transition: background 0.15s, color 0.15s, border-color 0.15s, box-shadow 0.15s, opacity 0.15s;
+}
+.btn:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px var(--accent);
+}
+.btn:disabled {
+  pointer-events: none;
+  opacity: 0.45;
+}
+.btn svg { width: 15px; height: 15px; flex-shrink: 0; }
+
+/* Primary — solid accent */
+.btn-primary {
+  background: var(--accent);
+  color: var(--bg);
+  font-weight: 600;
+}
+.btn-primary:hover {
+  background: var(--accent-hover);
+  box-shadow: 0 2px 12px var(--accent-glow);
+}
+.btn-primary:active { opacity: 0.85; }
+
+/* Secondary — surface-2 fill */
+.btn-secondary {
+  background: var(--surface-2);
+  color: var(--text);
+  border-color: var(--border);
+}
+.btn-secondary:hover {
+  background: var(--surface-2);
+  border-color: var(--border-light);
+}
+
+/* Ghost — no border */
+.btn-ghost {
+  background: transparent;
+  color: var(--text-dim);
+}
+.btn-ghost:hover {
+  background: rgba(255,255,255,0.06);
+  color: var(--text);
+}
+
+/* Outline */
+.btn-outline {
+  background: transparent;
+  color: var(--text-dim);
+  border-color: var(--border);
+}
+.btn-outline:hover {
+  background: var(--surface-2);
+  color: var(--text);
+  border-color: var(--border-light);
+}
+
+/* Size modifiers */
+.btn-sm { font-size: 12px; padding: 6px 12px; border-radius: 6px; }
+.btn-xs { font-size: 11px; padding: 4px 9px;  border-radius: 5px; }

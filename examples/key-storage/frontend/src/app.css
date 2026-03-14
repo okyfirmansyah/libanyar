@@ -1,42 +1,42 @@
 @import "tailwindcss";
 
 :root {
-  /* ── Core Palette — Void-black + Electric Cyan ────────────────────── */
-  --bg: #0A0A0A;
-  --surface: #1A1A1A;
-  --surface-2: #222222;
-  --surface-3: #2A2A2A;
-  --border: #2E2E2E;
-  --border-light: #3E3E3E;
+  /* ── Core Palette — Ink-Black + Sand-Dune Brass ─────────────────── */
+  --bg:         #0b1318;  /* ink-black-950 — deepest anchor */
+  --surface:    #141718;  /* silver-950↑ — panels/sidebar */
+  --surface-2:  #1c1f21;  /* silver-900↑ — inputs/cards */
+  --surface-3:  #252829;  /* silver-800↓ — hover/elevated */
+  --border:     #2e3236;  /* silver-800 blend — structural lines */
+  --border-light: #3a3f43; /* silver-700↓ — emphasized borders */
 
-  /* Brand */
-  --accent: #00E1C9;
-  --accent-hover: #00C8B3;
-  --accent-dim: rgba(0, 225, 201, 0.12);
-  --accent-glow: rgba(0, 225, 201, 0.15);
-  --secondary: #0072F0;
-  --secondary-dim: rgba(0, 114, 240, 0.12);
+  /* Brand — warm brass accent */
+  --accent:       #b6ab7c;  /* sand-dune-400 */
+  --accent-hover: #c8c09d;  /* sand-dune-300 */
+  --accent-dim:   rgba(182, 171, 124, 0.12);
+  --accent-glow:  rgba(182, 171, 124, 0.15);
+  --secondary:    #6a8595;  /* blue-slate-500 */
+  --secondary-dim: rgba(106, 133, 149, 0.12);
 
-  /* Gradient endpoints */
-  --gradient-start: #0072F0;
-  --gradient-end: #00E1C9;
+  /* Gradient endpoints (kept for compat) */
+  --gradient-start: #6a8595; /* blue-slate-500 */
+  --gradient-end:   #b6ab7c; /* sand-dune-400 */
 
   /* Semantic */
-  --danger: #E92C37;
-  --danger-dim: rgba(233, 44, 55, 0.12);
-  --warning: #D2B55B;
-  --warning-dim: rgba(210, 181, 91, 0.12);
-  --success: #22AA66;
+  --danger:     #e71829;  /* punch-red-500 */
+  --danger-dim: rgba(231, 24, 41, 0.12);
+  --warning:    #a3965c;  /* sand-dune-500 */
+  --warning-dim: rgba(163, 150, 92, 0.12);
+  --success:    #6a8595;  /* blue-slate-500 */
 
-  /* Text */
-  --text: #F8F9FA;
-  --text-dim: #9CA3AF;
-  --text-muted: #6B7280;
+  /* Text — Silver scale (widened for contrast) */
+  --text:       #e4e6e7;  /* silver-100 */
+  --text-dim:   #a0a7ab;  /* silver-350 — lifted for readability */
+  --text-muted: #6e767a;  /* silver-550 — lifted slightly */
 
   /* Legacy aliases kept for compatibility */
-  --gold: #D2B55B;
-  --gold-dim: rgba(210, 181, 91, 0.10);
-  --gold-glow: rgba(210, 181, 91, 0.35);
+  --gold:      #a3965c;  /* sand-dune-500 */
+  --gold-dim:  rgba(163, 150, 92, 0.10);
+  --gold-glow: rgba(163, 150, 92, 0.35);
 }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -169,12 +169,12 @@ button {
 .btn-danger {
   background: var(--danger-dim);
   color: var(--danger);
-  border-color: rgba(233,44,55,0.2);
+  border-color: rgba(231,24,41,0.2);
 }
 .btn-danger:hover {
-  background: rgba(233,44,55,0.18);
-  border-color: rgba(233,44,55,0.35);
-  box-shadow: 0 0 8px rgba(233,44,55,0.15);
+  background: rgba(231,24,41,0.18);
+  border-color: rgba(231,24,41,0.35);
+  box-shadow: 0 0 8px rgba(231,24,41,0.15);
 }
 
 /* Accent ghost — transparent with accent text */
@@ -183,7 +183,7 @@ button {
   color: var(--accent);
 }
 .btn-accent-ghost:hover {
-  background: rgba(0,225,201,0.16);
+  background: rgba(182, 171, 124, 0.16);
 }
 
 /* Input base */
@@ -273,7 +273,7 @@ input::placeholder, textarea::placeholder {
   color: var(--warning);
 }
 .badge-success {
-  background: rgba(34, 170, 102, 0.12);
+  background: rgba(106, 133, 149, 0.12);
   color: var(--success);
 }
 .badge-muted {

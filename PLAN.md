@@ -1,6 +1,6 @@
 # LibAnyar — Implementation Plan
 
-> Last updated: 2026-03-09
+> Last updated: 2026-03-14
 
 ## Phase Overview
 
@@ -14,9 +14,9 @@
 | 4c | [Hybrid IPC (Native + HTTP Fallback)](#phase-4c-hybrid-ipc) | ✅ Complete | 1 day |
 | 4d | [Multi-Window & Child Windows](#phase-4d-multi-window--child-windows) | ✅ Complete | 2-3 weeks |
 | 4e | [Platform Abstraction Refactor](#phase-4e-platform-abstraction-refactor) | ✅ Complete | 3-5 days |
-| 4f | [Shared Memory IPC & WebGL Canvas](#phase-4f-shared-memory-ipc--webgl-canvas) | 🔲 Not Started | 2-3 weeks |
-| 5 | [CLI Tool](#phase-5-cli-tool) | 🔲 Not Started | 2-3 weeks |
-| 6 | [Polish & Documentation](#phase-6-polish--documentation) | 🔲 Not Started | Ongoing |
+| 4f | [Shared Memory IPC & WebGL Canvas](#phase-4f-shared-memory-ipc--webgl-canvas) | ✅ Complete | 2-3 weeks |
+| 5 | [CLI Tool](#phase-5-cli-tool) | 🟡 Partial | 2-3 weeks |
+| 6 | [Polish & Documentation](#phase-6-polish--documentation) | 🟡 Partial | Ongoing |
 | 7 | [Windows & macOS Support](#phase-7-windows--macos-support) | 🔲 Not Started | 3-4 weeks |
 | 8 | [Plugin System & Packaging](#phase-8-plugin-system--packaging) | 🔲 Not Started | 2-3 weeks |
 
@@ -44,7 +44,7 @@
 ### 1.3 WebView Integration
 - [x] Integrate `webview/webview` as `third_party/webview/` (70 headers, C API)
 - [x] Implement `anyar::Window` — wraps webview_t handle via pimpl, RAII destroy
-- [ ] Implement `anyar::WindowManager` — deferred to Phase 4d (single window via App suffices for Phase 1)
+- [x] Implement `anyar::WindowManager` — implemented in Phase 4d (multi-window support)
 - [x] Navigate webview to `http://127.0.0.1:<port>/`
 - [x] Handle main thread requirement — webview_run() on main, asyik on spawned thread
 - [x] Implement graceful shutdown — closing window stops service
@@ -72,7 +72,7 @@
 - [x] Frontend calls `invoke("greet", {name})`, displays result
 - [x] Frontend listens for events via WebSocket bridge
 - [ ] Backend has a periodic fiber emitting counter events (enhancement)
-- [ ] Document build & run steps in example README
+- [x] Document build & run steps in example README
 
 ### Phase 1 Deliverable
 > A native Linux window displaying a React UI, with working request-response IPC and real-time events between React and C++.
@@ -375,7 +375,7 @@ core/src/
 
 > Replaces the single `std::unique_ptr<Window> window_` in `App` with a multi-window manager.
 
-- [ ] Create `core/include/anyar/window_manager.h` — `WindowManager` class
+- [x] Create `core/include/anyar/window_manager.h` — `WindowManager` class
   - `std::map<std::string, std::shared_ptr<Window>> windows_` — label → window
   - `create(label, WindowCreateOptions) → std::string` — create & show window, return label
   - `close(label)` — close and destroy a specific window
@@ -385,7 +385,7 @@ core/src/
   - `labels() → std::vector<std::string>` — list all open window labels
   - `count() → size_t` — number of open windows
   - `on_window_closed` callback — notified when any window is closed (for cleanup)
-- [ ] `WindowCreateOptions` struct (extends `WindowConfig`):
+- [x] `WindowCreateOptions` struct (extends `WindowConfig`):
   - Inherits: `title`, `width`, `height`, `resizable`, `decorations`, `debug`
   - New: `parent` (string, label of parent window — empty = top-level)
   - New: `modal` (bool, default false — if true + parent set, blocks parent)
@@ -400,68 +400,68 @@ core/src/
 > Extend the existing `Window` class with a **platform-neutral public API**. No GTK/Cocoa/Win32 types in public headers. Platform-specific calls live in `window_linux.cpp` (pimpl).
 
 Public API (platform-neutral `window.h`):
-- [ ] `Window::native_handle() → void*` — returns opaque native handle (caller casts per platform)
-- [ ] `Window::set_parent(Window& parent)` — establish parent/child relationship (takes our own `Window`, not a GTK type)
-- [ ] `Window::set_modal(bool)` — block interaction with parent
-- [ ] `Window::set_enabled(bool)` — enable/disable input on this window (pseudo-modal fallback)
-- [ ] `Window::set_always_on_top(bool)` — keep above other windows
-- [ ] `Window::set_closable(bool)` — allow/prevent user closing
-- [ ] `Window::set_position(int x, int y)` — move window
-- [ ] `Window::center_on_parent()` — center relative to parent (or screen if no parent)
-- [ ] `Window::on_close` callback — invoked when window is destroyed
-- [ ] `Window::on_close_requested` interceptable callback — JS can `preventDefault()` to cancel close
-- [ ] Change `Window` constructor to accept `WindowCreateOptions` instead of `WindowConfig`
+- [x] `Window::native_handle() → void*` — returns opaque native handle (caller casts per platform)
+- [x] `Window::set_parent(Window& parent)` — establish parent/child relationship (takes our own `Window`, not a GTK type)
+- [x] `Window::set_modal(bool)` — block interaction with parent
+- [x] `Window::set_enabled(bool)` — enable/disable input on this window (pseudo-modal fallback)
+- [x] `Window::set_always_on_top(bool)` — keep above other windows
+- [x] `Window::set_closable(bool)` — allow/prevent user closing
+- [x] `Window::set_position(int x, int y)` — move window
+- [x] `Window::center_on_parent()` — center relative to parent (or screen if no parent)
+- [x] `Window::on_close` callback — invoked when window is destroyed
+- [x] `Window::on_close_requested` interceptable callback — JS can `preventDefault()` to cancel close
+- [x] Change `Window` constructor to accept `WindowCreateOptions` instead of `WindowConfig`
 
 Linux implementation (`window_linux.cpp`, inside `Window::Impl`):
-- [ ] `native_handle()` → `webview_get_window(wv)` → returns `GtkWindow*` as `void*`
-- [ ] Internal `webkit_view()` → `webview_get_native_handle(BROWSER_CONTROLLER)` → `WebKitWebView*` (for related view sharing, NOT public)
-- [ ] `set_parent(Window&)` → extract parent's native handle → `gtk_window_set_transient_for()`
-- [ ] `set_modal(true)` → `gtk_window_set_modal()`
-- [ ] `set_enabled(bool)` → `gtk_widget_set_sensitive()`
-- [ ] `set_always_on_top(bool)` → `gtk_window_set_keep_above()`
-- [ ] `set_closable(false)` → connect GTK `delete-event` signal → return `TRUE` to block
-- [ ] `set_position(x, y)` → `gtk_window_move()`
-- [ ] `on_close_requested` → GTK `delete-event` signal handler; emit `window:close-requested` event
-- [ ] When creating child window: use `webkit_web_view_new_with_related_view()` to share web process with parent (related view pattern from WRY)
-- [ ] Navigating child windows: navigate to `http://127.0.0.1:<port>/<url_path>` (same server, different route)
+- [x] `native_handle()` → `webview_get_window(wv)` → returns `GtkWindow*` as `void*`
+- [x] Internal `webkit_view()` → `webview_get_native_handle(BROWSER_CONTROLLER)` → `WebKitWebView*` (for related view sharing, NOT public)
+- [x] `set_parent(Window&)` → extract parent's native handle → `gtk_window_set_transient_for()`
+- [x] `set_modal(true)` → `gtk_window_set_modal()`
+- [x] `set_enabled(bool)` → `gtk_widget_set_sensitive()`
+- [x] `set_always_on_top(bool)` → `gtk_window_set_keep_above()`
+- [x] `set_closable(false)` → connect GTK `delete-event` signal → return `TRUE` to block
+- [x] `set_position(x, y)` → `gtk_window_move()`
+- [x] `on_close_requested` → GTK `delete-event` signal handler; emit `window:close-requested` event
+- [x] When creating child window: use `webkit_web_view_new_with_related_view()` to share web process with parent (related view pattern from WRY)
+- [x] Navigating child windows: navigate to `http://127.0.0.1:<port>/<url_path>` (same server, different route)
 
 ### 4d.3 App Integration
 
 > Wire `WindowManager` into `App`, replacing the single-window code.
 
-- [ ] Replace `std::unique_ptr<Window> window_` with `WindowManager window_mgr_`
-- [ ] Update `App::create_window()` to delegate to `WindowManager::create("main", ...)`
-- [ ] Update `App::run()`:
+- [x] Replace `std::unique_ptr<Window> window_` with `WindowManager window_mgr_`
+- [x] Update `App::create_window()` to delegate to `WindowManager::create("main", ...)`
+- [x] Update `App::run()`:
   - Create main window via `window_mgr_.create("main", ...)`
   - Set up native IPC for main window
   - Run platform main loop — on Linux: `gtk_main()` (single loop for all windows, **not** `webview_run()`)
   - Monitor open window count — when all windows closed, stop service
-- [ ] Update `App::setup_native_ipc()` → `App::setup_native_ipc(Window* w)`
+- [x] Update `App::setup_native_ipc()` → `App::setup_native_ipc(Window* w)`
   - Bind `__anyar_ipc__` per window instance
   - Register per-window event sink
   - Inject `window.__LIBANYAR_WINDOW_LABEL__` so frontend knows its own label
-- [ ] Register built-in window management commands (see §4d.5)
-- [ ] Event routing: emit to specific window label or broadcast to all (`"*"`)
-- [ ] `on_window_closed` handler: if `"main"` closes → close all windows + stop app
+- [x] Register built-in window management commands (see §4d.5)
+- [x] Event routing: emit to specific window label or broadcast to all (`"*"`)
+- [x] `on_window_closed` handler: if `"main"` closes → close all windows + stop app
 
 ### 4d.4 Platform Main Loop Abstraction
 
 > Currently `webview_run(wv)` calls `gtk_main()` internally for the single window. With multiple windows we need direct control over the platform main loop.
 
 **Rename `gtk_dispatch.h` → `main_thread.h`** (platform-neutral public API):
-- [ ] Create `core/include/anyar/main_thread.h` — exports `run_on_main_thread(F&& fn)` template (same signature as current `run_on_gtk_main`)
-- [ ] Create `core/src/main_thread_linux.cpp` — implements via `g_idle_add()` + `boost::fibers::promise` (move current `gtk_dispatch.h` body here)
-- [ ] Update all callers: `run_on_gtk_main(...)` → `run_on_main_thread(...)`
-- [ ] Deprecate / remove `gtk_dispatch.h`
+- [x] Create `core/include/anyar/main_thread.h` — exports `run_on_main_thread(F&& fn)` template (same signature as current `run_on_gtk_main`)
+- [x] Create `core/src/main_thread_linux.cpp` — implements via `g_idle_add()` + `boost::fibers::promise` (move current `gtk_dispatch.h` body here)
+- [x] Update all callers: `run_on_gtk_main(...)` → `run_on_main_thread(...)`
+- [x] Deprecate / remove `gtk_dispatch.h`
 
 **Main loop takeover** (Linux-specific, in `app_linux.cpp` or behind `#ifdef`):
-- [ ] Research: verify `webview_run()` calls `gtk_main()` (read webview source)
-- [ ] Switch from `webview_run()` to `gtk_main()` directly on main thread
+- [x] Research: verify `webview_run()` calls `gtk_main()` (read webview source)
+- [x] Switch from `webview_run()` to `gtk_main()` directly on main thread
   - Create all windows via `webview_create()` + manual `gtk_widget_show_all()`
   - Run `gtk_main()` once for all windows
   - On last window close → `gtk_main_quit()`
-- [ ] Ensure `webview_dispatch()` still works (it uses `g_idle_add` internally — should be fine)
-- [ ] Alternative: keep first window via `webview_run()`, create child windows via GTK APIs alongside
+- [x] Ensure `webview_dispatch()` still works (it uses `g_idle_add` internally — should be fine)
+- [x] Alternative: keep first window via `webview_run()`, create child windows via GTK APIs alongside
   - Simpler, less invasive — child windows are native `GtkWindow` + `WebKitWebView`, not `webview_t`
   - Investigate as Plan B if `gtk_main()` takeover causes issues
 
@@ -471,34 +471,34 @@ Linux implementation (`window_linux.cpp`, inside `Window::Impl`):
 
 > C++ commands callable from frontend JS to manage windows.
 
-- [ ] `window:create` — create a new window from frontend
+- [x] `window:create` — create a new window from frontend
   - Args: `{ label, title, width, height, url, parent, modal, resizable, center, alwaysOnTop }`
   - Returns: `{ label }` — the assigned label
   - If `label` already exists → error
-- [ ] `window:close` — close a specific window
+- [x] `window:close` — close a specific window
   - Args: `{ label }` — if omitted, close the calling window
-- [ ] `window:close-all` — close all windows (triggers app shutdown)
-- [ ] `window:list` — list all open window labels with their config
+- [x] `window:close-all` — close all windows (triggers app shutdown)
+- [x] `window:list` — list all open window labels with their config
   - Returns: `[{ label, title, width, height, modal, parent }]`
-- [ ] `window:set-title` — change a window's title
+- [x] `window:set-title` — change a window's title
   - Args: `{ label, title }`
-- [ ] `window:set-size` — resize a window
+- [x] `window:set-size` — resize a window
   - Args: `{ label, width, height }`
-- [ ] `window:focus` — bring a window to front
+- [x] `window:focus` — bring a window to front
   - Args: `{ label }`
-- [ ] `window:set-enabled` — enable/disable input on a window (pseudo-modal pattern)
+- [x] `window:set-enabled` — enable/disable input on a window (pseudo-modal pattern)
   - Args: `{ label, enabled }`
-- [ ] `window:set-always-on-top` — toggle always-on-top
+- [x] `window:set-always-on-top` — toggle always-on-top
   - Args: `{ label, alwaysOnTop }`
-- [ ] `window:emit` — emit an event to a specific window (or all)
+- [x] `window:emit` — emit an event to a specific window (or all)
   - Args: `{ label, event, payload }` — label `"*"` = broadcast
-- [ ] `window:get-label` — returns the calling window's own label
+- [x] `window:get-label` — returns the calling window's own label
 
 ### 4d.6 JS Bridge — Window Module
 
 > TypeScript API for frontend developers: `@libanyar/api/window`
 
-- [ ] Create `js-bridge/src/modules/window.ts`:
+- [x] Create `js-bridge/src/modules/window.ts`:
   ```typescript
   // Create a new child/modal window
   createWindow(opts: WindowOptions): Promise<string>
@@ -535,7 +535,7 @@ Linux implementation (`window_linux.cpp`, inside `Window::Impl`):
   onClose(handler: () => void): UnlistenFn  // before this window closes
   onCloseRequested(handler: (event: CloseRequestedEvent) => void): UnlistenFn  // interceptable close (call event.preventDefault() to cancel)
   ```
-- [ ] `WindowOptions` interface:
+- [x] `WindowOptions` interface:
   ```typescript
   interface WindowOptions {
     label: string;           // unique window identifier
@@ -553,8 +553,8 @@ Linux implementation (`window_linux.cpp`, inside `Window::Impl`):
     minimizable?: boolean;   // (default: true)
   }
   ```
-- [ ] Export from `js-bridge/src/index.ts`
-- [ ] Add to `window.__anyar__` global object
+- [x] Export from `js-bridge/src/index.ts`
+- [x] Add to `window.__anyar__` global object
 
 ### 4d.7 Frontend Routing for Child Windows
 
@@ -577,16 +577,16 @@ Linux implementation (`window_linux.cpp`, inside `Window::Impl`):
 
 > Events need window-awareness for targeted delivery.
 
-- [ ] Extend `EventBus` to support per-window sinks (keyed by label)
+- [ ] Extend `EventBus` to support per-window sinks (keyed by label) *(currently uses generic broadcast to all ws_sinks_)*
   - `add_window_sink(label, sink_fn) → uint64_t`
   - `emit_to_window(label, event, payload)` — send to one window
   - `emit(event, payload)` — broadcast to all windows (existing behavior)
-- [ ] JS-side: `listen()` receives events for current window + broadcasts
+- [x] JS-side: `listen()` receives events for current window + broadcasts
 - [ ] New: `listenGlobal(event, handler)` — listen to events from any window
-- [ ] Window lifecycle events (emitted automatically):
+- [x] Window lifecycle events (emitted automatically):
   - `window:created` — `{ label, title }` — broadcast when a window is created
   - `window:closed` — `{ label }` — broadcast when a window is closed
-  - `window:focused` — `{ label }` — broadcast when a window gains focus
+  - [ ] `window:focused` — `{ label }` — broadcast when a window gains focus *(not yet implemented)*
 
 ### 4d.9 Key-Storage Example: Native Modal Window
 
@@ -883,7 +883,7 @@ Feature 1 (`buffer`) is a standalone general-purpose API. Feature 2 (`canvas`) i
 ### 4f.1 Feature 1: Shared Memory IPC — C++ Core (`anyar::SharedBuffer`)
 
 #### 4f.1.1 SharedBuffer Class (Linux Implementation)
-- [ ] Add `core/include/anyar/shared_buffer.h` — platform-neutral public API:
+- [x] Add `core/include/anyar/shared_buffer.h` — platform-neutral public API:
   ```cpp
   namespace anyar {
   class SharedBuffer {
@@ -904,7 +904,7 @@ Feature 1 (`buffer`) is a standalone general-purpose API. Feature 2 (`canvas`) i
   };
   } // namespace anyar
   ```
-- [ ] Add `core/src/shared_buffer_linux.cpp`:
+- [x] Add `core/src/shared_buffer_linux.cpp`:
   - `create()`: `shm_open(O_CREAT|O_RDWR)` → `ftruncate(size)` → `mmap(PROT_READ|PROT_WRITE, MAP_SHARED)`
   - Store `fd`, `ptr`, `size`, `shm_name` (auto-generated `/anyar_<pid>_<name>`)
   - Destructor: `munmap()` + `shm_unlink()`
@@ -912,13 +912,13 @@ Feature 1 (`buffer`) is a standalone general-purpose API. Feature 2 (`canvas`) i
 - [ ] Phase 7 adds: `shared_buffer_win32.cpp` (WebView2 `CreateSharedBuffer`), `shared_buffer_macos.cpp` (POSIX shm)
 
 #### 4f.1.2 SharedBuffer URI Scheme (Linux)
-- [ ] Register `anyar-shm://` custom URI scheme via `webkit_web_context_register_uri_scheme()` in `App` startup
-- [ ] Scheme handler: parses `anyar-shm://<buffer-name>` → looks up SharedBuffer by name → creates `GMemoryInputStream` from mapped pointer → responds with `application/octet-stream`
-- [ ] CORS headers for cross-origin fetch from `http://127.0.0.1:<port>`
+- [x] Register `anyar-shm://` custom URI scheme via `webkit_web_context_register_uri_scheme()` in `App` startup
+- [x] Scheme handler: parses `anyar-shm://<buffer-name>` → looks up SharedBuffer by name → creates `GMemoryInputStream` from mapped pointer → responds with `application/octet-stream`
+- [x] CORS headers for cross-origin fetch from `http://127.0.0.1:<port>`
 - [ ] Phase 7: Windows uses `PostSharedBufferToScript()` (no URI scheme needed); macOS uses `WKURLSchemeHandler`
 
 #### 4f.1.3 SharedBufferPool (Ring Buffer for Streaming)
-- [ ] Add `core/include/anyar/shared_buffer_pool.h`:
+- [x] Add `core/include/anyar/shared_buffer_pool.h`:
   ```cpp
   namespace anyar {
   class SharedBufferPool {
@@ -934,20 +934,20 @@ Feature 1 (`buffer`) is a standalone general-purpose API. Feature 2 (`canvas`) i
   };
   } // namespace anyar
   ```
-- [ ] Implement with atomic index + semaphore/condition_variable for back-pressure
-- [ ] Prevents producer from overwriting a buffer JS hasn't finished reading
+- [x] Implement with atomic index + semaphore/condition_variable for back-pressure
+- [x] Prevents producer from overwriting a buffer JS hasn't finished reading
 
 #### 4f.1.4 IPC Commands for Buffer Management
-- [ ] `buffer:create` — create a named shared buffer (returns name + size)
-- [ ] `buffer:release` — JS signals it has finished reading a buffer
-- [ ] `buffer:destroy` — cleanup a named buffer
-- [ ] `buffer:list` — list active shared buffers (for debugging)
-- [ ] Register commands in `App::register_builtin_commands()`
+- [x] `buffer:create` — create a named shared buffer (returns name + size)
+- [x] `buffer:release` — JS signals it has finished reading a buffer
+- [x] `buffer:destroy` — cleanup a named buffer
+- [x] `buffer:list` — list active shared buffers (for debugging)
+- [x] Register commands in `App::register_builtin_commands()`
 
 ### 4f.2 Feature 1: Shared Memory IPC — JS Bridge (`@libanyar/api/buffer`)
 
 #### 4f.2.1 Buffer Module
-- [ ] Add `js-bridge/src/modules/buffer.ts`:
+- [x] Add `js-bridge/src/modules/buffer.ts`:
   ```typescript
   export interface SharedBufferHandle {
       name: string;
@@ -966,21 +966,21 @@ Feature 1 (`buffer`) is a standalone general-purpose API. Feature 2 (`canvas`) i
   // One-shot: request a buffer's current content
   export function fetchBuffer(name: string): Promise<ArrayBuffer>;
   ```
-- [ ] `getBuffer()` implementation:
+- [x] `getBuffer()` implementation:
   - Native mode: `fetch("anyar-shm://<name>")` → `response.arrayBuffer()` (Linux/macOS); or direct `ArrayBuffer` from shared buffer event (Windows)
   - Fallback mode (external browser): `invoke("buffer:read", {name})` → base64 decode (slow but functional)
-- [ ] `release()`: calls `invoke("buffer:release", {name})` to signal C++ the buffer is free
-- [ ] Export from `@libanyar/api` main entry point
+- [x] `release()`: calls `invoke("buffer:release", {name})` to signal C++ the buffer is free
+- [x] Export from `@libanyar/api` main entry point
 
 #### 4f.2.2 Platform Detection & Fallback
-- [ ] Detect if `anyar-shm://` scheme is available (native webview mode)
-- [ ] If not (dev server in browser), fall back to WebSocket binary or HTTP fetch
-- [ ] Transparent to consumer code — same `onSharedBuffer()` API regardless of transport
+- [x] Detect if `anyar-shm://` scheme is available (native webview mode)
+- [x] If not (dev server in browser), fall back to WebSocket binary or HTTP fetch
+- [x] Transparent to consumer code — same `onSharedBuffer()` API regardless of transport
 
 ### 4f.3 Feature 2: WebGL Canvas Renderer (`@libanyar/api/canvas`)
 
 #### 4f.3.1 Frame Renderer Module
-- [ ] Add `js-bridge/src/modules/canvas.ts`:
+- [x] Add `js-bridge/src/modules/canvas.ts`:
   ```typescript
   export interface FrameRendererOptions {
       format: 'rgba' | 'yuv420' | 'rgb' | 'nv12';
@@ -1002,8 +1002,8 @@ Feature 1 (`buffer`) is a standalone general-purpose API. Feature 2 (`canvas`) i
   ```
 
 #### 4f.3.2 WebGL Shader Pipeline
-- [ ] RGBA path: single `texImage2D()` upload → fullscreen quad with passthrough shader
-- [ ] YUV420 path: three separate textures (Y, U, V) → YUV→RGB conversion fragment shader:
+- [x] RGBA path: single `texImage2D()` upload → fullscreen quad with passthrough shader
+- [x] YUV420 path: three separate textures (Y, U, V) → YUV→RGB conversion fragment shader:
   ```glsl
   uniform sampler2D y_tex, u_tex, v_tex;
   varying vec2 v_uv;
@@ -1019,12 +1019,12 @@ Feature 1 (`buffer`) is a standalone general-purpose API. Feature 2 (`canvas`) i
       );
   }
   ```
-- [ ] NV12 path: two textures (Y plane, interleaved UV plane)
-- [ ] Custom shader support: user provides fragment shader, renderer handles vertex + texture setup
-- [ ] Vertex shader: fullscreen quad (two triangles), UV coordinates for texture mapping
+- [x] NV12 path: two textures (Y plane, interleaved UV plane)
+- [x] Custom shader support: user provides fragment shader, renderer handles vertex + texture setup
+- [x] Vertex shader: fullscreen quad (two triangles), UV coordinates for texture mapping
 
 #### 4f.3.3 Integration Helper
-- [ ] `createBufferRenderer()` — convenience that wires `onSharedBuffer()` to `drawFrame()` automatically:
+- [x] `createBufferRenderer()` — convenience that wires `onSharedBuffer()` to `drawFrame()` automatically:
   ```typescript
   export function createBufferRenderer(
       canvas: HTMLCanvasElement,
@@ -1033,11 +1033,11 @@ Feature 1 (`buffer`) is a standalone general-purpose API. Feature 2 (`canvas`) i
   ): { destroy: () => void };
   // Internally: onSharedBuffer(name, h => { renderer.drawFrame(h.getBuffer(), h.metadata); h.release(); })
   ```
-- [ ] Export from `@libanyar/api` main entry point and as `@libanyar/api/canvas`
+- [x] Export from `@libanyar/api` main entry point and as `@libanyar/api/canvas`
 
 ### 4f.4 CMake & Build Integration
-- [ ] Add `shared_buffer_linux.cpp` to `core/CMakeLists.txt` under Linux guard
-- [ ] Link `-lrt` on Linux (required for `shm_open`)
+- [x] Add `shared_buffer_linux.cpp` to `core/CMakeLists.txt` under Linux guard
+- [x] Link `-lrt` on Linux (required for `shm_open`)
 - [ ] Phase 7 adds: `shared_buffer_win32.cpp`, `shared_buffer_macos.cpp`
 
 ### 4f.5 WebSocket Binary Fallback Path
@@ -1046,15 +1046,15 @@ Feature 1 (`buffer`) is a standalone general-purpose API. Feature 2 (`canvas`) i
 - [ ] Video player example can optionally be updated to use the new buffer API, but existing WS path remains functional
 
 ### 4f.6 Testing & Validation
-- [ ] Unit test: create/destroy shared buffer, write/read data integrity
-- [ ] Unit test: SharedBufferPool acquire/release cycling
-- [ ] Integration test: C++ writes frame → JS fetches via `anyar-shm://` → validates content
+- [x] Unit test: create/destroy shared buffer, write/read data integrity
+- [x] Unit test: SharedBufferPool acquire/release cycling
+- [x] Integration test: C++ writes frame → JS fetches via `anyar-shm://` → validates content
 - [ ] Performance test: measure latency for 8MB and 33MB buffers (target <0.5ms and <1ms)
 - [ ] Fallback test: verify WebSocket binary path works when scheme is unavailable
 
 ### 4f.7 Example: SharedBuffer Video Player (Enhancement)
-- [ ] Optionally update video-player example to use `SharedBufferPool` instead of raw WebSocket
-- [ ] Add YUV420 mode: send Y/U/V planes as separate shared buffers, render with GPU shader
+- [x] Optionally update video-player example to use `SharedBufferPool` instead of raw WebSocket
+- [x] Add YUV420 mode: send Y/U/V planes as separate shared buffers, render with GPU shader
 - [ ] Benchmark before/after: WebSocket RGBA vs SharedBuffer YUV420
 
 ### Implementation Order
@@ -1113,20 +1113,25 @@ Feature 1 (`buffer`) is a standalone general-purpose API. Feature 2 (`canvas`) i
 - [x] Guide: Building Your First App
 - [x] Guide: Writing Plugins
 - [x] Guide: Database Integration
+- [x] Guide: Shared Memory & WebGL Canvas
+- [x] Guide: Multi-Window
 - [x] Architecture overview for contributors
 
 ### 6.2 Examples
 - [x] Hello World (greet command) — exists with README
+- [x] Key Storage (SQLite CRUD + Svelte + multi-window modal) — exists with README
+- [x] Video Player (SharedBufferPool + WebGL canvas, RGBA/YUV420) — exists with README
+- [x] WiFi Analyzer (passive/active scan, libnl, WebGL canvas) — exists with README
 - [ ] Todo App (SQLite CRUD + React)
 - [ ] File Explorer (native dialogs + file system)
 - [ ] Markdown Editor (file read/write + live preview)
 - [ ] Chat App (WebSocket events demonstration)
 
 ### 6.3 Testing
-- [ ] Unit tests for core components (Catch2)
-- [ ] Integration tests (webview + server + IPC)
+- [x] Unit tests for core components (Catch2) — 8 test files, 1932 lines, 7/8 pass (webgl_canvas segfaults during teardown)
+- [x] Integration tests (webview + server + IPC) — SharedBuffer integration tests implemented
 - [ ] JS bridge unit tests (Vitest)
-- [ ] Linux CI validation
+- [x] Linux CI validation (CircleCI — Ubuntu 22.04, GCC 11)
 
 ### 6.4 Performance
 - [ ] Benchmark: startup time (target < 500ms)

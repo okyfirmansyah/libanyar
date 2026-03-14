@@ -1,6 +1,8 @@
-<img src="docs/libanyar.png" alt="LibAnyar" width="420" />
+<img src="docs/assets/libanyar.png" alt="LibAnyar" width="420" />
 
 # LibAnyar
+
+[![CircleCI](https://dl.circleci.com/status-badge/img/gh/okyfirmansyah/libanyar/tree/main.svg?style=shield)](https://dl.circleci.com/status-badge/redirect/gh/okyfirmansyah/libanyar/tree/main)
 
 > **Anyar** (Indonesian/Javanese) — "new", "fresh", "modern"
 
@@ -151,15 +153,14 @@ See [PLAN.md](PLAN.md) for full roadmap.
 A minimal example showing IPC commands, events, and built-in plugins.
 
 <p align="center">
-  <img src="docs/hello_world.gif" alt="Hello World Example" />
+  <img src="docs/assets/hello_world.gif" alt="Hello World Example" />
 </p>
-
 ### Local Video Player
 
 FFmpeg-powered video player with WebSocket streaming and Canvas rendering.
 
 <p align="center">
-  <img src="docs/video_player.gif" alt="Local Video Player Example" />
+  <video src="docs/assets/video-player.mp4" alt="Local Video Player Example"></video>
 </p>
 
 ### Secure Key Storage
@@ -167,7 +168,15 @@ FFmpeg-powered video player with WebSocket streaming and Canvas rendering.
 Encrypted password manager with AES-256-GCM, multi-window modal dialogs, and a custom plugin.
 
 <p align="center">
-  <img src="docs/secure_key_storage.gif" alt="Secure Key Storage Example" />
+  <video src="docs/assets/key-storage.mp4" alt="Secure Key Storage Example"></video>
+</p>
+
+### Wifi Analyzer
+
+A desktop Wifi analyzer with real-time signal strength visualization and channel scanning.
+
+<p align="center">
+  <video src="docs/assets/wifi-analyzer.mp4" alt="Wifi Analyzer Example"></video>
 </p>
 
 ## License

@@ -143,22 +143,22 @@
 
 <main class="h-screen flex flex-col overflow-hidden" style="background: var(--bg); color: var(--text);">
   <!-- Header -->
-  <header class="flex items-center gap-4 px-6 py-3 shrink-0 relative" style="border-bottom: none;">
-    <!-- Gradient bottom border -->
-    <div class="absolute bottom-0 left-0 right-0 h-[2px]" style="background: linear-gradient(90deg, #0072F0, #00E1C9); opacity: 0.6;"></div>
-
-    <h1 class="text-base font-semibold tracking-tight whitespace-nowrap">
-      <span style="background: linear-gradient(135deg, #0072F0, #00E1C9); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">LibAnyar</span> Video Player
-    </h1>
+  <header class="flex items-center gap-4 px-6 py-3 shrink-0" style="border-bottom: 1px solid var(--border);">
+    <div class="flex items-center gap-2.5 pl-4">
+      <h1 class="text-base font-semibold tracking-tight whitespace-nowrap" style="color: var(--text);">
+        Video Player
+      </h1>
+    </div>
 
     <button
       onclick={openFile}
       disabled={loading}
-      class="px-4 py-1.5 text-white text-sm font-medium rounded-lg transition-all disabled:opacity-50 cursor-pointer"
-      style="background: linear-gradient(135deg, #0072F0, #00E1C9);"
-      onmouseenter={(e) => e.target.style.boxShadow = '0 2px 12px rgba(0,225,201,0.15)'}
-      onmouseleave={(e) => e.target.style.boxShadow = 'none'}
+      class="btn btn-primary"
     >
+      <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+              d="M5 19a2 2 0 01-2-2V7a2 2 0 012-2h4l2 2h4a2 2 0 012 2v1M5 19h14a2 2 0 002-2v-5a2 2 0 00-2-2H9a2 2 0 00-2 2v5a2 2 0 01-2 2z" />
+      </svg>
       {loading ? 'Loading…' : 'Open File'}
     </button>
 
@@ -179,7 +179,7 @@
 
   <!-- Error -->
   {#if errorMsg}
-    <div class="px-6 py-2 text-sm" style="background: rgba(233,44,55,0.1); color: var(--danger);">
+    <div class="px-6 py-2 text-sm" style="background: var(--danger-dim); color: var(--danger);">
       {errorMsg}
     </div>
   {/if}
@@ -223,9 +223,13 @@
           {fmtTime(currentTime)} / {fmtTime(duration)}
         </span>
 
-        <span class="text-xs ml-auto" style="color: rgba(255,255,255,0.3);">
-          {videoInfo?.width}×{videoInfo?.height} SharedBuffer WebGL{gpuRenderer ? ` · ${gpuRenderer}` : ''}
-        </span>
+        <div class="flex items-center gap-3 ml-auto">
+          <span class="text-xs" style="color: rgba(255,255,255,0.3);">
+            {videoInfo?.width}×{videoInfo?.height} SharedBuffer WebGL{gpuRenderer ? ` · ${gpuRenderer}` : ''}
+          </span>
+          <span style="width: 1px; height: 12px; background: rgba(255,255,255,0.15);"></span>
+          <img src="/assets/text.png" alt="LibAnyar" class="h-[15px]" style="opacity: 0.6;" />
+        </div>
       </div>
 
       <!-- Bottom panel: absolutely positioned overlay, slides up/down -->
@@ -294,13 +298,49 @@
       </div>
     {:else if !loading}
       <!-- Empty state -->
-      <div class="flex-1 flex flex-col items-center justify-center gap-4" style="color: var(--text-dim);">
-        <svg class="w-16 h-16 opacity-25" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <div class="flex-1 flex flex-col items-center justify-center gap-5" style="color: var(--text-dim);">
+        <svg class="w-16 h-16 opacity-20" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z"/>
         </svg>
         <p class="text-sm">Open a video file to begin</p>
-        <p class="text-xs opacity-50">Supports MP4, WebM, MKV, AVI, MOV, OGG</p>
+        <p class="text-xs" style="color: var(--text-muted);">Supports MP4, WebM, MKV, AVI, MOV, OGG</p>
+        <!-- Powered by LibAnyar -->
+        <div class="flex items-center gap-2.5 mt-6" style="opacity: 0.8;">
+          <span class="text-[12px]" style="color: var(--text-muted); letter-spacing: 0.02em;">powered by</span>
+          <div class="logo-shine-wrap">
+            <img src="/assets/libanyar.png" alt="LibAnyar" class="h-12" style="filter: grayscale(0.2) brightness(0.85);" />
+            <div class="logo-shine"></div>
+          </div>
+        </div>
       </div>
     {/if}
   </div>
 </main>
+
+<style>
+  .logo-shine-wrap {
+    position: relative;
+    display: inline-block;
+    overflow: hidden;
+    border-radius: 3px;
+  }
+
+  .logo-shine {
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(
+      105deg,
+      transparent 30%,
+      rgba(255, 255, 255, 0.55) 50%,
+      transparent 70%
+    );
+    transform: translateX(-120%);
+    animation: logo-shine-sweep 0.9s cubic-bezier(0.4, 0, 0.2, 1) 0.5s 1 forwards;
+    pointer-events: none;
+  }
+
+  @keyframes logo-shine-sweep {
+    from { transform: translateX(-120%); }
+    to   { transform: translateX(160%);  }
+  }
+</style>

@@ -422,60 +422,13 @@ void WifiPlugin::render_spectrum(const std::vector<AccessPoint>& aps,
         }
     };
 
-    // ── Minimal 4×5 bitmap font (digits 0-9, minus, space) ──────────
-    //    Each glyph: 5 rows, 4 bits per row (bit3 = leftmost pixel)
-    struct Glyph { uint8_t rows[5]; };
-    static const Glyph font[] = {
-        {{0x6, 0x9, 0x9, 0x9, 0x6}}, // '0'
-        {{0x2, 0x6, 0x2, 0x2, 0x7}}, // '1'
-        {{0xF, 0x1, 0x6, 0x8, 0xF}}, // '2'
-        {{0xE, 0x1, 0x6, 0x1, 0xE}}, // '3'
-        {{0x9, 0x9, 0xF, 0x1, 0x1}}, // '4'
-        {{0xF, 0x8, 0xE, 0x1, 0xE}}, // '5'
-        {{0x7, 0x8, 0xE, 0x9, 0x6}}, // '6'
-        {{0xF, 0x1, 0x2, 0x4, 0x4}}, // '7'
-        {{0x6, 0x9, 0x6, 0x9, 0x6}}, // '8'
-        {{0x6, 0x9, 0x7, 0x1, 0x6}}, // '9'
-        {{0x0, 0x0, 0xE, 0x0, 0x0}}, // '-' idx 10
-        {{0x0, 0x0, 0x0, 0x0, 0x0}}, // ' ' idx 11
-    };
-
-    auto glyph_idx = [](char c) -> int {
-        if (c >= '0' && c <= '9') return c - '0';
-        if (c == '-') return 10;
-        return 11; // space / unknown
-    };
-
-    // Draw a text string at (tx, ty) with 2× scale
-    auto draw_text = [&](int tx, int ty, const std::string& text,
-                         uint8_t cr, uint8_t cg, uint8_t cb, int scale = 2) {
-        int cx = tx;
-        for (char c : text) {
-            auto& g = font[glyph_idx(c)];
-            for (int row = 0; row < 5; ++row)
-                for (int col = 0; col < 4; ++col)
-                    if (g.rows[row] & (0x8 >> col))
-                        for (int sy = 0; sy < scale; ++sy)
-                            for (int sx = 0; sx < scale; ++sx)
-                                setpx(cx + col * scale + sx,
-                                      ty + row * scale + sy,
-                                      cr, cg, cb, 255);
-            cx += (4 + 1) * scale; // char width + 1px gap
-        }
-    };
-
-    // Measure text width in pixels
-    auto text_width = [](const std::string& text, int scale = 2) -> int {
-        return static_cast<int>(text.size()) * (4 + 1) * scale - scale;
-    };
-
     // ── Draw grid ───────────────────────────────────────────────────────
 
     // Axes
     hline(margin_top + plot_h, margin_left, margin_left + plot_w, 60, 60, 80);
     vline(margin_left, margin_top, margin_top + plot_h, 60, 60, 80);
 
-    // Y-axis: dBm grid lines + labels (every 20 dBm)
+    // Y-axis: dBm grid lines (every 20 dBm)
     const int dbm_values[] = {-100, -80, -60, -40, -20};
     for (int dbm : dbm_values) {
         double norm = (dbm - dbm_min) / (dbm_max - dbm_min);
@@ -484,28 +437,16 @@ void WifiPlugin::render_spectrum(const std::vector<AccessPoint>& aps,
         // Grid line (skip for -100, that's the baseline)
         if (dbm > static_cast<int>(dbm_min))
             hline(y, margin_left, margin_left + plot_w, 40, 40, 55);
-
-        // Label — right-aligned in left margin
-        std::string label = std::to_string(dbm);
-        int tw = text_width(label);
-        draw_text(margin_left - tw - 4, y - 5, label, 120, 120, 150);
     }
 
-    // 2.4 GHz channel markers + labels
+    // 2.4 GHz channel markers
     for (int ch = 1; ch <= 14; ++ch) {
         double norm_x = (ch - 1.0) / 13.0;
         int x = margin_left + static_cast<int>(norm_x * w_24);
         vline(x, margin_top + plot_h, margin_top + plot_h + 5, 80, 80, 100);
-
-        // Channel number below axis (show every 2nd for space, or all if wide)
-        if (ch <= 13 && (ch % 2 == 1 || w_24 > 250)) {
-            std::string lbl = std::to_string(ch);
-            int tw = text_width(lbl);
-            draw_text(x - tw / 2, margin_top + plot_h + 8, lbl, 100, 100, 120);
-        }
     }
 
-    // 5 GHz channel markers + labels
+    // 5 GHz channel markers
     const int ch5[] = {36, 40, 44, 48, 52, 56, 60, 64,
                        100, 104, 108, 112, 116, 120, 124, 128,
                        132, 136, 140, 144, 149, 153, 157, 161, 165};
@@ -514,20 +455,7 @@ void WifiPlugin::render_spectrum(const std::vector<AccessPoint>& aps,
         double norm_x = static_cast<double>(i) / (n_ch5 - 1);
         int x = margin_left + w_24 + band_gap + static_cast<int>(norm_x * w_5);
         vline(x, margin_top + plot_h, margin_top + plot_h + 5, 80, 80, 100);
-
-        // Show label every 4th channel to avoid clutter
-        if (i % 4 == 0 || i == n_ch5 - 1) {
-            std::string lbl = std::to_string(ch5[i]);
-            int tw = text_width(lbl);
-            draw_text(x - tw / 2, margin_top + plot_h + 8, lbl, 100, 100, 120);
-        }
     }
-
-    // Band labels
-    draw_text(margin_left + w_24 / 2 - text_width("2.4") / 2,
-              margin_top + plot_h + 24, "2.4", 80, 80, 100);
-    draw_text(margin_left + w_24 + band_gap + w_5 / 2 - text_width("5") / 2,
-              margin_top + plot_h + 24, "5", 80, 80, 100);
 
     // ── Channel → pixel-X mapping ──────────────────────────────────────
 

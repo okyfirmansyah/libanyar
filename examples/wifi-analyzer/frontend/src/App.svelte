@@ -25,6 +25,65 @@
   // Sort mode for the network table
   let sortBy = $state('signal'); // 'signal' | 'channel' | 'ssid'
 
+  // ── Tooltip on peak hover ─────────────────────────────────────────────
+  // C++ palette (same order as render_spectrum)
+  const PALETTE = [
+    '#42a5f5','#ef5350','#66bb6a','#ffa726',
+    '#ab47bc','#26c6da','#fff176','#8d6e63',
+    '#ec407a','#00e676',
+  ];
+  const CH5 = [36,40,44,48,52,56,60,64,100,104,108,112,116,120,124,128,
+               132,136,140,144,149,153,157,161,165];
+
+  /** Mirror of C++ ch_to_px — returns center x in 800×400 canvas coords */
+  function peakCx(ch) {
+    if (ch >= 1 && ch <= 14) return 50 + ((ch - 1) / 13) * 277;
+    const i = CH5.indexOf(ch);
+    return i >= 0 ? 347 + (i / 24) * 433 : null;
+  }
+
+  /** Mirror of C++ peak_y in 800×400 canvas coords */
+  function peakCy(signal) {
+    const norm = Math.max(0, Math.min(1, (signal + 100) / 80));
+    return 30 + 330 - norm * 330;
+  }
+
+  /** @type {HTMLDivElement | undefined} */
+  let canvasWrap = $state(undefined);
+
+  /** @type {{ ap: object, color: string, px: number, py: number } | null} */
+  let tooltip = $state(null);
+
+  const HIT_RADIUS = 18; // canvas units — peak dot is ±2 px
+
+  function onCanvasMouseMove(e) {
+    if (!canvasWrap || networks.length === 0) { tooltip = null; return; }
+    const rect = canvasWrap.getBoundingClientRect();
+    // Convert CSS mouse coords → 800×400 canvas space
+    const mx = (e.clientX - rect.left) / rect.width  * 800;
+    const my = (e.clientY - rect.top)  / rect.height * 400;
+
+    let best = null, bestDist = HIT_RADIUS;
+    networks.forEach((ap, i) => {
+      const cx = peakCx(ap.channel);
+      if (cx === null) return;
+      const cy = peakCy(ap.signal);
+      const d = Math.hypot(mx - cx, my - cy);
+      if (d < bestDist) {
+        bestDist = d;
+        // Convert peak back to CSS px for tooltip position
+        const cssPx = (cx / 800) * rect.width;
+        const cssPy = (cy / 400) * rect.height;
+        // Flip tooltip below peak when peak is in top 38% of the canvas
+        const flip = cssPy < rect.height * 0.38;
+        best = { ap, color: PALETTE[i % PALETTE.length], px: cssPx, py: cssPy, flip };
+      }
+    });
+    tooltip = best;
+  }
+
+  function onCanvasMouseLeave() { tooltip = null; }
+
   // Detect GPU renderer name
   function detectGpu() {
     try {
@@ -200,14 +259,88 @@
   <!-- ── Main content ── -->
   <div class="flex-1 flex flex-col overflow-hidden min-h-0">
     <!-- Spectrum Canvas -->
-    <div class="flex-1 relative min-h-0" style="background: var(--surface);">
+    <div bind:this={canvasWrap}
+         class="flex-1 relative min-h-0"
+         style="background: var(--surface);"
+         onmousemove={onCanvasMouseMove}
+         onmouseleave={onCanvasMouseLeave}>
       <canvas bind:this={canvasEl}
               width="800" height="400"
               class="w-full h-full">
       </canvas>
-      <div class="absolute top-2 left-2.5 text-[10px] font-medium" style="color: var(--text-muted);">
-        dBm
-      </div>
+      <!-- SVG axis labels — crisp vector text, scales with canvas -->
+      <!-- viewBox matches canvas intrinsic size (800×400); overflow:visible lets labels in margins show -->
+      <svg viewBox="0 0 800 400"
+           preserveAspectRatio="none"
+           class="absolute inset-0 w-full h-full pointer-events-none"
+           xmlns="http://www.w3.org/2000/svg"
+           style="font-family: 'Inter', system-ui, sans-serif; overflow: visible;">
+        <!-- dBm unit -->
+        <text x="16" y="20" text-anchor="start" font-size="10" fill="#6e767a">dBm</text>
+
+        <!-- Y-axis dBm value labels  (margin_left=50, plot_h=330, margin_top=30) -->
+        <!-- y = margin_top + plot_h − (dbm+100)/80 × plot_h -->
+        <text x="44" y="30"    text-anchor="end" dominant-baseline="middle" font-size="10" fill="#788387">-20</text>
+        <text x="44" y="112.5" text-anchor="end" dominant-baseline="middle" font-size="10" fill="#788387">-40</text>
+        <text x="44" y="195"   text-anchor="end" dominant-baseline="middle" font-size="10" fill="#788387">-60</text>
+        <text x="44" y="277.5" text-anchor="end" dominant-baseline="middle" font-size="10" fill="#788387">-80</text>
+        <text x="44" y="360"   text-anchor="end" dominant-baseline="middle" font-size="10" fill="#788387">-100</text>
+
+        <!-- 2.4 GHz channel labels  x = 50 + (ch-1)/13 × 277 -->
+        <text x="50"    y="374" text-anchor="middle" font-size="9" fill="#788387">1</text>
+        <text x="71.3"  y="374" text-anchor="middle" font-size="9" fill="#788387">2</text>
+        <text x="92.6"  y="374" text-anchor="middle" font-size="9" fill="#788387">3</text>
+        <text x="113.8" y="374" text-anchor="middle" font-size="9" fill="#788387">4</text>
+        <text x="135.1" y="374" text-anchor="middle" font-size="9" fill="#788387">5</text>
+        <text x="156.4" y="374" text-anchor="middle" font-size="9" fill="#788387">6</text>
+        <text x="177.7" y="374" text-anchor="middle" font-size="9" fill="#788387">7</text>
+        <text x="198.9" y="374" text-anchor="middle" font-size="9" fill="#788387">8</text>
+        <text x="220.2" y="374" text-anchor="middle" font-size="9" fill="#788387">9</text>
+        <text x="241.5" y="374" text-anchor="middle" font-size="9" fill="#788387">10</text>
+        <text x="262.8" y="374" text-anchor="middle" font-size="9" fill="#788387">11</text>
+        <text x="284.1" y="374" text-anchor="middle" font-size="9" fill="#788387">12</text>
+        <text x="305.4" y="374" text-anchor="middle" font-size="9" fill="#788387">13</text>
+
+        <!-- 2.4 GHz band label -->
+        <text x="178" y="391" text-anchor="middle" font-size="9" fill="#6e767a">2.4 GHz</text>
+
+        <!-- 5 GHz channel labels  x = 347 + i/24 × 433  (every 4th of 25 channels) -->
+        <text x="347" y="374" text-anchor="middle" font-size="9" fill="#788387">36</text>
+        <text x="419" y="374" text-anchor="middle" font-size="9" fill="#788387">52</text>
+        <text x="491" y="374" text-anchor="middle" font-size="9" fill="#788387">100</text>
+        <text x="564" y="374" text-anchor="middle" font-size="9" fill="#788387">116</text>
+        <text x="636" y="374" text-anchor="middle" font-size="9" fill="#788387">132</text>
+        <text x="708" y="374" text-anchor="middle" font-size="9" fill="#788387">149</text>
+        <text x="780" y="374" text-anchor="middle" font-size="9" fill="#788387">165</text>
+
+        <!-- 5 GHz band label -->
+        <text x="564" y="391" text-anchor="middle" font-size="9" fill="#6e767a">5 GHz</text>
+      </svg>
+
+      <!-- Peak tooltip -->
+      {#if tooltip}
+        {@const ap = tooltip.ap}
+        <div class="peak-tooltip"
+             class:flip={tooltip.flip}
+             style="left: {tooltip.px}px; top: {tooltip.py}px; --arrow-left: {tooltip.arrowLeft}px;">
+          <div class="peak-tooltip-header">
+            <span class="peak-dot" style="background: {tooltip.color};"></span>
+            <span class="peak-ssid">{ap.ssid || '(Hidden)'}</span>
+            {#if ap.associated}
+              <span class="badge badge-accent" style="font-size:10px;padding:1px 5px;">Connected</span>
+            {/if}
+          </div>
+          <div class="peak-tooltip-rows">
+            <div class="peak-row"><span>Channel</span><span>{ap.channel}</span></div>
+            <div class="peak-row"><span>Freq</span><span>{ap.frequency} MHz</span></div>
+            <div class="peak-row"><span>Signal</span>
+              <span style="color: {ap.signal >= -50 ? 'var(--success)' : ap.signal >= -70 ? 'var(--warning)' : 'var(--danger)'}; font-weight:600;">{ap.signal} dBm</span>
+            </div>
+            <div class="peak-row"><span>Width</span><span>{ap.bandwidth} MHz</span></div>
+            <div class="peak-row"><span>Security</span><span>{ap.security || 'Open'}</span></div>
+          </div>
+        </div>
+      {/if}
     </div>
 
     <div class="separator"></div>
@@ -303,6 +436,8 @@
         <span style="color: var(--border-light);">·</span>
         <span class="kbd">{gpuRenderer}</span>
       {/if}
+      <span style="width: 1px; height: 12px; background: var(--border-light);"></span>
+      <img src="/assets/text.png" alt="LibAnyar" class="h-[13px]" style="opacity: 0.5;" />
     </div>
   </footer>
 

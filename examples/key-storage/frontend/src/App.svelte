@@ -549,15 +549,9 @@
     <!-- Welcome / empty state -->
     <div class="flex-1 w-full flex items-center justify-center">
       <div class="flex flex-col items-center text-center max-w-md px-8">
-        <div class="w-14 h-14 mx-auto mb-5 rounded-xl flex items-center justify-center"
-             style="background: var(--surface-2); border: 1px solid var(--border);">
-          <svg class="w-7 h-7" style="color: var(--text-muted);" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
-                  d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
-          </svg>
-        </div>
-        <h2 class="text-lg font-semibold mb-1.5" style="color: var(--text);">Key Storage</h2>
-        <p class="text-[13px] mb-8 leading-relaxed" style="color: var(--text-muted);">
+        <img src="/assets/icon.png" alt="LibAnyar" class="w-16 h-16" style="opacity: 0.85; margin-bottom: 24px;" />
+        <h2 class="text-lg font-semibold" style="color: var(--text); margin-bottom: 8px;">Key Storage</h2>
+        <p class="text-[13px] leading-relaxed" style="color: var(--text-muted); margin-bottom: 40px;">
           Create a new encrypted vault or open an existing one<br />to manage your credentials.
         </p>
         <div class="flex gap-3 justify-center">
@@ -574,13 +568,18 @@
             Open Vault
           </button>
         </div>
-        <div class="flex items-center gap-4 mt-6">
+        <div class="flex items-center gap-4" style="margin-top: 28px;">
           <span class="flex items-center gap-1.5 text-[11px]" style="color: var(--text-muted);">
             <span class="kbd">Ctrl+Shift+N</span> New
           </span>
           <span class="flex items-center gap-1.5 text-[11px]" style="color: var(--text-muted);">
             <span class="kbd">Ctrl+O</span> Open
           </span>
+        </div>
+        <!-- Powered by LibAnyar -->
+        <div class="flex items-center gap-1.5" style="opacity: 0.4; margin-top: 44px;">
+          <span class="text-[11px]" style="color: var(--text-muted); letter-spacing: 0.02em;">powered by</span>
+          <img src="/assets/text.png" alt="LibAnyar" class="h-3.5" style="filter: grayscale(0.2) brightness(0.85);" />
         </div>
       </div>
     </div>
@@ -608,6 +607,8 @@
       {:else}
         <span class="badge badge-muted">AES-256-GCM</span>
       {/if}
+      <span class="separator-vertical" style="height: 12px;"></span>
+      <img src="/assets/text.png" alt="LibAnyar" class="h-[14px]" style="opacity: 0.55;" />
     </div>
   </footer>
 </main>

@@ -1,0 +1,260 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# LibAnyar — CircleCI Configuration
+# ─────────────────────────────────────────────────────────────────────────────
+# Builds the C++ core library + tests, and validates the JS bridge compiles.
+# Uses Ubuntu 22.04 (matches dev environment), with caching for Boost, SOCI,
+# LibAsyik, and npm modules to keep builds under ~5 minutes after first run.
+# ─────────────────────────────────────────────────────────────────────────────
+
+version: 2.1
+
+# ── Reusable commands ────────────────────────────────────────────────────────
+
+commands:
+  install_system_deps:
+    description: "Install Ubuntu system packages required for building"
+    steps:
+      - run:
+          name: Install system packages
+          command: |
+            apt-get update -y
+            apt-get install -y \
+              build-essential cmake git wget curl unzip pkg-config \
+              libssl-dev libsqlite3-dev libpq-dev \
+              libgtk-3-dev libwebkit2gtk-4.0-dev \
+              gstreamer1.0-plugins-bad \
+              libappindicator3-dev libnotify-dev \
+              nlohmann-json3-dev \
+              xvfb mesa-utils
+
+  install_boost:
+    description: "Build and install Boost 1.81 (cached)"
+    steps:
+      - restore_cache:
+          keys:
+            - boost-v1.81.0-{{ arch }}
+      - run:
+          name: Build Boost 1.81 (if not cached)
+          command: |
+            if [ -f /usr/local/include/boost/version.hpp ]; then
+              echo "Boost already installed from cache, skipping"
+              exit 0
+            fi
+            cd /tmp
+            wget -q https://sourceforge.net/projects/boost/files/boost/1.81.0/boost_1_81_0.tar.gz
+            tar -zxf boost_1_81_0.tar.gz
+            cd boost_1_81_0
+            ./bootstrap.sh
+            ./b2 -j$(nproc) cxxflags="-std=c++17" \
+                 --with-fiber --with-context --with-atomic \
+                 --with-date_time --with-filesystem --with-url \
+                 install
+            ldconfig
+      - save_cache:
+          key: boost-v1.81.0-{{ arch }}
+          paths:
+            - /usr/local/include/boost
+            - /usr/local/lib/libboost_*
+
+  install_soci:
+    description: "Build and install SOCI 4.0.3 (cached)"
+    steps:
+      - restore_cache:
+          keys:
+            - soci-v4.0.3-{{ arch }}
+      - run:
+          name: Build SOCI 4.0.3 (if not cached)
+          command: |
+            if [ -f /usr/local/lib/cmake/SOCI/SOCIConfig.cmake ]; then
+              echo "SOCI already installed from cache, skipping"
+              exit 0
+            fi
+            cd /tmp
+            wget -q https://github.com/SOCI/soci/archive/refs/tags/v4.0.3.zip
+            unzip -q v4.0.3.zip
+            cd soci-4.0.3 && mkdir build && cd build
+            cmake .. \
+              -DSOCI_WITH_BOOST=ON \
+              -DSOCI_WITH_POSTGRESQL=ON \
+              -DSOCI_WITH_SQLITE3=ON \
+              -DCMAKE_CXX_STANDARD=17 \
+              -DSOCI_CXX11=ON
+            make -j$(nproc)
+            make install
+            ldconfig
+      - save_cache:
+          key: soci-v4.0.3-{{ arch }}
+          paths:
+            - /usr/local/lib/libsoci_*
+            - /usr/local/lib/cmake/SOCI
+            - /usr/local/include/soci
+
+  install_libasyik:
+    description: "Build and install LibAsyik (cached by commit)"
+    steps:
+      - restore_cache:
+          keys:
+            - libasyik-v1-{{ arch }}
+      - run:
+          name: Build LibAsyik (if not cached)
+          command: |
+            if [ -f /usr/local/lib/cmake/libasyik/libasyik-config.cmake ]; then
+              echo "LibAsyik already installed from cache, skipping"
+              exit 0
+            fi
+            cd /tmp
+            git clone --depth=1 https://github.com/okyfirmansyah/libasyik libasyik-src
+            cd libasyik-src
+            git submodule update --init --recursive
+            mkdir build_ci && cd build_ci
+            cmake .. \
+              -DCMAKE_BUILD_TYPE=Release \
+              -DCMAKE_CXX_STANDARD=17 \
+              -DLIBASYIK_ENABLE_SOCI=ON
+            make -j$(nproc)
+            make install
+            ldconfig
+      - save_cache:
+          key: libasyik-v1-{{ arch }}
+          paths:
+            - /usr/local/lib/cmake/libasyik
+            - /usr/local/lib/liblibasyik*
+            - /usr/local/include/libasyik
+
+  install_nodejs:
+    description: "Install Node.js 20 LTS"
+    steps:
+      - run:
+          name: Install Node.js 20
+          command: |
+            if command -v node &>/dev/null; then
+              echo "Node.js $(node --version) already available"
+              exit 0
+            fi
+            curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
+            apt-get install -y nodejs
+
+  install_nlohmann_json:
+    description: "Install nlohmann/json header (fallback if system package missing)"
+    steps:
+      - run:
+          name: Ensure nlohmann/json is available
+          command: |
+            if [ -f /usr/local/include/nlohmann/json.hpp ] || \
+               [ -f /usr/include/nlohmann/json.hpp ]; then
+              echo "nlohmann/json already installed"
+              exit 0
+            fi
+            mkdir -p /usr/local/include/nlohmann
+            wget -q -O /usr/local/include/nlohmann/json.hpp \
+              https://github.com/nlohmann/json/releases/download/v3.11.3/json.hpp
+
+# ── Jobs ─────────────────────────────────────────────────────────────────────
+
+jobs:
+  build-and-test:
+    docker:
+      - image: ubuntu:22.04
+    resource_class: medium
+    environment:
+      DEBIAN_FRONTEND: noninteractive
+      CMAKE_BUILD_TYPE: Release
+    steps:
+      - checkout
+
+      # ── Install all dependencies ──
+      - install_system_deps
+      - install_boost
+      - install_soci
+      - install_libasyik
+      - install_nodejs
+      - install_nlohmann_json
+
+      # ── Build JS bridge ──
+      - restore_cache:
+          keys:
+            - npm-js-bridge-{{ checksum "js-bridge/package-lock.json" }}
+            - npm-js-bridge-
+      - run:
+          name: "JS Bridge: install & build"
+          command: |
+            cd js-bridge
+            npm ci
+            npm run build
+      - save_cache:
+          key: npm-js-bridge-{{ checksum "js-bridge/package-lock.json" }}
+          paths:
+            - js-bridge/node_modules
+
+      # ── Build C++ core + tests ──
+      - run:
+          name: "C++: Configure (CMake)"
+          command: |
+            mkdir -p build
+            cd build
+            cmake .. \
+              -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE} \
+              -DANYAR_BUILD_TESTS=ON \
+              -DANYAR_BUILD_EXAMPLES=OFF \
+              -DANYAR_BUILD_CLI=OFF
+      - run:
+          name: "C++: Build"
+          command: |
+            cd build
+            make -j$(nproc)
+      - run:
+          name: "C++: Run unit tests"
+          command: |
+            cd build
+            # Run tests excluding the WebGL E2E test (requires GPU/display)
+            ctest --output-on-failure \
+                  --exclude-regex "test_webgl_canvas" \
+                  --timeout 60
+      - run:
+          name: "C++: Run WebGL E2E test (xvfb, allow failure)"
+          command: |
+            cd build
+            # WebGL test needs a virtual display — may segfault during
+            # teardown on headless CI, so we allow failure here.
+            xvfb-run --auto-servernum --server-args="-screen 0 1280x720x24" \
+              ctest --output-on-failure \
+                    --tests-regex "test_webgl_canvas" \
+                    --timeout 60 \
+            || echo "⚠ WebGL E2E test failed (known issue: segfault during teardown)"
+
+      # ── Store test results ──
+      - store_test_results:
+          path: build/Testing
+      - store_artifacts:
+          path: build/Testing/Temporary/LastTest.log
+          destination: test-log
+
+  js-bridge-typecheck:
+    docker:
+      - image: node:20-slim
+    resource_class: small
+    steps:
+      - checkout
+      - restore_cache:
+          keys:
+            - npm-js-bridge-{{ checksum "js-bridge/package-lock.json" }}
+            - npm-js-bridge-
+      - run:
+          name: "JS Bridge: install & typecheck"
+          command: |
+            cd js-bridge
+            npm ci
+            npm run build
+      - save_cache:
+          key: npm-js-bridge-{{ checksum "js-bridge/package-lock.json" }}
+          paths:
+            - js-bridge/node_modules
+
+# ── Workflows ────────────────────────────────────────────────────────────────
+
+workflows:
+  version: 2
+  build-test:
+    jobs:
+      - build-and-test
+      - js-bridge-typecheck

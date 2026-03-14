@@ -189,7 +189,7 @@
   }
 
   .entry-row.selected {
-    background: rgba(0, 225, 201, 0.04);
+    background: rgba(182, 171, 124, 0.04);
     box-shadow: inset 2px 0 0 var(--accent);
   }
 

@@ -862,6 +862,8 @@ void VideoPlugin::run_decode_loop() {
 
             boost::this_fiber::sleep_for(std::chrono::milliseconds(2));
         }
+        // Log exit from main decode loop
+        std::cout << "[VideoPlugin] Exiting main decode loop" << std::endl;
     }
 
 cleanup:
@@ -900,8 +902,15 @@ void VideoPlugin::initialize(anyar::PluginContext& ctx) {
             pending_seek_ = -1.0;
             audio_time_   = -1.0;
             service_->execute([this]() {
-                try { run_decode_loop(); } catch (...) {}
+                try {
+                    run_decode_loop();
+                } catch (const std::exception& ex) {
+                    std::cerr << "[VideoPlugin] Exception in decode loop: " << ex.what() << std::endl;
+                } catch (...) {
+                    std::cerr << "[VideoPlugin] Unknown exception in decode loop." << std::endl;
+                }
                 streaming_ = false;
+                playing_ = false;
                 frame_pool_.reset();
             });
         } else {
@@ -1087,6 +1096,7 @@ void VideoPlugin::initialize(anyar::PluginContext& ctx) {
     // ── video:close ─────────────────────────────────────────────────────────
     cmds.add("video:close", [this](const json& /*args*/) -> json {
         std::lock_guard<boost::fibers::mutex> lock(mtx_);
+        stop_streaming();
         close_file();
         return {{"closed", true}};
     });
@@ -1097,7 +1107,7 @@ void VideoPlugin::initialize(anyar::PluginContext& ctx) {
 }
 
 void VideoPlugin::shutdown() {
-    stop_streaming();
+    
     std::lock_guard<boost::fibers::mutex> lock(mtx_);
     close_file();
     std::cout << "[VideoPlugin] Shutdown" << std::endl;
