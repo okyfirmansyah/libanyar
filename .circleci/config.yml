@@ -15,8 +15,16 @@ commands:
     description: "Install Ubuntu system packages required for building"
     steps:
       - run:
-          name: Install system packages
+          name: Install system packages + CMake 3.28
           command: |
+            apt-get update -y
+            apt-get install -y ca-certificates gpg wget
+            # Kitware APT repo — provides CMake 3.28+ (Ubuntu 22.04's 3.22
+            # has a FindBoost that doesn't recognise Boost >= 1.79)
+            wget -qO- https://apt.kitware.com/keys/kitware-archive-latest.asc \
+              | gpg --dearmor -o /usr/share/keyrings/kitware-archive-keyring.gpg
+            echo 'deb [signed-by=/usr/share/keyrings/kitware-archive-keyring.gpg] https://apt.kitware.com/ubuntu/ jammy main' \
+              > /etc/apt/sources.list.d/kitware.list
             apt-get update -y
             apt-get install -y \
               build-essential cmake git wget curl unzip pkg-config \
@@ -26,6 +34,7 @@ commands:
               libappindicator3-dev libnotify-dev \
               nlohmann-json3-dev \
               xvfb mesa-utils
+            echo "CMake version: $(cmake --version | head -1)"
 
   install_boost:
     description: "Build and install Boost 1.81 (cached)"
@@ -37,7 +46,8 @@ commands:
           name: Build Boost 1.81 (if not cached)
           command: |
             if [ -f /usr/local/include/boost/version.hpp ]; then
-              echo "Boost already installed from cache, skipping"
+              echo "Boost already installed from cache, running ldconfig"
+              ldconfig
               exit 0
             fi
             cd /tmp
@@ -55,6 +65,8 @@ commands:
           paths:
             - /usr/local/include/boost
             - /usr/local/lib/libboost_*
+            - /usr/local/lib/cmake/boost_*
+            - /usr/local/lib/cmake/Boost-1.81.0
 
   install_soci:
     description: "Build and install SOCI 4.0.3 (cached)"
@@ -66,7 +78,8 @@ commands:
           name: Build SOCI 4.0.3 (if not cached)
           command: |
             if [ -f /usr/local/lib/cmake/SOCI/SOCIConfig.cmake ]; then
-              echo "SOCI already installed from cache, skipping"
+              echo "SOCI already installed from cache, running ldconfig"
+              ldconfig
               exit 0
             fi
             cd /tmp
@@ -99,7 +112,8 @@ commands:
           name: Build LibAsyik (if not cached)
           command: |
             if [ -f /usr/local/lib/cmake/libasyik/libasyik-config.cmake ]; then
-              echo "LibAsyik already installed from cache, skipping"
+              echo "LibAsyik already installed from cache, running ldconfig"
+              ldconfig
               exit 0
             fi
             cd /tmp
