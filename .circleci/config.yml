@@ -111,7 +111,7 @@ commands:
               -DCMAKE_BUILD_TYPE=Release \
               -DCMAKE_CXX_STANDARD=17 \
               -DLIBASYIK_ENABLE_SOCI=ON
-            make -j$(nproc)
+            make -j2
             make install
             ldconfig
       - save_cache:
