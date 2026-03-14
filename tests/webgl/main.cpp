@@ -117,12 +117,14 @@ int main() {
     // ── Run (blocks until window closes) ────────────────────────────────
     app.run();
 
+    // Clean up shared buffer AFTER app has fully shut down
+    // (the anyar-shm:// URI handler may still reference buffer data during
+    // WebKitGTK teardown if we clear too early)
+    anyar::SharedBufferRegistry::instance().clear();
+
     if (exit_code.load() != 0) {
         std::cerr << "[FAIL] " << failure_reason << std::endl;
     }
-
-    // Clean up shared buffer
-    anyar::SharedBufferRegistry::instance().clear();
 
     return exit_code.load();
 }

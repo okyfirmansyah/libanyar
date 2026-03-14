@@ -94,7 +94,20 @@ struct Window::Impl {
         if (wv && !destroyed) {
             // Normal path: Window is being deleted without the GTK
             // "destroy" signal having fired (e.g. shared_ptr dropped).
+            // Mark destroyed FIRST so that any stale g_idle_add callbacks
+            // processed during deplete_run_loop_event_queue() inside
+            // webview_destroy() will see is_destroyed()==true and bail out.
             disconnect_close_signals();
+            destroyed = true;
+#ifdef __linux__
+            // Drain any stale g_idle_add callbacks (from webview_dispatch,
+            // event push sinks, etc.) BEFORE webview_destroy().  This
+            // prevents webview's internal deplete_run_loop_event_queue()
+            // from processing callbacks that reference the destroyed widget.
+            while (g_main_context_pending(nullptr)) {
+                g_main_context_iteration(nullptr, FALSE);
+            }
+#endif
             webview_destroy(wv);
             wv = nullptr;
         }
@@ -371,6 +384,13 @@ void Window::destroy() {
                 GTK_WIDGET(impl_->parent_window), TRUE);
             impl_->parent_window = nullptr;
         }
+
+        // Drain any stale g_idle_add callbacks BEFORE webview_destroy()
+        // so that deplete_run_loop_event_queue() inside the webview
+        // destructor won't process callbacks referencing the dead widget.
+        while (g_main_context_pending(nullptr)) {
+            g_main_context_iteration(nullptr, FALSE);
+        }
 #endif
 
         webview_destroy(impl_->wv);
@@ -417,7 +437,7 @@ void Window::navigate(const std::string& url) {
 }
 
 void Window::dispatch(std::function<void()> fn) {
-    if (!impl_->wv) return;
+    if (!impl_->wv || impl_->destroyed) return;
     auto* f = new std::function<void()>(std::move(fn));
     webview_dispatch(impl_->wv,
         [](webview_t /*w*/, void* arg) {
@@ -541,7 +561,7 @@ void Window::bind(const std::string& name, BindCallback callback) {
 
 void Window::return_result(const std::string& seq, int status,
                            const std::string& result) {
-    if (impl_->wv) {
+    if (impl_->wv && !impl_->destroyed) {
         webview_return(impl_->wv, seq.c_str(), status, result.c_str());
     }
 }

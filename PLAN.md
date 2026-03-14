@@ -1,6 +1,6 @@
 # LibAnyar — Implementation Plan
 
-> Last updated: 2026-03-14
+> Last updated: 2026-03-14 (CI achieved)
 
 ## Phase Overview
 
@@ -17,6 +17,7 @@
 | 4f | [Shared Memory IPC & WebGL Canvas](#phase-4f-shared-memory-ipc--webgl-canvas) | ✅ Complete | 2-3 weeks |
 | 5 | [CLI Tool](#phase-5-cli-tool) | 🟡 Partial | 2-3 weeks |
 | 6 | [Polish & Documentation](#phase-6-polish--documentation) | 🟡 Partial | Ongoing |
+| **→** | **[Next Steps (Prioritized)](#next-steps-prioritized)** | **🎯 Active** | — |
 | 7 | [Windows & macOS Support](#phase-7-windows--macos-support) | 🔲 Not Started | 3-4 weeks |
 | 8 | [Plugin System & Packaging](#phase-8-plugin-system--packaging) | 🔲 Not Started | 2-3 weeks |
 
@@ -1128,7 +1129,7 @@ Feature 1 (`buffer`) is a standalone general-purpose API. Feature 2 (`canvas`) i
 - [ ] Chat App (WebSocket events demonstration)
 
 ### 6.3 Testing
-- [x] Unit tests for core components (Catch2) — 8 test files, 1932 lines, 7/8 pass (webgl_canvas segfaults during teardown)
+- [x] Unit tests for core components (Catch2) — 8 test files, all 8/8 pass (WebGL teardown segfault fixed)
 - [x] Integration tests (webview + server + IPC) — SharedBuffer integration tests implemented
 - [ ] JS bridge unit tests (Vitest)
 - [x] Linux CI validation (CircleCI — Ubuntu 22.04, GCC 11)
@@ -1212,6 +1213,79 @@ Feature 1 (`buffer`) is a standalone general-purpose API. Feature 2 (`canvas`) i
 
 ### Phase 8 Deliverable
 > Feature-complete framework with plugin ecosystem and distribution tooling.
+
+---
+
+---
+
+## Next Steps (Prioritized)
+
+> **Context**: Phases 1–4f are complete. Phase 5 (CLI) and Phase 6 (Polish) are partially done. Linux CI is operational (CircleCI). The framework is functionally complete on Linux — what remains is hardening, packaging, and expansion.
+
+### Remaining Items Inventory
+
+All unchecked `[ ]` items across the plan, categorized:
+
+| Category | Items | Phases |
+|----------|-------|--------|
+| **Linux hardening** | WebGL test segfault fix, performance benchmarks, JS bridge tests | 6.3, 6.4 |
+| **Incomplete features** | EventBus per-window sinks, `listenGlobal`, `window:focused` event | 4d.8 |
+| **Dev experience** | C++ watch mode, embed frontend (cmrc), Linux packaging (DEB/AppImage) | 5.2, 5.3 |
+| **Fallback paths** | SharedBuffer WebSocket fallback, SharedBuffer perf benchmarks | 4f.5, 4f.6, 4f.7 |
+| **More examples** | Todo App, File Explorer, Markdown Editor, Chat App | 6.2 |
+| **Stretch goals** | Type-safe query builder, migration runner, periodic fiber events | 4.2, 4.3, 1.6 |
+| **Cross-platform** | All of Phase 7 (Windows/macOS) + Phase 8 (plugins/packaging) | 7, 8 |
+
+### Recommended Priority Order
+
+#### Tier 1 — Ship-Ready Linux (do next)
+
+These items complete the Linux story — green CI, distributable binaries, quantified performance.
+
+| # | Task | Phase | Effort | Why Now |
+|---|------|-------|--------|----------|
+| **1** | ~~**Fix WebGL E2E teardown segfault**~~ | 6.3 | ~~1-2d~~ | ✅ Done — fixed 4 root causes: `~Impl()` destruction order, stale `g_idle_add` drain, `GBytes` shared_ptr capture, `App::run()` shutdown sequence. 8/8 tests pass. |
+| **2** | **JS bridge unit tests (Vitest)** | 6.3 | 2-3d | Zero JS test coverage. Add to CI for full test pyramid. |
+| **3** | **Linux packaging (DEB + AppImage)** | 5.3 | 2-3d | Makes apps distributable. `anyar build --package deb`. |
+| **4** | **Embed frontend into binary (cmrc)** | 5.3 | 1-2d | Single-binary deployment, no external dist/ needed. |
+| **5** | **Performance benchmarks** | 6.4 | 1-2d | Quantify startup, IPC latency, memory. Publish in README. |
+
+#### Tier 2 — Feature Completeness
+
+Gaps in implemented phases that should be closed before expanding.
+
+| # | Task | Phase | Effort | Why |
+|---|------|-------|--------|-----|
+| **6** | **EventBus per-window sinks** | 4d.8 | 1d | Targeted events use broadcast workaround; proper impl for multi-window apps. |
+| **7** | **SharedBuffer WebSocket fallback** | 4f.5 | 1-2d | `anyar dev` (browser mode) can't use `anyar-shm://`; needs WS path. |
+| **8** | **C++ watch mode** (`anyar dev --watch`) | 5.2 | 1-2d | DX improvement — auto-rebuild C++ on save. |
+| **9** | **`window:focused` event** | 4d.8 | 0.5d | Small gap in window lifecycle events. |
+
+#### Tier 3 — Ecosystem Growth
+
+More examples and stretch features that demonstrate breadth.
+
+| # | Task | Phase | Effort | Notes |
+|---|------|-------|--------|-------|
+| **10** | **Todo App example** (React + SQLite) | 6.2 | 2-3d | Demonstrates the React path (current examples are Svelte-heavy). |
+| **11** | **File Explorer example** | 6.2 | 2-3d | Showcases fs + dialog plugins working together. |
+| **12** | **SharedBuffer perf benchmarks** | 4f.6-7 | 1d | Quantify improvement over WebSocket for marketing. |
+| **13** | **Migration runner** | 4.3 | 1-2d | Convenience for SQLite-heavy apps. |
+
+#### Tier 4 — Cross-Platform Expansion
+
+Only after Linux is fully polished.
+
+| # | Task | Phase | Effort | Notes |
+|---|------|-------|--------|-------|
+| **14** | **Windows support** | 7.1 | 2-3w | WebView2 + Win32 implementations. Requires LibAsyik MSVC verification. |
+| **15** | **macOS support** | 7.2 | 2-3w | WKWebView + Cocoa implementations. |
+| **16** | **Multi-platform CI** | 7.3 | 2-3d | GitHub Actions matrix for Linux/Win/macOS. |
+| **17** | **Dynamic plugin system** | 8 | 2-3w | dlopen/LoadLibrary, tray, notifications, auto-updater. |
+
+### Decision Point
+
+The recommended next action is **Tier 1, Item 1: Fix the WebGL E2E teardown segfault**. This achieves a fully green CI pipeline and demonstrates framework stability. After Tier 1 is complete, LibAnyar on Linux is production-distributable.
 
 ---
 

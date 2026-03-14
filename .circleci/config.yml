@@ -178,14 +178,13 @@ jobs:
                   --exclude-regex "test_webgl_canvas" \
                   --timeout 60
       - run:
-          name: "C++: Run WebGL E2E test (xvfb, allow failure)"
+          name: "C++: Run WebGL E2E test (xvfb)"
           command: |
             cd build
             xvfb-run --auto-servernum --server-args="-screen 0 1280x720x24" \
               ctest --output-on-failure \
                     --tests-regex "test_webgl_canvas" \
-                    --timeout 60 \
-            || echo "WebGL E2E test failed (known teardown segfault — assertions passed)"
+                    --timeout 60
 
       # ── Store test results ───────────────────────────────────────────
       - store_test_results:

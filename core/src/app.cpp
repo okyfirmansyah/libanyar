@@ -17,6 +17,10 @@
 #include <iostream>
 #include <random>
 
+#ifdef __linux__
+#include <gtk/gtk.h>
+#endif
+
 namespace anyar {
 
 // ── Platform-Specific Initialization ────────────────────────────────────────
@@ -289,30 +293,48 @@ int App::run() {
         // This also processes events for all child windows.
         main_win->run();
 
-        // Main window closed — stop service
+        // ── Orderly shutdown ────────────────────────────────────────
+        // 1) Stop the service FIRST so no new fibers can be spawned
+        //    (prevents new g_idle_add callbacks from the service thread).
         if (service_) {
             service_->stop();
         }
+        if (service_thread_.joinable()) {
+            service_thread_.join();
+        }
+
+        // 2) Clean up event sinks BEFORE window destruction so that
+        //    no event dispatch tries to eval JS on a dying webview.
+        for (auto& [lbl, sink_id] : native_event_sinks_) {
+            events_.remove_ws_sink(sink_id);
+        }
+        native_event_sinks_.clear();
+
+        // 3) Explicitly destroy all windows while the GTK main
+        //    context is still valid. This sets destroyed=true on
+        //    each window, so any stale g_idle_add callbacks that
+        //    fire during deplete_run_loop_event_queue() will see
+        //    is_destroyed()==true and bail out harmlessly.
+        window_mgr_.close_all();
+
+#ifdef __linux__
+        // 4) Drain any remaining GTK idle callbacks (e.g. deferred
+        //    on_close handlers) so they run while objects are alive.
+        while (gtk_events_pending()) {
+            gtk_main_iteration();
+        }
+#endif
+
     } else {
         // No window — run headless (useful for testing)
         service_thread_.join();
         return 0;
     }
 
-    if (service_thread_.joinable()) {
-        service_thread_.join();
-    }
-
     // Shutdown plugins
     for (auto& plugin : plugins_) {
         plugin->shutdown();
     }
-
-    // Clean up remaining event sinks
-    for (auto& [label, sink_id] : native_event_sinks_) {
-        events_.remove_ws_sink(sink_id);
-    }
-    native_event_sinks_.clear();
 
     return 0;
 }

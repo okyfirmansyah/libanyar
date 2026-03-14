@@ -255,9 +255,16 @@ static void handle_shm_uri_request(WebKitURISchemeRequest* request,
     // Mark the pool slot as READING if it's in a pool
     // (standalone buffers are always readable)
     // We use GBytes to wrap the data WITHOUT copying — GBytes will just
-    // reference our mmap'd pointer. The shared_ptr ref keeps it alive.
-    auto buf_ref = buf;  // prevent premature destruction
-    GBytes* bytes = g_bytes_new_static(buf->data(), buf->size());
+    // reference our mmap'd pointer.
+    // IMPORTANT: capture the shared_ptr in the GBytes destroy callback
+    // so the buffer stays alive as long as the GInputStream uses it.
+    auto* buf_ref = new std::shared_ptr<SharedBuffer>(buf);
+    GBytes* bytes = g_bytes_new_with_free_func(
+        buf->data(), buf->size(),
+        +[](gpointer data) {
+            delete static_cast<std::shared_ptr<SharedBuffer>*>(data);
+        },
+        buf_ref);
     GInputStream* stream = g_memory_input_stream_new_from_bytes(bytes);
     g_bytes_unref(bytes);  // stream holds a ref
 
