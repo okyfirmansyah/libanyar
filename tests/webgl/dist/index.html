@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>WebGL Canvas E2E Test</title>
+  <style>
+    body { margin: 0; background: #111; color: #0f0; font-family: monospace; font-size: 12px; padding: 10px; }
+    canvas { display: block; margin: 10px 0; border: 1px solid #333; image-rendering: pixelated; }
+    #log { white-space: pre-wrap; }
+    .pass { color: #0f0; }
+    .fail { color: #f00; }
+  </style>
+</head>
+<body>
+  <div id="log">WebGL Canvas E2E Test — waiting for IPC...\n</div>
+  <canvas id="canvas" width="4" height="4" style="width:64px;height:64px;"></canvas>
+
+<script>
+// ── Configuration ──────────────────────────────────────────────────────────
+const WIDTH = 4;
+const HEIGHT = 4;
+const BUF_NAME = 'test-frame';
+const TOLERANCE = 2; // allow ±2 for GPU rounding
+
+const log = document.getElementById('log');
+function logMsg(msg, cls) {
+  const span = document.createElement('span');
+  span.className = cls || '';
+  span.textContent = msg + '\n';
+  log.appendChild(span);
+}
+
+// ── WebGL Shaders (same as canvas.ts) ──────────────────────────────────────
+const VERTEX_SRC = `
+  attribute vec2 a_position;
+  attribute vec2 a_texCoord;
+  varying vec2 v_texCoord;
+  void main() {
+    gl_Position = vec4(a_position, 0.0, 1.0);
+    v_texCoord = a_texCoord;
+  }
+`;
+
+const FRAGMENT_SRC = `
+  precision mediump float;
+  varying vec2 v_texCoord;
+  uniform sampler2D u_texture;
+  void main() {
+    gl_FragColor = texture2D(u_texture, v_texCoord);
+  }
+`;
+
+// Fullscreen quad
+const POSITIONS = new Float32Array([
+  -1, -1,   1, -1,  -1,  1,
+  -1,  1,   1, -1,   1,  1,
+]);
+// Tex coords (flip Y: top-left = 0,0)
+const TEXCOORDS = new Float32Array([
+  0, 1,  1, 1,  0, 0,
+  0, 0,  1, 1,  1, 0,
+]);
+
+// ── Report result via LibAnyar IPC ─────────────────────────────────────────
+async function report(passed, message, checks) {
+  try {
+    if (typeof window.__anyar_ipc__ === 'function') {
+      await window.__anyar_ipc__(JSON.stringify({
+        id: 'test-report-1',
+        cmd: 'test:report',
+        args: { passed, message, checks: checks || 0 }
+      }));
+    } else {
+      logMsg('WARN: No native IPC — cannot report to C++');
+    }
+  } catch (e) {
+    logMsg('Error reporting: ' + e.message, 'fail');
+  }
+
+  // Close the window after a brief delay
+  setTimeout(async () => {
+    try {
+      if (typeof window.__anyar_ipc__ === 'function') {
+        await window.__anyar_ipc__(JSON.stringify({
+          id: 'test-close-1',
+          cmd: 'window:close-all',
+          args: {}
+        }));
+      }
+    } catch (e) { /* window may already be closing */ }
+  }, 200);
+}
+
+// ── Main test ──────────────────────────────────────────────────────────────
+async function runTest() {
+  logMsg('Starting WebGL canvas E2E test...');
+  let checks = 0;
+
+  try {
+    // ── Step 1: Wait for IPC to be ready ─────────────────────────────────
+    let attempts = 0;
+    while (typeof window.__anyar_ipc__ !== 'function' && attempts < 50) {
+      await new Promise(r => setTimeout(r, 100));
+      attempts++;
+    }
+    if (typeof window.__anyar_ipc__ !== 'function') {
+      return report(false, 'IPC not available after 5 seconds');
+    }
+    logMsg('IPC ready');
+
+    // ── Step 2: Fetch buffer via anyar-shm:// ────────────────────────────
+    logMsg('Fetching anyar-shm://' + BUF_NAME + '...');
+    let response;
+    try {
+      response = await fetch('anyar-shm://' + BUF_NAME);
+    } catch (e) {
+      return report(false, 'fetch(anyar-shm://) failed: ' + e.message);
+    }
+    if (!response.ok) {
+      return report(false, 'fetch returned HTTP ' + response.status);
+    }
+    const arrayBuffer = await response.arrayBuffer();
+    const pixelData = new Uint8Array(arrayBuffer);
+    logMsg('Fetched ' + pixelData.length + ' bytes');
+
+    // Verify fetch size
+    if (pixelData.length !== WIDTH * HEIGHT * 4) {
+      return report(false, 'Expected ' + (WIDTH*HEIGHT*4) + ' bytes, got ' + pixelData.length);
+    }
+    checks++;
+
+    // Verify source data integrity before GPU
+    // Row 0 should be red (255,0,0,255)
+    if (pixelData[0] !== 255 || pixelData[1] !== 0 || pixelData[2] !== 0) {
+      return report(false, 'Source data row 0 not red: [' + pixelData[0] + ',' + pixelData[1] + ',' + pixelData[2] + ']');
+    }
+    checks++;
+    logMsg('Source data verified ✓');
+
+    // ── Step 3: Set up WebGL ─────────────────────────────────────────────
+    const canvas = document.getElementById('canvas');
+    canvas.width = WIDTH;
+    canvas.height = HEIGHT;
+
+    const gl = canvas.getContext('webgl', {
+      alpha: false,
+      antialias: false,
+      premultipliedAlpha: false,
+      preserveDrawingBuffer: true, // Required for readPixels
+    });
+    if (!gl) {
+      return report(false, 'WebGL not available');
+    }
+    logMsg('WebGL context created');
+
+    // Compile shaders
+    const vs = gl.createShader(gl.VERTEX_SHADER);
+    gl.shaderSource(vs, VERTEX_SRC);
+    gl.compileShader(vs);
+    if (!gl.getShaderParameter(vs, gl.COMPILE_STATUS)) {
+      return report(false, 'Vertex shader: ' + gl.getShaderInfoLog(vs));
+    }
+
+    const fs = gl.createShader(gl.FRAGMENT_SHADER);
+    gl.shaderSource(fs, FRAGMENT_SRC);
+    gl.compileShader(fs);
+    if (!gl.getShaderParameter(fs, gl.COMPILE_STATUS)) {
+      return report(false, 'Fragment shader: ' + gl.getShaderInfoLog(fs));
+    }
+
+    const program = gl.createProgram();
+    gl.attachShader(program, vs);
+    gl.attachShader(program, fs);
+    gl.linkProgram(program);
+    if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+      return report(false, 'Program link: ' + gl.getProgramInfoLog(program));
+    }
+    gl.useProgram(program);
+    logMsg('Shaders compiled and linked ✓');
+
+    // Position buffer
+    const posBuf = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, posBuf);
+    gl.bufferData(gl.ARRAY_BUFFER, POSITIONS, gl.STATIC_DRAW);
+    const posLoc = gl.getAttribLocation(program, 'a_position');
+    gl.enableVertexAttribArray(posLoc);
+    gl.vertexAttribPointer(posLoc, 2, gl.FLOAT, false, 0, 0);
+
+    // Texcoord buffer
+    const texBuf = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, texBuf);
+    gl.bufferData(gl.ARRAY_BUFFER, TEXCOORDS, gl.STATIC_DRAW);
+    const texLoc = gl.getAttribLocation(program, 'a_texCoord');
+    gl.enableVertexAttribArray(texLoc);
+    gl.vertexAttribPointer(texLoc, 2, gl.FLOAT, false, 0, 0);
+
+    // Create texture from buffer data
+    const tex = gl.createTexture();
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, tex);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, WIDTH, HEIGHT, 0, gl.RGBA, gl.UNSIGNED_BYTE, pixelData);
+    gl.uniform1i(gl.getUniformLocation(program, 'u_texture'), 0);
+    logMsg('Texture uploaded (' + WIDTH + '×' + HEIGHT + ') ✓');
+
+    // ── Step 4: Render ───────────────────────────────────────────────────
+    gl.viewport(0, 0, WIDTH, HEIGHT);
+    gl.drawArrays(gl.TRIANGLES, 0, 6);
+    logMsg('Frame rendered ✓');
+
+    // ── Step 5: Read pixels back ─────────────────────────────────────────
+    const readback = new Uint8Array(WIDTH * HEIGHT * 4);
+    gl.readPixels(0, 0, WIDTH, HEIGHT, gl.RGBA, gl.UNSIGNED_BYTE, readback);
+
+    logMsg('readPixels returned ' + readback.length + ' bytes');
+
+    // ── Step 6: Verify pixels ────────────────────────────────────────────
+    // Note: WebGL readPixels returns bottom-to-top, so:
+    //   readback row 0 = bottom of image = our row 3 (White)
+    //   readback row 1 = our row 2 (Blue)
+    //   readback row 2 = our row 1 (Green)
+    //   readback row 3 = top of image = our row 0 (Red)
+    const expected = [
+      // readback row 0 = source row 3 (White)
+      { row: 0, label: 'White', r: 255, g: 255, b: 255, a: 255 },
+      // readback row 1 = source row 2 (Blue)
+      { row: 1, label: 'Blue',  r: 0,   g: 0,   b: 255, a: 255 },
+      // readback row 2 = source row 1 (Green)
+      { row: 2, label: 'Green', r: 0,   g: 255, b: 0,   a: 255 },
+      // readback row 3 = source row 0 (Red)
+      { row: 3, label: 'Red',   r: 255, g: 0,   b: 0,   a: 255 },
+    ];
+
+    const errors = [];
+    for (const e of expected) {
+      for (let x = 0; x < WIDTH; x++) {
+        const i = (e.row * WIDTH + x) * 4;
+        const pr = readback[i], pg = readback[i+1], pb = readback[i+2], pa = readback[i+3];
+
+        const ok = Math.abs(pr - e.r) <= TOLERANCE &&
+                   Math.abs(pg - e.g) <= TOLERANCE &&
+                   Math.abs(pb - e.b) <= TOLERANCE &&
+                   Math.abs(pa - e.a) <= TOLERANCE;
+
+        if (ok) {
+          checks++;
+        } else {
+          errors.push(e.label + ' pixel (' + x + ',' + e.row + '): expected [' +
+                      e.r + ',' + e.g + ',' + e.b + ',' + e.a + '] got [' +
+                      pr + ',' + pg + ',' + pb + ',' + pa + ']');
+        }
+      }
+    }
+
+    if (errors.length > 0) {
+      for (const err of errors) logMsg(err, 'fail');
+      return report(false, errors.length + ' pixel mismatches: ' + errors[0], checks);
+    }
+
+    logMsg('All ' + checks + ' checks passed!', 'pass');
+    return report(true, 'RGBA render + readPixels verified for ' + WIDTH + '×' + HEIGHT + ' image', checks);
+
+  } catch (e) {
+    logMsg('EXCEPTION: ' + e.message, 'fail');
+    return report(false, 'Exception: ' + e.message);
+  }
+}
+
+// Wait for page load, then start
+window.addEventListener('load', () => {
+  setTimeout(runTest, 300);
+});
+</script>
+</body>
+</html>

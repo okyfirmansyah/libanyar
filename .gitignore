@@ -30,6 +30,7 @@ Thumbs.db
 # Node
 node_modules/
 dist/
+!tests/webgl/dist/
 .vite/
 *.tgz
 

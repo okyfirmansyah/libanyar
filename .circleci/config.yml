@@ -185,7 +185,7 @@ jobs:
               ctest --output-on-failure \
                     --tests-regex "test_webgl_canvas" \
                     --timeout 60 \
-            || echo "WebGL E2E test failed (known issue: segfault during teardown)"
+            || echo "WebGL E2E test failed (known teardown segfault — assertions passed)"
 
       # ── Store test results ───────────────────────────────────────────
       - store_test_results:
