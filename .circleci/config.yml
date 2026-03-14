@@ -39,6 +39,7 @@ jobs:
             # CMake 3.28: knows Boost 1.81 and still has FindBoost
             # (3.22 too old, 4.x removed FindBoost entirely)
             wget -q https://github.com/Kitware/CMake/releases/download/v3.28.6/cmake-3.28.6-linux-x86_64.tar.gz
+            mkdir -p /opt/cmake
             tar -xzf cmake-3.28.6-linux-x86_64.tar.gz -C /opt/cmake --strip-components=1
             ln -sf /opt/cmake/bin/cmake  /usr/local/bin/cmake
             ln -sf /opt/cmake/bin/ctest  /usr/local/bin/ctest
