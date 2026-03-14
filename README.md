@@ -160,7 +160,10 @@ A minimal example showing IPC commands, events, and built-in plugins.
 FFmpeg-powered video player with WebSocket streaming and Canvas rendering.
 
 <p align="center">
-  <video src="docs/assets/video-player.mp4" alt="Local Video Player Example"></video>
+  <video controls>
+    <source src="docs/assets/video-player.mp4" type="video/mp4">
+    Your browser does not support the video tag.
+  </video>
 </p>
 
 ### Secure Key Storage
@@ -168,7 +171,10 @@ FFmpeg-powered video player with WebSocket streaming and Canvas rendering.
 Encrypted password manager with AES-256-GCM, multi-window modal dialogs, and a custom plugin.
 
 <p align="center">
-  <video src="docs/assets/key-storage.mp4" alt="Secure Key Storage Example"></video>
+  <video controls>
+    <source src="docs/assets/key-storage.mp4" type="video/mp4">
+    Your browser does not support the video tag.
+  </video>
 </p>
 
 ### Wifi Analyzer
@@ -176,7 +182,10 @@ Encrypted password manager with AES-256-GCM, multi-window modal dialogs, and a c
 A desktop Wifi analyzer with real-time signal strength visualization and channel scanning.
 
 <p align="center">
-  <video src="docs/assets/wifi-analyzer.mp4" alt="Wifi Analyzer Example"></video>
+  <video controls>
+    <source src="docs/assets/wifi-analyzer.mp4" type="video/mp4">
+    Your browser does not support the video tag.
+  </video>
 </p>
 
 ## License
