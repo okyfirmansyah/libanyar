@@ -2,18 +2,28 @@
 # LibAnyar — CircleCI Configuration
 # ─────────────────────────────────────────────────────────────────────────────
 # Builds the C++ core library + tests, and validates the JS bridge compiles.
-# Uses Ubuntu 22.04 (matches dev environment), with caching for Boost, SOCI,
-# LibAsyik, and npm modules to keep builds under ~5 minutes after first run.
+# Uses Ubuntu 22.04 (matches dev environment).
+#
+# C++ dependencies (Boost 1.81, SOCI 4.0.3, LibAsyik) are built from source
+# and stored in a single /usr/local cache to avoid CircleCI glob limitations.
 # ─────────────────────────────────────────────────────────────────────────────
 
 version: 2.1
 
-# ── Reusable commands ────────────────────────────────────────────────────────
+# ── Jobs ─────────────────────────────────────────────────────────────────────
 
-commands:
-  install_system_deps:
-    description: "Install Ubuntu system packages required for building"
+jobs:
+  build-and-test:
+    docker:
+      - image: ubuntu:22.04
+    resource_class: medium
+    environment:
+      DEBIAN_FRONTEND: noninteractive
+      CMAKE_BUILD_TYPE: Release
     steps:
+      - checkout
+
+      # ── System packages + CMake 3.28 ──────────────────────────────────
       - run:
           name: Install system packages + CMake 3.28
           command: |
@@ -26,25 +36,30 @@ commands:
               libappindicator3-dev libnotify-dev \
               nlohmann-json3-dev \
               xvfb mesa-utils
-            # Install CMake 3.28.6 (pre-built binary).
-            # - Ubuntu 22.04's CMake 3.22: FindBoost doesn't know Boost >= 1.79
-            # - Kitware latest (4.2):      FindBoost module removed (CMP0167)
-            # CMake 3.28 is the sweet spot — knows Boost 1.81 and still has FindBoost.
+            # CMake 3.28: knows Boost 1.81 and still has FindBoost
+            # (3.22 too old, 4.x removed FindBoost entirely)
             wget -q https://github.com/Kitware/CMake/releases/download/v3.28.6/cmake-3.28.6-linux-x86_64.tar.gz
-            tar -xzf cmake-3.28.6-linux-x86_64.tar.gz -C /usr/local --strip-components=1
+            tar -xzf cmake-3.28.6-linux-x86_64.tar.gz -C /opt/cmake --strip-components=1
+            ln -sf /opt/cmake/bin/cmake  /usr/local/bin/cmake
+            ln -sf /opt/cmake/bin/ctest  /usr/local/bin/ctest
+            ln -sf /opt/cmake/bin/cpack  /usr/local/bin/cpack
             echo "CMake version: $(cmake --version | head -1)"
 
-  install_boost:
-    description: "Build and install Boost 1.81 (cached)"
-    steps:
+      # ── Restore combined C++ dependency cache ─────────────────────────
+      #    All of Boost, SOCI, LibAsyik install to /usr/local.
+      #    CircleCI cache paths don't support globs, so we cache the
+      #    entire /usr/local/lib and /usr/local/include directories.
       - restore_cache:
           keys:
-            - boost-v1.81.0-{{ arch }}
+            - cpp-deps-v2-{{ arch }}
+
+      # ── Boost 1.81 ────────────────────────────────────────────────────
       - run:
-          name: Build Boost 1.81 (if not cached)
+          name: "Build Boost 1.81 (if not cached)"
           command: |
-            if [ -f /usr/local/include/boost/version.hpp ]; then
-              echo "Boost already installed from cache, running ldconfig"
+            if [ -f /usr/local/include/boost/version.hpp ] && \
+               [ -f /usr/local/lib/libboost_fiber.a ]; then
+              echo "Boost 1.81 already installed (cached)"
               ldconfig
               exit 0
             fi
@@ -56,27 +71,15 @@ commands:
             ./b2 -j$(nproc) cxxflags="-std=c++17" \
                  --with-fiber --with-context --with-atomic \
                  --with-date_time --with-filesystem --with-url \
-                 install
+                 link=static,shared install
             ldconfig
-      - save_cache:
-          key: boost-v1.81.0-{{ arch }}
-          paths:
-            - /usr/local/include/boost
-            - /usr/local/lib/libboost_*
-            - /usr/local/lib/cmake/boost_*
-            - /usr/local/lib/cmake/Boost-1.81.0
 
-  install_soci:
-    description: "Build and install SOCI 4.0.3 (cached)"
-    steps:
-      - restore_cache:
-          keys:
-            - soci-v4.0.3-{{ arch }}
+      # ── SOCI 4.0.3 ───────────────────────────────────────────────────
       - run:
-          name: Build SOCI 4.0.3 (if not cached)
+          name: "Build SOCI 4.0.3 (if not cached)"
           command: |
             if [ -f /usr/local/lib/cmake/SOCI/SOCIConfig.cmake ]; then
-              echo "SOCI already installed from cache, running ldconfig"
+              echo "SOCI 4.0.3 already installed (cached)"
               ldconfig
               exit 0
             fi
@@ -93,24 +96,13 @@ commands:
             make -j$(nproc)
             make install
             ldconfig
-      - save_cache:
-          key: soci-v4.0.3-{{ arch }}
-          paths:
-            - /usr/local/lib/libsoci_*
-            - /usr/local/lib/cmake/SOCI
-            - /usr/local/include/soci
 
-  install_libasyik:
-    description: "Build and install LibAsyik (cached by commit)"
-    steps:
-      - restore_cache:
-          keys:
-            - libasyik-v1-{{ arch }}
+      # ── LibAsyik ──────────────────────────────────────────────────────
       - run:
-          name: Build LibAsyik (if not cached)
+          name: "Build LibAsyik (if not cached)"
           command: |
             if [ -f /usr/local/lib/cmake/libasyik/libasyik-config.cmake ]; then
-              echo "LibAsyik already installed from cache, running ldconfig"
+              echo "LibAsyik already installed (cached)"
               ldconfig
               exit 0
             fi
@@ -123,66 +115,29 @@ commands:
               -DCMAKE_BUILD_TYPE=Release \
               -DCMAKE_CXX_STANDARD=17 \
               -DLIBASYIK_ENABLE_SOCI=ON
-            make -j2
+            make -j$(nproc)
             make install
             ldconfig
-      - save_cache:
-          key: libasyik-v1-{{ arch }}
-          paths:
-            - /usr/local/lib/cmake/libasyik
-            - /usr/local/lib/liblibasyik*
-            - /usr/local/include/libasyik
 
-  install_nodejs:
-    description: "Install Node.js 20 LTS"
-    steps:
+      # ── Save combined C++ dependency cache ────────────────────────────
+      - save_cache:
+          key: cpp-deps-v2-{{ arch }}
+          paths:
+            - /usr/local/lib
+            - /usr/local/include
+
+      # ── Node.js 20 ───────────────────────────────────────────────────
       - run:
           name: Install Node.js 20
           command: |
             if command -v node &>/dev/null; then
               echo "Node.js $(node --version) already available"
-              exit 0
+            else
+              curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
+              apt-get install -y nodejs
             fi
-            curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
-            apt-get install -y nodejs
 
-  install_nlohmann_json:
-    description: "Install nlohmann/json header (fallback if system package missing)"
-    steps:
-      - run:
-          name: Ensure nlohmann/json is available
-          command: |
-            if [ -f /usr/local/include/nlohmann/json.hpp ] || \
-               [ -f /usr/include/nlohmann/json.hpp ]; then
-              echo "nlohmann/json already installed"
-              exit 0
-            fi
-            mkdir -p /usr/local/include/nlohmann
-            wget -q -O /usr/local/include/nlohmann/json.hpp \
-              https://github.com/nlohmann/json/releases/download/v3.11.3/json.hpp
-
-# ── Jobs ─────────────────────────────────────────────────────────────────────
-
-jobs:
-  build-and-test:
-    docker:
-      - image: ubuntu:22.04
-    resource_class: medium
-    environment:
-      DEBIAN_FRONTEND: noninteractive
-      CMAKE_BUILD_TYPE: Release
-    steps:
-      - checkout
-
-      # ── Install all dependencies ──
-      - install_system_deps
-      - install_boost
-      - install_soci
-      - install_libasyik
-      - install_nodejs
-      - install_nlohmann_json
-
-      # ── Build JS bridge ──
+      # ── Build JS bridge ──────────────────────────────────────────────
       - restore_cache:
           keys:
             - npm-js-bridge-{{ checksum "js-bridge/package-lock.json" }}
@@ -198,7 +153,7 @@ jobs:
           paths:
             - js-bridge/node_modules
 
-      # ── Build C++ core + tests ──
+      # ── Build C++ core + tests ───────────────────────────────────────
       - run:
           name: "C++: Configure (CMake)"
           command: |
@@ -218,7 +173,6 @@ jobs:
           name: "C++: Run unit tests"
           command: |
             cd build
-            # Run tests excluding the WebGL E2E test (requires GPU/display)
             ctest --output-on-failure \
                   --exclude-regex "test_webgl_canvas" \
                   --timeout 60
@@ -226,15 +180,13 @@ jobs:
           name: "C++: Run WebGL E2E test (xvfb, allow failure)"
           command: |
             cd build
-            # WebGL test needs a virtual display — may segfault during
-            # teardown on headless CI, so we allow failure here.
             xvfb-run --auto-servernum --server-args="-screen 0 1280x720x24" \
               ctest --output-on-failure \
                     --tests-regex "test_webgl_canvas" \
                     --timeout 60 \
-            || echo "⚠ WebGL E2E test failed (known issue: segfault during teardown)"
+            || echo "WebGL E2E test failed (known issue: segfault during teardown)"
 
-      # ── Store test results ──
+      # ── Store test results ───────────────────────────────────────────
       - store_test_results:
           path: build/Testing
       - store_artifacts:
