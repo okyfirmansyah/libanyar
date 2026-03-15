@@ -209,6 +209,11 @@ jobs:
             cd js-bridge
             npm ci
             npm run build
+      - run:
+          name: "JS Bridge: unit tests (Vitest)"
+          command: |
+            cd js-bridge
+            npm test
       - save_cache:
           key: npm-js-bridge-{{ checksum "js-bridge/package-lock.json" }}
           paths:

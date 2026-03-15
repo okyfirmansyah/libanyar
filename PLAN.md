@@ -1245,7 +1245,7 @@ These items complete the Linux story — green CI, distributable binaries, quant
 | # | Task | Phase | Effort | Why Now |
 |---|------|-------|--------|----------|
 | **1** | ~~**Fix WebGL E2E teardown segfault**~~ | 6.3 | ~~1-2d~~ | ✅ Done — fixed 4 root causes: `~Impl()` destruction order, stale `g_idle_add` drain, `GBytes` shared_ptr capture, `App::run()` shutdown sequence. 8/8 tests pass. |
-| **2** | **JS bridge unit tests (Vitest)** | 6.3 | 2-3d | Zero JS test coverage. Add to CI for full test pyramid. |
+| **2** | ~~**JS bridge unit tests (Vitest)**~~ | 6.3 | ~~2-3d~~ | ✅ Done — 112 tests across 10 files: config, invoke, events, fs, dialog, shell, db, buffer, window, React hooks. Added to CI pipeline. |
 | **3** | **Linux packaging (DEB + AppImage)** | 5.3 | 2-3d | Makes apps distributable. `anyar build --package deb`. |
 | **4** | **Embed frontend into binary (cmrc)** | 5.3 | 1-2d | Single-binary deployment, no external dist/ needed. |
 | **5** | **Performance benchmarks** | 6.4 | 1-2d | Quantify startup, IPC latency, memory. Publish in README. |
