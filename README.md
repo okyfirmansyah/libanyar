@@ -55,34 +55,32 @@ Building desktop apps shouldn't force a choice between powerful native performan
 
 ## Architecture
 
-```
-┌─────────────────────────────────────────┐
-│         Web Frontend (React/Vue)        │
-├─────────────────────────────────────────┤
-│    @libanyar/api  (JS Bridge)           │
-│  ★ Native IPC (webview_bind, ~0.01ms)  │
-│  ★ Shared Memory (anyar-shm://, 0-copy)│
-│  ○ HTTP/WS fallback (browser dev mode) │
-├─────────────────────────────────────────┤
-│      OS WebView (WebKit/WebView2)       │
-├─────────────────────────────────────────┤
-│         LibAnyar Core (C++17)           │
-│   IPC Router │ Commands │ Event Bus     │
-│   Window Mgr │ Plugins  │ Native APIs   │
-│   SharedBuffer │ BufferPool │ WebGL     │
-├─────────────────────────────────────────┤
-│        LibAsyik (Foundation)            │
-│  HTTP/WS Server │ SOCI/SQL │ Fibers    │
-└─────────────────────────────────────────┘
+```mermaid
+block-beta
+  columns 1
+
+  A["🌐 Web Frontend — React / Vue / Svelte"]
+  B["📡 @libanyar/api — JS Bridge\n★ Native IPC (webview_bind, ~0.01ms)\n★ Shared Memory (anyar-shm://, zero-copy)\n○ HTTP/WS fallback (browser dev mode)"]
+  C["🖼️ OS WebView — WebKit / WebView2"]
+  D["⚙️ LibAnyar Core (C++17)\nIPC Router · Commands · Event Bus\nWindow Mgr · Plugins · Native APIs\nSharedBuffer · BufferPool · WebGL"]
+  E["🧱 LibAsyik — Foundation\nHTTP/WS Server · SOCI/SQL · Boost Fibers"]
+
+  A --> B --> C --> D --> E
+
+  style A fill:#4f46e5,color:#fff
+  style B fill:#7c3aed,color:#fff
+  style C fill:#2563eb,color:#fff
+  style D fill:#0891b2,color:#fff
+  style E fill:#059669,color:#fff
 ```
 
 ## Quick Start
 
 > [!TIP]
-> **Start a new project** — scaffold C++ backend + React frontend in seconds:
+> **Start a new project** — scaffold with the Anyar CLI:
 > ```bash
-> npx create-anyar@latest my-app
-> cd my-app && cmake -B build && cmake --build build -j$(nproc)
+> anyar init my-app          # interactive: pick template (React, Vue, Svelte)
+> cd my-app && anyar dev     # start Vite HMR + C++ backend
 > ```
 
 **C++ backend** — define commands and manage windows:
