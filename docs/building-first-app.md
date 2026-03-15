@@ -202,6 +202,27 @@ Run the production binary:
 cd build && ./greeter
 ```
 
+## 6b. Package for Distribution
+
+Once your production build succeeds, create distributable Linux packages:
+
+```bash
+# DEB package (Ubuntu/Debian)
+anyar build --package deb --version 1.0.0
+
+# AppImage (portable Linux)
+anyar build --package appimage --version 1.0.0
+
+# Both at once
+anyar build --package all --version 1.0.0
+```
+
+Output files appear in `build/`:
+- `greeter_1.0.0_amd64.deb`
+- `greeter-1.0.0-x86_64.AppImage`
+
+See [Packaging & Distribution](packaging.md) for details on custom icons, dependency detection, and advanced options.
+
 ## 7. Using Events
 
 LibAnyar supports bidirectional events between C++ and the frontend.
@@ -268,6 +289,7 @@ await db.exec({ handle, sql: 'CREATE TABLE tasks (id INTEGER PRIMARY KEY, name T
 
 ## Next Steps
 
+- [Packaging & Distribution](packaging.md) — Create DEB packages and AppImage bundles
 - [Writing Plugins](writing-plugins.md) — Create custom C++ plugins for your app
 - [Database Integration](database-integration.md) — Full SQLite/PostgreSQL guide
 - [Architecture Overview](../ARCHITECTURE.md) — How the IPC, events, and threading model work

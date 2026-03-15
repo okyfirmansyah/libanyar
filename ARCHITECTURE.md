@@ -716,7 +716,8 @@ libanyar/
 │       ├── main.cpp
 │       ├── cmd_init.cpp
 │       ├── cmd_dev.cpp
-│       └── cmd_build.cpp
+│       ├── cmd_build.cpp
+│       └── cmd_package.cpp  # DEB + AppImage packaging
 │
 ├── templates/                      # Project templates
 │   ├── react-ts/

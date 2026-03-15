@@ -18,6 +18,8 @@ static void print_build_usage() {
     --no-frontend     Skip frontend build
     --no-backend      Skip C++ backend build
     --clean           Clean build directory before building
+    --package FORMAT  Package after build (deb, appimage, all)
+    --version VER     Application version for packaging (default: 0.1.0)
     --help, -h        Show this help
 
   Must be run from a LibAnyar project directory.
@@ -29,6 +31,8 @@ int cmd_build(int argc, char* argv[]) {
     bool build_backend = true;
     bool clean = false;
     std::string build_type = "Release";
+    std::string package_format;
+    std::string app_version = "0.1.0";
 
     for (int i = 1; i < argc; i++) {
         std::string arg = argv[i];
@@ -38,6 +42,8 @@ int cmd_build(int argc, char* argv[]) {
         if (arg == "--no-frontend") { build_frontend = false; continue; }
         if (arg == "--no-backend") { build_backend = false; continue; }
         if (arg == "--clean") { clean = true; continue; }
+        if (arg == "--package" && i + 1 < argc) { package_format = argv[++i]; continue; }
+        if (arg == "--version" && i + 1 < argc) { app_version = argv[++i]; continue; }
     }
 
     // Verify project directory
@@ -136,7 +142,16 @@ int cmd_build(int argc, char* argv[]) {
     std::cout << std::endl;
     print_success("Build complete!");
 
-    if (build_backend) {
+    // ── 3) Package if requested ─────────────────────────────────────────
+    if (!package_format.empty()) {
+        std::cout << std::endl;
+        fs::path build_dir = project_dir / "build";
+        int rc = package_linux(package_format, project_name, project_dir,
+                               build_dir, app_version);
+        if (rc != 0) return rc;
+    }
+
+    if (build_backend && package_format.empty()) {
         std::cout << std::endl;
         std::cout << "  Run your app:" << std::endl;
         std::cout << "    cd build && ./" << project_name << std::endl;

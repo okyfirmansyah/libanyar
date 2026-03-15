@@ -9,6 +9,7 @@ add_executable(anyar
     src/cmd_init.cpp
     src/cmd_dev.cpp
     src/cmd_build.cpp
+    src/cmd_package.cpp
     src/util.cpp
     src/templates.cpp
 )

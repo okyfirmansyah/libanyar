@@ -15,6 +15,20 @@ int cmd_init(int argc, char* argv[]);
 int cmd_dev(int argc, char* argv[]);
 int cmd_build(int argc, char* argv[]);
 
+// ── Packaging (Linux) ───────────────────────────────────────────────────────
+
+/// Package a built application into the given format.
+/// @param format   "deb", "appimage", or "all"
+/// @param project_name  CMake project name (binary name)
+/// @param project_dir   Root of the application project
+/// @param build_dir     Build directory containing the binary
+/// @param version       Semantic version string (e.g. "0.1.0")
+int package_linux(const std::string& format,
+                  const std::string& project_name,
+                  const fs::path& project_dir,
+                  const fs::path& build_dir,
+                  const std::string& version);
+
 // ── Utility functions ───────────────────────────────────────────────────────
 
 /// Run a shell command, return exit code.  Streams stdout/stderr to terminal.
