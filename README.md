@@ -18,11 +18,12 @@ Building desktop apps shouldn't force a choice between powerful native performan
 | Backend Language | C++ | JavaScript | Rust | **C++** |
 | Binary Size | ~15MB | ~150MB+ | ~3-5MB | **~3-8MB** |
 | RAM Usage | ~30MB | ~200MB+ | ~20MB | **~20MB** |
-| C++ Ecosystem | Native | Via N-API | Via FFI | **Native** |
+| C/C++ Ecosystem | Native | Via N-API | Via FFI | **Native** |
 | Built-in DB | — | — | Plugin | **SQLite+PostgreSQL** |
 | Native IPC | Custom | — | webview msg | **webview_bind** |
-| HTTP/WS Fallback | — | — | — | **Built-in** |
+| IPC HTTP/WS Fallback | — | — | — | **Built-in** |
 | Zero-copy Binary IPC | — | — | — | **Shared Memory** |
+| WebGL Canvas Rendering | Native OpenGL | Manual | Manual | **Built-in (RGB and YUV formats supported)** |
 
 ## Example Projects
 
@@ -65,7 +66,10 @@ block-beta
   D["⚙️ LibAnyar Core (C++17)\nIPC Router · Commands · Event Bus\nWindow Mgr · Plugins · Native APIs\nSharedBuffer · BufferPool · WebGL"]
   E["🧱 LibAsyik — Foundation\nHTTP/WS Server · SOCI/SQL · Boost Fibers"]
 
-  A --> B --> C --> D --> E
+  A -- " " --> B
+  B -- " " --> C
+  C -- " " --> D
+  D -- " " --> E
 
   style A fill:#4f46e5,color:#fff
   style B fill:#7c3aed,color:#fff
@@ -147,6 +151,26 @@ cd examples/hello-world
 ## Shared Memory IPC & WebGL Canvas
 
 LibAnyar provides **zero-copy binary data transfer** between C++ and the webview frontend — ideal for video frames, LiDAR point clouds, image processing, or any large binary payload.
+
+```mermaid
+flowchart LR
+  subgraph CPP["C++ Backend"]
+    A["Capture / Generate\n(FFmpeg, sensor, etc.)"] --> B["SharedBuffer\nmmap'd memory"]
+  end
+
+  subgraph IPC["Zero-copy IPC"]
+    B -- "anyar-shm:// URI" --> C["OS WebView\nfetch()"]
+  end
+
+  subgraph JS["JS Frontend"]
+    C --> D["WebGL Renderer\n(RGBA/YUV420/NV12...)"]
+    D --> E["Canvas\n🖥️"]
+  end
+
+  style CPP fill:#0891b2,color:#fff
+  style IPC fill:#7c3aed,color:#fff
+  style JS fill:#4f46e5,color:#fff
+```
 
 | Feature | Description |
 |---|---|
