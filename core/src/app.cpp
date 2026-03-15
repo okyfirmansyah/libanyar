@@ -294,8 +294,17 @@ int App::run() {
         main_win->run();
 
         // ── Orderly shutdown ────────────────────────────────────────
-        // 1) Stop the service FIRST so no new fibers can be spawned
-        //    (prevents new g_idle_add callbacks from the service thread).
+#ifdef __linux__
+        // 0) Drain any pending GTK idle callbacks BEFORE stopping the
+        //    service.  This fulfils promises from run_on_main_thread()
+        //    so that blocked fibers can resume and complete, avoiding
+        //    the "N fiber(s) still active" forced-exit timeout.
+        while (g_main_context_pending(nullptr)) {
+            g_main_context_iteration(nullptr, FALSE);
+        }
+#endif
+
+        // 1) Stop the service so no new fibers can be spawned.
         if (service_) {
             service_->stop();
         }
@@ -389,13 +398,15 @@ void App::register_window_commands() {
     });
 
     // window:close-all — close all windows (triggers app shutdown)
+    // NOTE: terminate() is thread-safe (internally uses g_idle_add),
+    // so we call it directly instead of blocking the fiber with
+    // post_to_main_thread — that would race with the shutdown
+    // sequence after the main loop exits.
     commands_.add("window:close-all", [this](const json&) -> json {
-        post_to_main_thread([this]() {
-            Window* main_win = window_mgr_.main_window();
-            if (main_win) {
-                main_win->terminate();
-            }
-        });
+        Window* main_win = window_mgr_.main_window();
+        if (main_win) {
+            main_win->terminate();
+        }
         return {{"ok", true}};
     });
 
