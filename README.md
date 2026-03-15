@@ -143,7 +143,7 @@ See the [Shared Memory & WebGL Guide](docs/shared-memory-webgl.md) for full API 
 ✅ **Phase 3** — Native APIs & plugins: file system, dialogs (GTK3), shell/subprocess, clipboard
 ✅ **Phase 4** — Database integration: SQLite & PostgreSQL via LibAsyik SOCI pool, parameterized queries, transactions
 ✅ **Phase 4f** — Shared Memory IPC & WebGL Canvas: zero-copy binary transfer, buffer pools, RGBA/YUV420 rendering
-✅ **Phase 5** — CLI tool: project scaffolding (`anyar init`), dev server (`anyar dev`), production build, **Linux packaging (DEB + AppImage)**
+✅ **Phase 5** — CLI tool: project scaffolding (`anyar init`), dev server (`anyar dev`), production build, **Linux packaging (DEB + AppImage)**, **single-binary embed (cmrc)**
 
 See [PLAN.md](PLAN.md) for full roadmap.
 

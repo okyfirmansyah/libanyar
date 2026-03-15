@@ -10,6 +10,10 @@ option(ANYAR_ENABLE_SOCI    "Enable SOCI database support (SQLite + PostgreSQL)"
 option(ANYAR_BUILD_EXAMPLES "Build example applications" ON)
 option(ANYAR_BUILD_CLI      "Build anyar CLI tool" ON)
 option(ANYAR_BUILD_TESTS    "Build tests" OFF)
+option(ANYAR_EMBED_FRONTEND "Embed frontend assets into binaries (requires built frontend)" OFF)
+
+# Make cmake/ modules available (CMakeRC, AnyarEmbed)
+list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
 # Point to LibAsyik source tree (for development, before `make install`)
 # Usage: cmake .. -DLIBASYIK_SOURCE_DIR=/path/to/libasyik

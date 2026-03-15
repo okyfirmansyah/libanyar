@@ -83,6 +83,7 @@ Then start developing:
 ```bash
 anyar dev     # Start Vite HMR + build/run C++ backend
 anyar build   # Production build
+anyar build --embed                            # Single-binary (frontend compiled in)
 anyar build --package deb --version 1.0.0      # Build + create .deb
 anyar build --package appimage --version 1.0.0 # Build + create AppImage
 anyar build --package all --version 1.0.0      # Build + both formats

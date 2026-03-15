@@ -5,6 +5,10 @@
 #include "wifi_plugin.h"
 #include <iostream>
 
+#ifdef ANYAR_EMBED_FRONTEND
+#include <anyar/embed.h>
+#endif
+
 int main() {
     anyar::AppConfig config;
     config.host = "127.0.0.1";
@@ -27,6 +31,10 @@ int main() {
     win.debug = true;
 
     app.create_window(win);
+
+#ifdef ANYAR_EMBED_FRONTEND
+    app.set_frontend_resolver(anyar::make_embedded_resolver());
+#endif
 
     std::cout << "[wifi-analyzer] Starting LibAnyar WiFi Channel Analyzer..."
               << std::endl;

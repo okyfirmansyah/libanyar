@@ -25,11 +25,16 @@ target_link_libraries(wifi_analyzer PRIVATE
 
 # Copy the frontend dist to the build output directory
 set(FRONTEND_DIST_DIR ${CMAKE_CURRENT_SOURCE_DIR}/frontend/dist)
-if(EXISTS ${FRONTEND_DIST_DIR})
-    add_custom_command(TARGET wifi_analyzer POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_directory
-            ${FRONTEND_DIST_DIR}
-            $<TARGET_FILE_DIR:wifi_analyzer>/dist
-        COMMENT "Copying wifi-analyzer frontend dist → build/dist"
-    )
+if(ANYAR_EMBED_FRONTEND AND EXISTS ${FRONTEND_DIST_DIR})
+    include(AnyarEmbed)
+    anyar_embed_frontend(wifi_analyzer "${FRONTEND_DIST_DIR}")
+else()
+    if(EXISTS ${FRONTEND_DIST_DIR})
+        add_custom_command(TARGET wifi_analyzer POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_directory
+                ${FRONTEND_DIST_DIR}
+                $<TARGET_FILE_DIR:wifi_analyzer>/dist
+            COMMENT "Copying wifi-analyzer frontend dist → build/dist"
+        )
+    endif()
 endif()

@@ -34,11 +34,16 @@ target_link_libraries(video_player PRIVATE
 
 # Copy the frontend dist to the build output directory
 set(FRONTEND_DIST_DIR ${CMAKE_CURRENT_SOURCE_DIR}/frontend/dist)
-if(EXISTS ${FRONTEND_DIST_DIR})
-    add_custom_command(TARGET video_player POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_directory
-            ${FRONTEND_DIST_DIR}
-            $<TARGET_FILE_DIR:video_player>/dist
-        COMMENT "Copying video-player frontend dist → build/dist"
-    )
+if(ANYAR_EMBED_FRONTEND AND EXISTS ${FRONTEND_DIST_DIR})
+    include(AnyarEmbed)
+    anyar_embed_frontend(video_player "${FRONTEND_DIST_DIR}")
+else()
+    if(EXISTS ${FRONTEND_DIST_DIR})
+        add_custom_command(TARGET video_player POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_directory
+                ${FRONTEND_DIST_DIR}
+                $<TARGET_FILE_DIR:video_player>/dist
+            COMMENT "Copying video-player frontend dist → build/dist"
+        )
+    endif()
 endif()

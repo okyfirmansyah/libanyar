@@ -1,5 +1,8 @@
 #pragma once
 
+#include <functional>
+#include <string>
+
 /// @file app_config.h
 /// @brief Application and window configuration structures for LibAnyar.
 ///
@@ -118,5 +121,18 @@ struct AppConfig {
     /// Served as static files by the HTTP server. Typically `"./dist"`.
     std::string dist_path;
 };
+
+/// @brief Callback type for serving embedded frontend resources.
+///
+/// Given a request path (e.g. "/assets/index.js"), writes the file body
+/// and content-type to the output parameters. Returns true if the file
+/// was found, false for 404.
+///
+/// @see anyar::make_embedded_resolver() in <anyar/embed.h>
+using FileResolver = std::function<bool(
+    const std::string& path,
+    std::string& out_body,
+    std::string& out_content_type
+)>;
 
 } // namespace anyar

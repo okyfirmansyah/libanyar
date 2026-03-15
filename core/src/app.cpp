@@ -130,6 +130,12 @@ void App::use(std::shared_ptr<IAnyarPlugin> plugin) {
     plugins_.push_back(std::move(plugin));
 }
 
+// ── Embedded Frontend ───────────────────────────────────────────────────────
+
+void App::set_frontend_resolver(FileResolver resolver) {
+    frontend_resolver_ = std::move(resolver);
+}
+
 // ── Internal ────────────────────────────────────────────────────────────────
 
 int App::find_available_port() {
@@ -196,26 +202,64 @@ void App::start_server() {
     // Keep builtins alive for shutdown
     plugins_.insert(plugins_.begin(), builtins.begin(), builtins.end());
 
-    // ── Static file serving (frontend assets) — uses LibAsyik serve_static ──
-    std::string dist_abs = std::filesystem::absolute(config_.dist_path).string();
-    if (std::filesystem::exists(dist_abs)) {
-        asyik::static_file_config cfg;
-        cfg.cache_control = "no-cache";
-        cfg.index_file    = "index.html";
-        server_->serve_static("/", dist_abs, cfg);
-    } else {
-        server_->on_http_request("/", "GET",
-            [](asyik::http_request_ptr req, asyik::http_route_args args) {
-                req->response.body =
-                    "<!DOCTYPE html><html><head><title>LibAnyar</title></head>"
-                    "<body style='font-family:system-ui;padding:40px'>"
-                    "<h1>LibAnyar</h1>"
-                    "<p>No frontend build found. Place your built frontend in <code>./dist</code>.</p>"
-                    "</body></html>";
-                req->response.headers.set("Content-Type", "text/html");
-                req->response.result(200);
+    // ── Frontend serving ────────────────────────────────────────────────────
+    if (frontend_resolver_) {
+        // Embedded mode: serve frontend from compiled-in resources
+        auto resolver = frontend_resolver_;
+        server_->on_http_request("/<path>", "GET",
+            [resolver](asyik::http_request_ptr req, asyik::http_route_args args) {
+                std::string path = "/" + args[0];
+                std::string body, content_type;
+                if (resolver(path, body, content_type)) {
+                    req->response.body = std::move(body);
+                    req->response.headers.set("Content-Type", content_type);
+                    req->response.headers.set("Cache-Control", "no-cache");
+                    req->response.result(200);
+                } else {
+                    req->response.body = "404 Not Found";
+                    req->response.headers.set("Content-Type", "text/plain");
+                    req->response.result(404);
+                }
             }
         );
+        // Also handle bare "/" (root without path)
+        server_->on_http_request("/", "GET",
+            [resolver](asyik::http_request_ptr req, asyik::http_route_args args) {
+                std::string body, content_type;
+                if (resolver("/", body, content_type)) {
+                    req->response.body = std::move(body);
+                    req->response.headers.set("Content-Type", content_type);
+                    req->response.headers.set("Cache-Control", "no-cache");
+                    req->response.result(200);
+                } else {
+                    req->response.body = "404 Not Found";
+                    req->response.headers.set("Content-Type", "text/plain");
+                    req->response.result(404);
+                }
+            }
+        );
+    } else {
+        // Filesystem mode: serve frontend from dist directory
+        std::string dist_abs = std::filesystem::absolute(config_.dist_path).string();
+        if (std::filesystem::exists(dist_abs)) {
+            asyik::static_file_config cfg;
+            cfg.cache_control = "no-cache";
+            cfg.index_file    = "index.html";
+            server_->serve_static("/", dist_abs, cfg);
+        } else {
+            server_->on_http_request("/", "GET",
+                [](asyik::http_request_ptr req, asyik::http_route_args args) {
+                    req->response.body =
+                        "<!DOCTYPE html><html><head><title>LibAnyar</title></head>"
+                        "<body style='font-family:system-ui;padding:40px'>"
+                        "<h1>LibAnyar</h1>"
+                        "<p>No frontend build found. Place your built frontend in <code>./dist</code>.</p>"
+                        "</body></html>";
+                    req->response.headers.set("Content-Type", "text/html");
+                    req->response.result(200);
+                }
+            );
+        }
     }
 }
 

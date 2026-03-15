@@ -658,11 +658,16 @@ libanyar/
 │   ├── decisions.md                # Architecture decision log
 │   └── progress.md                 # Current progress tracking
 │
+├── cmake/                          # CMake modules
+│   ├── CMakeRC.cmake               # CMake Resource Compiler (cmrc)
+│   └── AnyarEmbed.cmake            # anyar_embed_frontend() helper
+│
 ├── core/                           # LibAnyar framework library
 │   ├── CMakeLists.txt
 │   ├── include/anyar/
 │   │   ├── app.h                   # anyar::App
-│   │   ├── app_config.h            # Configuration structs
+│   │   ├── app_config.h            # Configuration structs + FileResolver
+│   │   ├── embed.h                 # cmrc-backed embedded frontend resolver
 │   │   ├── window.h                # Window management
 │   │   ├── ipc_router.h            # HTTP + WS IPC routing
 │   │   ├── command_registry.h      # Command dispatch

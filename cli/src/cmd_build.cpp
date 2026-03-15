@@ -18,6 +18,7 @@ static void print_build_usage() {
     --no-frontend     Skip frontend build
     --no-backend      Skip C++ backend build
     --clean           Clean build directory before building
+    --embed           Embed frontend into binary (single-file deployment)
     --package FORMAT  Package after build (deb, appimage, all)
     --version VER     Application version for packaging (default: 0.1.0)
     --help, -h        Show this help
@@ -30,6 +31,7 @@ int cmd_build(int argc, char* argv[]) {
     bool build_frontend = true;
     bool build_backend = true;
     bool clean = false;
+    bool embed = false;
     std::string build_type = "Release";
     std::string package_format;
     std::string app_version = "0.1.0";
@@ -42,6 +44,7 @@ int cmd_build(int argc, char* argv[]) {
         if (arg == "--no-frontend") { build_frontend = false; continue; }
         if (arg == "--no-backend") { build_backend = false; continue; }
         if (arg == "--clean") { clean = true; continue; }
+        if (arg == "--embed") { embed = true; continue; }
         if (arg == "--package" && i + 1 < argc) { package_format = argv[++i]; continue; }
         if (arg == "--version" && i + 1 < argc) { app_version = argv[++i]; continue; }
     }
@@ -108,7 +111,11 @@ int cmd_build(int argc, char* argv[]) {
         fs::create_directories(build_dir);
 
         print_step("Configuring CMake (" + build_type + ")...");
-        int rc = run("cmake .. -DCMAKE_BUILD_TYPE=" + build_type, build_dir);
+        std::string cmake_cmd = "cmake .. -DCMAKE_BUILD_TYPE=" + build_type;
+        if (embed) {
+            cmake_cmd += " -DANYAR_EMBED_FRONTEND=ON";
+        }
+        int rc = run(cmake_cmd, build_dir);
         if (rc != 0) {
             print_error("CMake configuration failed");
             return 1;

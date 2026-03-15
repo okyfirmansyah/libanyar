@@ -82,6 +82,12 @@ public:
     /// Run the application (blocks until all windows are closed)
     int run();
 
+    /// Set a resolver for embedded frontend resources.
+    /// When set, the HTTP server serves frontend files from this resolver
+    /// instead of the filesystem dist_path.
+    /// @see anyar::make_embedded_resolver() in <anyar/embed.h>
+    void set_frontend_resolver(FileResolver resolver);
+
 private:
     void start_server();
     void setup_native_ipc(Window* window);
@@ -111,6 +117,9 @@ private:
     std::map<std::string, std::unique_ptr<SharedBufferPool>> buffer_pools_;
 
     std::vector<std::shared_ptr<IAnyarPlugin>> plugins_;
+
+    /// Optional resolver for embedded frontend resources
+    FileResolver frontend_resolver_;
 };
 
 } // namespace anyar

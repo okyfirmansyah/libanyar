@@ -223,6 +223,22 @@ Output files appear in `build/`:
 
 See [Packaging & Distribution](packaging.md) for details on custom icons, dependency detection, and advanced options.
 
+## 6c. Single-Binary Deployment
+
+Embed the frontend directly into the binary so no external `dist/` directory is needed:
+
+```bash
+anyar build --embed
+```
+
+The resulting binary contains all frontend assets compiled in via [CMakeRC](https://github.com/vector-of-bool/cmrc). You can copy it anywhere and it runs standalone — no `dist/` folder required.
+
+Combine with packaging for the smallest distributable:
+
+```bash
+anyar build --embed --package deb --version 1.0.0
+```
+
 ## 7. Using Events
 
 LibAnyar supports bidirectional events between C++ and the frontend.

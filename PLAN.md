@@ -1,6 +1,6 @@
 # LibAnyar — Implementation Plan
 
-> Last updated: 2026-03-15 (Linux packaging done)
+> Last updated: 2026-03-15 (embed frontend done)
 
 ## Phase Overview
 
@@ -1096,7 +1096,7 @@ Feature 1 (`buffer`) is a standalone general-purpose API. Feature 2 (`canvas`) i
 ### 5.3 `anyar build`
 - [x] Build frontend (npm run build)
 - [x] Build C++ backend (cmake --build)
-- [ ] Optionally embed frontend into binary (cmrc)
+- [x] Optionally embed frontend into binary (cmrc)
 - [x] Linux packaging (DEB, AppImage)
 
 ### Phase 5 Deliverable
@@ -1247,7 +1247,7 @@ These items complete the Linux story — green CI, distributable binaries, quant
 | **1** | ~~**Fix WebGL E2E teardown segfault**~~ | 6.3 | ~~1-2d~~ | ✅ Done — fixed 4 root causes: `~Impl()` destruction order, stale `g_idle_add` drain, `GBytes` shared_ptr capture, `App::run()` shutdown sequence. 8/8 tests pass. |
 | **2** | ~~**JS bridge unit tests (Vitest)**~~ | 6.3 | ~~2-3d~~ | ✅ Done — 112 tests across 10 files: config, invoke, events, fs, dialog, shell, db, buffer, window, React hooks. Added to CI pipeline. |
 | **3** | ~~**Linux packaging (DEB + AppImage)**~~ | 5.3 | ~~2-3d~~ | ✅ Done — `anyar build --package deb\|appimage\|all`. DEB with auto-deps via ldd, AppImage via linuxdeploy. |
-| **4** | **Embed frontend into binary (cmrc)** | 5.3 | 1-2d | Single-binary deployment, no external dist/ needed. |
+| **4** | ~~**Embed frontend into binary (cmrc)**~~ | 5.3 | ~~1-2d~~ | ✅ Done — `anyar build --embed` compiles frontend into binary via cmrc. `App::set_frontend_resolver()` + `<anyar/embed.h>`. |
 | **5** | **Performance benchmarks** | 6.4 | 1-2d | Quantify startup, IPC latency, memory. Publish in README. |
 
 #### Tier 2 — Feature Completeness
