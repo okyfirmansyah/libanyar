@@ -10,17 +10,48 @@ A lightweight C++ desktop application framework that leverages web frontend tech
 
 ## Why LibAnyar?
 
+Building desktop apps shouldn't force a choice between powerful native performance and a modern, rich UI. LibAnyar bridges that gap — write your backend in C++ with full access to the native ecosystem, while crafting your interface with React, Vue, or any web framework you already know.
+
 | | Qt | Electron | Tauri | **LibAnyar** |
 |---|---|---|---|---|
 | UI Technology | QML/Widgets | Web (Chromium) | Web (OS WebView) | Web (OS WebView) |
 | Backend Language | C++ | JavaScript | Rust | **C++** |
 | Binary Size | ~15MB | ~150MB+ | ~3-5MB | **~3-8MB** |
 | RAM Usage | ~30MB | ~200MB+ | ~20MB | **~20MB** |
-| C++ Ecosystem | ✅ Native | ❌ Via N-API | ❌ Via FFI | ✅ **Native** |
-| Built-in DB | ❌ | ❌ | ❌ Plugin | ✅ **SQLite+PostgreSQL** |
-| Native IPC | Custom | ❌ | ✅ webview msg | ✅ **webview_bind** |
-| HTTP/WS Fallback | ❌ | ❌ | ❌ | ✅ **Built-in** |
-| Zero-copy Binary IPC | ❌ | ❌ | ❌ | ✅ **Shared Memory** |
+| C++ Ecosystem | Native | Via N-API | Via FFI | **Native** |
+| Built-in DB | — | — | Plugin | **SQLite+PostgreSQL** |
+| Native IPC | Custom | — | webview msg | **webview_bind** |
+| HTTP/WS Fallback | — | — | — | **Built-in** |
+| Zero-copy Binary IPC | — | — | — | **Shared Memory** |
+
+## Example Projects
+
+<table>
+<tr>
+<td width="50%" align="center">
+<h3>Hello World</h3>
+<img src="docs/assets/hello_world.png" alt="Hello World" height="200" /><br/>
+<sub>Minimal example — IPC commands, events, and built-in plugins.</sub>
+</td>
+<td width="50%" align="center">
+<h3>Local Video Player</h3>
+<img src="docs/assets/video-player.gif" alt="Video Player" height="200" /><br/>
+<sub>FFmpeg-powered with zero-copy IPC and direct WebGL rendering.</sub>
+</td>
+</tr>
+<tr>
+<td width="50%" align="center">
+<h3>Secure Key Storage</h3>
+<img src="docs/assets/key-storage.gif" alt="Key Storage" height="200" /><br/>
+<sub>Encrypted password manager — AES-256-GCM, multi-window, custom plugin.</sub>
+</td>
+<td width="50%" align="center">
+<h3>Wifi Analyzer</h3>
+<img src="docs/assets/wifi-analyzer.gif" alt="Wifi Analyzer" height="200" /><br/>
+<sub>Real-time signal strength visualization and channel scanning.</sub>
+</td>
+</tr>
+</table>
 
 ## Architecture
 
@@ -47,6 +78,15 @@ A lightweight C++ desktop application framework that leverages web frontend tech
 
 ## Quick Start
 
+> [!TIP]
+> **Start a new project** — scaffold C++ backend + React frontend in seconds:
+> ```bash
+> npx create-anyar@latest my-app
+> cd my-app && cmake -B build && cmake --build build -j$(nproc)
+> ```
+
+**C++ backend** — define commands and manage windows:
+
 ```cpp
 #include <anyar/app.h>
 
@@ -66,6 +106,8 @@ int main() {
     return app.run();
 }
 ```
+
+**JS frontend** — call into C++ from React, Vue, or vanilla JS:
 
 ```tsx
 import { invoke } from '@libanyar/api';
@@ -136,38 +178,9 @@ const { destroy } = createBufferRenderer({
 
 See the [Shared Memory & WebGL Guide](docs/shared-memory-webgl.md) for full API reference.
 
-## Example Projects
+## Documentation
 
-### Hello World
-
-A minimal example showing IPC commands, events, and built-in plugins.
-
-<p align="center">
-  <img src="docs/assets/hello_world.png" alt="Hello World Example" height="240" />
-</p>
-
-### Local Video Player
-
-FFmpeg-powered video player with zero-copy IPC and direct WebGL canvas rendering.
-<p align="center">
-  <img src="docs/assets/video-player.gif" alt="Video Player Example" height="240" />
-</p>
-
-### Secure Key Storage
-
-Encrypted password manager with AES-256-GCM, multi-window modal dialogs, and a custom plugin.
-
-<p align="center">
-  <img src="docs/assets/key-storage.gif" alt="Key Storage Example" height="240" />
-</p>
-
-### Wifi Analyzer
-
-A desktop Wifi analyzer with real-time signal strength visualization and channel scanning.
-
-<p align="center">
-  <img src="docs/assets/wifi-analyzer.gif" alt="Wifi Analyzer Example" height="240" />
-</p>
+Guides, API references, and tutorials: **[LibAnyar Documentation](docs/README.md)**
 
 ## License
 
