@@ -100,11 +100,12 @@ struct Window::Impl {
             disconnect_close_signals();
             destroyed = true;
 #ifdef __linux__
-            // Drain any stale g_idle_add callbacks (from webview_dispatch,
-            // event push sinks, etc.) BEFORE webview_destroy().  This
-            // prevents webview's internal deplete_run_loop_event_queue()
-            // from processing callbacks that reference the destroyed widget.
-            while (g_main_context_pending(nullptr)) {
+            // Drain a bounded number of stale g_idle_add callbacks
+            // BEFORE webview_destroy().  This prevents webview’s
+            // internal deplete_run_loop_event_queue() from processing
+            // stale callbacks that reference the destroyed widget.
+            // Cap iterations to avoid hanging under xvfb.
+            for (int i = 0; i < 200 && g_main_context_pending(nullptr); ++i) {
                 g_main_context_iteration(nullptr, FALSE);
             }
 #endif
@@ -385,10 +386,11 @@ void Window::destroy() {
             impl_->parent_window = nullptr;
         }
 
-        // Drain any stale g_idle_add callbacks BEFORE webview_destroy()
-        // so that deplete_run_loop_event_queue() inside the webview
-        // destructor won't process callbacks referencing the dead widget.
-        while (g_main_context_pending(nullptr)) {
+        // Drain a bounded number of stale g_idle_add callbacks
+        // BEFORE webview_destroy() so that deplete_run_loop_event_queue()
+        // inside the webview destructor won't process stale callbacks.
+        // Cap iterations to avoid hanging under xvfb.
+        for (int i = 0; i < 200 && g_main_context_pending(nullptr); ++i) {
             g_main_context_iteration(nullptr, FALSE);
         }
 #endif

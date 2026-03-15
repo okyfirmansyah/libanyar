@@ -14,9 +14,11 @@
 #include <anyar/shared_buffer.h>
 
 #include <cstring>
+#include <cstdlib>
 #include <iostream>
 #include <atomic>
 #include <chrono>
+#include <thread>
 
 using json = anyar::json;
 
@@ -57,6 +59,16 @@ int main() {
             failure_reason = message;
             exit_code.store(1);
         }
+
+        // Watchdog: if app.run() doesn't return within 5 seconds
+        // (e.g. service thread or WebKitGTK cleanup hangs in headless CI),
+        // force exit with the test result.
+        std::thread([&exit_code]() {
+            std::this_thread::sleep_for(std::chrono::seconds(5));
+            std::cerr << "[test] Watchdog: forcing _exit("
+                      << exit_code.load() << ") after 5s" << std::endl;
+            _exit(exit_code.load());
+        }).detach();
 
         // Close the window after reporting
         return json{{"ok", true}};

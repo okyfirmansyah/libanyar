@@ -295,16 +295,21 @@ int App::run() {
 
         // ── Orderly shutdown ────────────────────────────────────────
 #ifdef __linux__
-        // 0) Drain any pending GTK idle callbacks BEFORE stopping the
-        //    service.  This fulfils promises from run_on_main_thread()
-        //    so that blocked fibers can resume and complete, avoiding
-        //    the "N fiber(s) still active" forced-exit timeout.
-        while (g_main_context_pending(nullptr)) {
+        // 0) Drain a limited number of pending GTK idle callbacks
+        //    BEFORE stopping the service.  This fulfils promises from
+        //    run_on_main_thread() so blocked fibers can resume.
+        //    Cap iterations to avoid hanging under xvfb where
+        //    WebKitGTK may continuously generate events.
+        for (int i = 0; i < 200 && g_main_context_pending(nullptr); ++i) {
             g_main_context_iteration(nullptr, FALSE);
         }
 #endif
 
-        // 1) Stop the service so no new fibers can be spawned.
+        // 1) Close the HTTP server acceptor so the accept-loop fiber
+        //    can exit, then stop the service.
+        if (server_) {
+            server_->close();
+        }
         if (service_) {
             service_->stop();
         }
@@ -319,20 +324,18 @@ int App::run() {
         }
         native_event_sinks_.clear();
 
-        // 3) Explicitly destroy all windows while the GTK main
-        //    context is still valid. This sets destroyed=true on
-        //    each window, so any stale g_idle_add callbacks that
-        //    fire during deplete_run_loop_event_queue() will see
-        //    is_destroyed()==true and bail out harmlessly.
+        // 3) Explicitly destroy all windows.  Each Window::destroy()
+        //    sets destroyed=true, so any stale g_idle_add callbacks
+        //    processed during webview’s deplete_run_loop_event_queue()
+        //    will bail out via the is_destroyed() guard.
         window_mgr_.close_all();
 
-#ifdef __linux__
-        // 4) Drain any remaining GTK idle callbacks (e.g. deferred
-        //    on_close handlers) so they run while objects are alive.
-        while (gtk_events_pending()) {
-            gtk_main_iteration();
-        }
-#endif
+        // NOTE: We intentionally do NOT drain GTK events after
+        // close_all().  Under xvfb, WebKitGTK may continuously
+        // generate events during web process teardown, causing an
+        // infinite drain loop.  The destroyed flag guards all
+        // callbacks, and deferred on_close handlers are not needed
+        // since we are shutting down the entire application.
 
     } else {
         // No window — run headless (useful for testing)
