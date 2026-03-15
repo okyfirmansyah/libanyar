@@ -6,7 +6,7 @@
 // ---------------------------------------------------------------------------
 
 import { invoke } from '../invoke';
-import { listen } from '../events';
+import { listen, emitTo as _emitTo } from '../events';
 import type { UnlistenFn, EventHandler } from '../types';
 
 // ── Types ──────────────────────────────────────────────────────────────────
@@ -188,6 +188,24 @@ export function onWindowCreated(
 }
 
 // ── Close confirmation ─────────────────────────────────────────────────────
+
+/**
+ * Emit an event targeted at a specific window.
+ * Convenience re-export of `emitTo()` from the events module.
+ *
+ * @param label   Target window label
+ * @param event   Event name
+ * @param payload Optional payload
+ */
+export function emitToWindow(
+  label: string,
+  event: string,
+  payload: unknown = null,
+): void {
+  _emitTo(label, event, payload);
+}
+
+// ── Close confirmation options ─────────────────────────────────────────────
 
 export interface CloseConfirmationOptions {
   /** Window label (defaults to current window). */

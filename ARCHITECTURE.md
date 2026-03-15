@@ -176,10 +176,13 @@ as a fallback for browser-based development and content streaming.
 - Latency: ~0.01–0.1 ms (in-process, no TCP/HTTP overhead)
 
 **Events** — `webview_eval` push:
-- C++ registers a native event sink via `EventBus::add_ws_sink()`
-- When an event fires, the sink calls `window_->eval("window.__anyar_dispatch_event__(msg)")` via `window_->dispatch()`
-- JS sets up `window.__anyar_dispatch_event__` to fan out to registered listeners
-- JS → C++ events use `invoke('anyar:emit_event', {event, payload})` which calls `EventBus::emit_local()` (no echo loop)
+- C++ registers a labeled window sink via `EventBus::add_window_sink(label, sink)`
+- When a broadcast event fires, all sinks receive `window_->eval("window.__anyar_dispatch_event__(msg)")`
+- Targeted events via `EventBus::emit_to_window(label, event, payload)` — only the target window’s sink is called
+- JS `listen()` filters by target: events aimed at other windows are ignored
+- JS `listenGlobal()` receives all events (broadcast + other windows’ targeted events) via `set_global_listener()`
+- JS → C++ events use `invoke('anyar:emit_event', {event, payload})` which calls `EventBus::emit()` (broadcast)
+- JS → targeted: `invoke('anyar:emit_to_window', {label, event, payload})` calls `EventBus::emit_to_window()`
 
 **Detection**: JS bridge checks `typeof window.__anyar_ipc__ === 'function'`
 and the C++ side injects `window.__LIBANYAR_NATIVE__ = true` via `webview_init()`.
@@ -285,7 +288,7 @@ class CommandRegistry {
 ### 4. EventBus
 
 Fiber-channel-based pub/sub system that fans out events to:
-- Native event sink (webview_eval push to frontend — primary)
+- Labeled window sinks (per-window `webview_eval` push — primary)
 - Connected WebSocket clients (browser fallback)
 - Internal C++ subscribers (plugins, other fibers)
 
@@ -293,14 +296,20 @@ Fiber-channel-based pub/sub system that fans out events to:
 class EventBus {
     void emit(const std::string& event, const json& payload);
     void emit_local(const std::string& event, const json& payload);
+    void emit_to_window(const std::string& label, const std::string& event,
+                        const json& payload);
     SubscriptionHandle on(const std::string& event, EventHandler handler);
-    void off(SubscriptionHandle handle);
+    uint64_t add_window_sink(const std::string& label, WsPushFn sink);
+    void remove_window_sink(const std::string& label);
+    void set_global_listener(uint64_t sink_id, bool enabled);
 };
 ```
 
 `emit()` broadcasts to **all** sinks (native, WebSocket, C++ subscribers).
 `emit_local()` dispatches to **C++ subscribers only** — used when JS emits
 via native IPC to avoid an echo loop (JS → C++ → back to JS).
+`emit_to_window()` sends to **one labeled sink** + global listeners + C++ subscribers.
+`set_global_listener()` marks a sink as “global” — receives targeted events for other windows.
 ```
 
 ### 5. WindowManager

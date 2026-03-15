@@ -578,12 +578,14 @@ Linux implementation (`window_linux.cpp`, inside `Window::Impl`):
 
 > Events need window-awareness for targeted delivery.
 
-- [ ] Extend `EventBus` to support per-window sinks (keyed by label) *(currently uses generic broadcast to all ws_sinks_)*
+- [x] Extend `EventBus` to support per-window sinks (keyed by label) *(uses `add_window_sink(label, sink_fn)` + `label_to_sink_` map)*
   - `add_window_sink(label, sink_fn) → uint64_t`
   - `emit_to_window(label, event, payload)` — send to one window
   - `emit(event, payload)` — broadcast to all windows (existing behavior)
 - [x] JS-side: `listen()` receives events for current window + broadcasts
-- [ ] New: `listenGlobal(event, handler)` — listen to events from any window
+- [x] New: `listenGlobal(event, handler)` — listen to events from any window
+- [x] New: `emitTo(label, event, payload)` — emit targeted event from JS
+- [x] New: `set_global_listener(sink_id, enabled)` — C++ global listener toggle
 - [x] Window lifecycle events (emitted automatically):
   - `window:created` — `{ label, title }` — broadcast when a window is created
   - `window:closed` — `{ label }` — broadcast when a window is closed
@@ -1229,7 +1231,7 @@ All unchecked `[ ]` items across the plan, categorized:
 | Category | Items | Phases |
 |----------|-------|--------|
 | **Linux hardening** | WebGL test segfault fix, performance benchmarks, JS bridge tests | 6.3, 6.4 |
-| **Incomplete features** | EventBus per-window sinks, `listenGlobal`, `window:focused` event | 4d.8 |
+| **Incomplete features** | ~~EventBus per-window sinks~~, ~~`listenGlobal`~~, `window:focused` event | 4d.8 |
 | **Dev experience** | C++ watch mode, embed frontend (cmrc), Linux packaging (DEB/AppImage) | 5.2, 5.3 |
 | **Fallback paths** | SharedBuffer WebSocket fallback, SharedBuffer perf benchmarks | 4f.5, 4f.6, 4f.7 |
 | **More examples** | Todo App, File Explorer, Markdown Editor, Chat App | 6.2 |
@@ -1256,7 +1258,7 @@ Gaps in implemented phases that should be closed before expanding.
 
 | # | Task | Phase | Effort | Why |
 |---|------|-------|--------|-----|
-| **6** | **EventBus per-window sinks** | 4d.8 | 1d | Targeted events use broadcast workaround; proper impl for multi-window apps. |
+| **6** | ~~**EventBus per-window sinks**~~ | 4d.8 | ~~1d~~ | ✅ Done — `add_window_sink()`, `emit_to_window()`, `set_global_listener()` in C++. JS: `emitTo()`, `listenGlobal()`. 9 new C++ tests, 6 new JS tests. |
 | **7** | **SharedBuffer WebSocket fallback** | 4f.5 | 1-2d | `anyar dev` (browser mode) can't use `anyar-shm://`; needs WS path. |
 | **8** | **C++ watch mode** (`anyar dev --watch`) | 5.2 | 1-2d | DX improvement — auto-rebuild C++ on save. |
 | **9** | **`window:focused` event** | 4d.8 | 0.5d | Small gap in window lifecycle events. |

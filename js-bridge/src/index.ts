@@ -4,7 +4,7 @@
 
 // ── Core API ───────────────────────────────────────────────────────────────
 export { invoke } from './invoke';
-export { listen, emit, once, onReady } from './events';
+export { listen, emit, emitTo, listenGlobal, once, onReady } from './events';
 export { getPort, setPort, getBaseUrl, getWsUrl, isNativeIpc } from './config';
 
 // ── Window Management ──────────────────────────────────────────────────────
@@ -65,7 +65,7 @@ export type {
 
 // ── Expose on window for non-module usage ──────────────────────────────────
 import { invoke } from './invoke';
-import { listen, emit, once, onReady } from './events';
+import { listen, emit, emitTo, listenGlobal, once, onReady } from './events';
 import { getPort, setPort, isNativeIpc } from './config';
 import {
   createWindow,
@@ -83,6 +83,8 @@ if (typeof window !== 'undefined') {
     invoke,
     listen,
     emit,
+    emitTo,
+    listenGlobal,
     once,
     onReady,
     getPort,

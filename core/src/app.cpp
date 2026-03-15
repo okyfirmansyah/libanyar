@@ -99,6 +99,11 @@ void App::emit(const std::string& event, const json& payload) {
     events_.emit(event, payload);
 }
 
+void App::emit_to(const std::string& label, const std::string& event,
+                  const json& payload) {
+    events_.emit_to_window(label, event, payload);
+}
+
 UnsubscribeFn App::on(const std::string& event, EventHandler handler) {
     return events_.on(event, std::move(handler));
 }
@@ -174,6 +179,26 @@ void App::start_server() {
         json payload = args.value("payload", json::object());
         events_.emit(event, payload);   // broadcast to C++ subs + all windows
         return nullptr;
+    });
+
+    // ── Targeted event: emit to a specific window ────────────────────────
+    commands_.add("anyar:emit_to_window", [this](const json& args) -> json {
+        std::string label = args.at("label").get<std::string>();
+        std::string event = args.at("event").get<std::string>();
+        json payload = args.value("payload", json::object());
+        events_.emit_to_window(label, event, payload);
+        return nullptr;
+    });
+
+    // ── Global listener toggle ───────────────────────────────────────────
+    commands_.add("anyar:enable_global_listener", [this](const json& args) -> json {
+        std::string caller = args.value("_caller_label", std::string("main"));
+        bool enabled = args.value("enabled", true);
+        auto it = native_event_sinks_.find(caller);
+        if (it != native_event_sinks_.end()) {
+            events_.set_global_listener(it->second, enabled);
+        }
+        return json{{"ok", true}};
     });
 
     // ── Register window management commands ─────────────────────────────
@@ -293,7 +318,7 @@ int App::run() {
                 // Remove the event sink for this window
                 auto it = native_event_sinks_.find(label);
                 if (it != native_event_sinks_.end()) {
-                    events_.remove_ws_sink(it->second);
+                    events_.remove_window_sink(label);
                     native_event_sinks_.erase(it);
                 }
 
@@ -364,7 +389,7 @@ int App::run() {
         // 2) Clean up event sinks BEFORE window destruction so that
         //    no event dispatch tries to eval JS on a dying webview.
         for (auto& [lbl, sink_id] : native_event_sinks_) {
-            events_.remove_ws_sink(sink_id);
+            events_.remove_window_sink(lbl);
         }
         native_event_sinks_.clear();
 
@@ -869,7 +894,7 @@ void App::setup_native_ipc(Window* window) {
     );
 
     // ── Register a native event push sink for this window ────────────────
-    uint64_t sink_id = events_.add_ws_sink(
+    uint64_t sink_id = events_.add_window_sink(label,
         [this, label](const std::string& message) {
             Window* win = window_mgr_.get(label);
             if (win && !win->is_destroyed()) {

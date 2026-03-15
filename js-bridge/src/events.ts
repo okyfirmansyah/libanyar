@@ -12,7 +12,7 @@ import type { EventMessage, EventHandler, UnlistenFn } from './types';
 
 // ── Internal state ─────────────────────────────────────────────────────────
 
-type Listener = { id: number; event: string; handler: EventHandler<any> };
+type Listener = { id: number; event: string; handler: EventHandler<any>; global: boolean };
 
 let _ws: WebSocket | null = null;
 let _listeners: Listener[] = [];
@@ -24,6 +24,14 @@ let _onReadyCallbacks: Array<() => void> = [];
 let _nativeBridged = false;
 
 const RECONNECT_MS = 1000;
+
+/** Resolve this window's label (used for targeted-event filtering). */
+function _getLabel(): string {
+  if (typeof window !== 'undefined') {
+    return (window as any).__LIBANYAR_WINDOW_LABEL__ ?? 'main';
+  }
+  return 'main';
+}
 
 /** True when running inside a LibAnyar webview with direct IPC. */
 function isNative(): boolean {
@@ -57,8 +65,8 @@ function ensureNativeBridge(): void {
   const origDispatch = w.__anyar_dispatch_event__;
   w.__anyar_dispatch_event__ = function (msg: EventMessage) {
     if (!msg || !msg.event) return;
-    // Dispatch to our module listeners
-    dispatch(msg.event, msg.payload);
+    // Dispatch to our module listeners (pass target for filtering)
+    dispatch(msg.event, msg.payload, (msg as any).target);
     // Also call C++ init-script listeners (if anything registered there directly)
     if (origDispatch && origDispatch !== w.__anyar_dispatch_event__) {
       try { origDispatch(msg); } catch { /* ignore */ }
@@ -104,9 +112,9 @@ function connect(): void {
 
   _ws.onmessage = (ev) => {
     try {
-      const msg: EventMessage = JSON.parse(ev.data);
+      const msg = JSON.parse(ev.data);
       if (msg.type === 'event' && msg.event) {
-        dispatch(msg.event, msg.payload);
+        dispatch(msg.event, msg.payload, msg.target);
       }
     } catch {
       // Ignore malformed messages
@@ -129,9 +137,13 @@ function scheduleReconnect(): void {
   }, RECONNECT_MS);
 }
 
-function dispatch(event: string, payload: unknown): void {
+function dispatch(event: string, payload: unknown, target?: string): void {
+  // Resolve this window's label for targeted event filtering
+  const ownLabel = _getLabel();
   for (const l of _listeners) {
     if (l.event === event || l.event === '*') {
+      // For non-global listeners, skip targeted events aimed at another window
+      if (!l.global && target && target !== ownLabel) continue;
       try {
         l.handler(payload);
       } catch (err) {
@@ -154,7 +166,7 @@ export function listen<T = unknown>(
   handler: EventHandler<T>,
 ): UnlistenFn {
   const id = ++_listenerId;
-  _listeners.push({ id, event, handler: handler as EventHandler<any> });
+  _listeners.push({ id, event, handler: handler as EventHandler<any>, global: false });
 
   if (isNative()) {
     ensureNativeBridge();
@@ -193,6 +205,59 @@ export function emit(event: string, payload: unknown = null): void {
     _sendQueue.push(data);
     ensureConnected();
   }
+}
+
+/**
+ * Emit an event targeted at a specific window.
+ *
+ * Only the target window's `listen()` handlers will fire.
+ * Windows that called `listenGlobal()` will also receive it.
+ *
+ * @param label   Target window label (e.g. "main", "settings")
+ * @param event   Event name
+ * @param payload Optional payload data
+ */
+export function emitTo(
+  label: string,
+  event: string,
+  payload: unknown = null,
+): void {
+  invoke('anyar:emit_to_window', { label, event, payload }).catch((err) => {
+    console.error('[LibAnyar] emitTo failed:', err);
+  });
+}
+
+/**
+ * Subscribe to events globally — receives both broadcast events and
+ * events targeted at other windows. Regular `listen()` only receives
+ * events targeted at the current window or broadcast events.
+ *
+ * @param event   Event name to listen for, or '*' for all events
+ * @param handler Callback fired with the event payload
+ * @returns       Unlisten function
+ */
+export function listenGlobal<T = unknown>(
+  event: string,
+  handler: EventHandler<T>,
+): UnlistenFn {
+  const id = ++_listenerId;
+  _listeners.push({ id, event, handler: handler as EventHandler<any>, global: true });
+
+  if (isNative()) {
+    ensureNativeBridge();
+    // Tell C++ to also push targeted events to this window
+    invoke('anyar:enable_global_listener', { enabled: true }).catch(() => {});
+  } else {
+    ensureConnected();
+  }
+
+  return () => {
+    _listeners = _listeners.filter((l) => l.id !== id);
+    // If no more global listeners remain, disable on C++ side
+    if (isNative() && !_listeners.some((l) => l.global)) {
+      invoke('anyar:enable_global_listener', { enabled: false }).catch(() => {});
+    }
+  };
 }
 
 /**

@@ -47,6 +47,11 @@ public:
     /// Emit an event to all frontends and C++ subscribers
     void emit(const std::string& event, const json& payload = json::object());
 
+    /// Emit an event to a specific window only (+ C++ subscribers).
+    /// Other windows will not receive it unless they called listenGlobal().
+    void emit_to(const std::string& label, const std::string& event,
+                 const json& payload = json::object());
+
     /// Subscribe to an event (C++ side)
     UnsubscribeFn on(const std::string& event, EventHandler handler);
 

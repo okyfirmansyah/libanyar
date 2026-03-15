@@ -1,5 +1,5 @@
 <script>
-  import { invoke, listen, emit, isNativeIpc } from '@libanyar/api';
+  import { invoke, listen, emitTo, isNativeIpc } from '@libanyar/api';
   import { createWindow, closeWindow, onWindowClosed, setCloseConfirmation } from '@libanyar/api';
   import GroupTree from './GroupTree.svelte';
   import EntryList from './EntryList.svelte';
@@ -74,20 +74,21 @@
   });
 
   // ── Cross-window event listeners (native mode) ────────────────────────────
-  // When the entry-detail child window saves/deletes, refresh the main list.
+  // The entry-detail child window uses emitTo('main', ...) for targeted
+  // delivery, so only this window receives save/delete notifications.
   $effect(() => {
-    const unlistenUpdated = listen('entry:updated', (msg) => {
+    const unlistenUpdated = listen('entry:updated', (payload) => {
       dbDirty = true;
       loadEntries();
       // If this entry is also the selected one in the CSS fallback, refresh it
-      if (selectedEntry && msg.payload?.id === selectedEntry.id) {
+      if (selectedEntry && payload?.id === selectedEntry.id) {
         loadEntry(selectedEntry.id);
       }
     });
 
-    const unlistenDeleted = listen('entry:deleted', (msg) => {
+    const unlistenDeleted = listen('entry:deleted', (payload) => {
       dbDirty = true;
-      const deletedId = msg.payload?.id;
+      const deletedId = payload?.id;
       if (selectedEntryId === deletedId) {
         selectedEntryId = null;
         selectedEntry = null;
@@ -100,8 +101,8 @@
     });
 
     // When a child window is closed, clean up any UI state referencing it
-    const unlistenClosed = onWindowClosed((msg) => {
-      const label = msg.payload?.label;
+    const unlistenClosed = onWindowClosed((payload) => {
+      const label = payload?.label;
       if (label && label.startsWith('entry-')) {
         // The entry modal child was closed — nothing to clean up in main
       }

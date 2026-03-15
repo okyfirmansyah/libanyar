@@ -327,4 +327,129 @@ describe('events', () => {
       expect(MockWebSocket._instances.length).toBeGreaterThan(countBefore);
     });
   });
+
+  // ── Per-window targeted events ─────────────────────────────────────────
+
+  describe('emitTo', () => {
+    it('invokes anyar:emit_to_window via native IPC', async () => {
+      (window as any).__LIBANYAR_NATIVE__ = true;
+
+      const mockIpc = vi.fn().mockResolvedValue({
+        id: 'test',
+        data: null,
+        error: null,
+      });
+      (window as any).__anyar_ipc__ = mockIpc;
+
+      const { emitTo } = await import('./events');
+      emitTo('settings', 'refresh:data', { key: 123 });
+
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(mockIpc).toHaveBeenCalled();
+      const call = JSON.parse(mockIpc.mock.calls[0][0]);
+      expect(call.cmd).toBe('anyar:emit_to_window');
+      expect(call.args).toEqual({
+        label: 'settings',
+        event: 'refresh:data',
+        payload: { key: 123 },
+      });
+    });
+  });
+
+  describe('listenGlobal', () => {
+    it('receives targeted events for other windows', async () => {
+      (window as any).__LIBANYAR_NATIVE__ = true;
+      (window as any).__LIBANYAR_WINDOW_LABEL__ = 'main';
+
+      const mockIpc = vi.fn().mockResolvedValue({
+        id: 'test',
+        data: null,
+        error: null,
+      });
+      (window as any).__anyar_ipc__ = mockIpc;
+
+      const { listenGlobal } = await import('./events');
+      const handler = vi.fn();
+      listenGlobal('secret', handler);
+
+      // Dispatch an event targeted at a different window
+      const dispatch = (window as any).__anyar_dispatch_event__;
+      dispatch({ event: 'secret', payload: { info: 'classified' }, target: 'settings' });
+
+      // Global listener should still receive it
+      expect(handler).toHaveBeenCalledWith({ info: 'classified' });
+    });
+
+    it('regular listen does NOT receive events targeted at other windows', async () => {
+      (window as any).__LIBANYAR_NATIVE__ = true;
+      (window as any).__LIBANYAR_WINDOW_LABEL__ = 'main';
+
+      const { listen } = await import('./events');
+      const handler = vi.fn();
+      listen('secret', handler);
+
+      const dispatch = (window as any).__anyar_dispatch_event__;
+      dispatch({ event: 'secret', payload: {}, target: 'settings' });
+
+      // Regular listener should NOT receive events for another window
+      expect(handler).not.toHaveBeenCalled();
+    });
+
+    it('regular listen receives events targeted at own window', async () => {
+      (window as any).__LIBANYAR_NATIVE__ = true;
+      (window as any).__LIBANYAR_WINDOW_LABEL__ = 'main';
+
+      const { listen } = await import('./events');
+      const handler = vi.fn();
+      listen('update', handler);
+
+      const dispatch = (window as any).__anyar_dispatch_event__;
+      dispatch({ event: 'update', payload: { v: 1 }, target: 'main' });
+
+      expect(handler).toHaveBeenCalledWith({ v: 1 });
+    });
+
+    it('regular listen receives broadcast events (no target)', async () => {
+      (window as any).__LIBANYAR_NATIVE__ = true;
+      (window as any).__LIBANYAR_WINDOW_LABEL__ = 'main';
+
+      const { listen } = await import('./events');
+      const handler = vi.fn();
+      listen('broadcast', handler);
+
+      const dispatch = (window as any).__anyar_dispatch_event__;
+      dispatch({ event: 'broadcast', payload: { v: 2 } });
+
+      expect(handler).toHaveBeenCalledWith({ v: 2 });
+    });
+
+    it('unlisten disables global listener and calls anyar:enable_global_listener', async () => {
+      (window as any).__LIBANYAR_NATIVE__ = true;
+
+      const mockIpc = vi.fn().mockResolvedValue({
+        id: 'test',
+        data: null,
+        error: null,
+      });
+      (window as any).__anyar_ipc__ = mockIpc;
+
+      const { listenGlobal } = await import('./events');
+      const handler = vi.fn();
+      const unlisten = listenGlobal('test', handler);
+
+      // Unlisten
+      unlisten();
+
+      // Wait for async invoke
+      await vi.advanceTimersByTimeAsync(0);
+
+      // Should have called enable_global_listener with enabled: false
+      const calls = mockIpc.mock.calls.map((c: any) => JSON.parse(c[0]));
+      const disableCall = calls.find(
+        (c: any) => c.cmd === 'anyar:enable_global_listener' && c.args.enabled === false,
+      );
+      expect(disableCall).toBeDefined();
+    });
+  });
 });

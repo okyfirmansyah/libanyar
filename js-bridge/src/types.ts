@@ -27,6 +27,8 @@ export interface EventMessage {
   type: 'event';
   event: string;
   payload: unknown;
+  /** Target window label. Absent or empty for broadcast events. */
+  target?: string;
 }
 
 /** A function that removes a subscription when called. */

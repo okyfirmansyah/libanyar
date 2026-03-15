@@ -6,7 +6,7 @@
    * Uses Save/Cancel pattern (no auto-save). Enter = Save, Escape = Cancel.
    * Communicates with the main window via LibAnyar events.
    */
-  import { invoke, emit, listen, closeWindow } from '@libanyar/api';
+  import { invoke, emitTo, listen, closeWindow } from '@libanyar/api';
 
   let { entryId } = $props();
 
@@ -104,8 +104,8 @@
         notes: draft.notes,
         expiresAt: draft.expiresAt,
       });
-      // Notify main window to refresh + mark dirty
-      emit('entry:updated', { id: draft.id });
+      // Notify main window to refresh + mark dirty (targeted, not broadcast)
+      emitTo('main', 'entry:updated', { id: draft.id });
       // Close on successful save
       closeWindow();
     } catch (e) {

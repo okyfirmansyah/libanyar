@@ -68,9 +68,14 @@ struct EventMessage {
     std::string type = "event";
     std::string event;
     json payload;
+    std::string target;  ///< Empty = broadcast; non-empty = targeted to window label
 
     json to_json() const {
-        return {{"type", type}, {"event", event}, {"payload", payload}};
+        json j = {{"type", type}, {"event", event}, {"payload", payload}};
+        if (!target.empty()) {
+            j["target"] = target;
+        }
+        return j;
     }
 
     static EventMessage from_json(const json& j) {
@@ -78,6 +83,7 @@ struct EventMessage {
         msg.type = j.value("type", "event");
         msg.event = j.at("event").get<std::string>();
         msg.payload = j.value("payload", json::object());
+        msg.target = j.value("target", std::string());
         return msg;
     }
 };
