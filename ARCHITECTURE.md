@@ -232,8 +232,10 @@ C++ (producer)                          WebView (consumer)
 **SharedBuffer** — Named shared memory region:
 - Created via `buffer:create` command (IPC) or `SharedBuffer::create()` (C++)
 - Backed by POSIX `shm_open("/anyar_<pid>_<name>")` + `mmap()`
-- C++ writes directly to `buf->data()` (raw pointer), JS reads via `fetch('anyar-shm://<name>')`
-- WebKitGTK URI scheme handler serves the mmap'd region with `g_bytes_new_static()` (no copy)
+- C++ writes directly to `buf->data()` (raw pointer), JS reads via `fetchBuffer(name)`
+- **Native webview**: `anyar-shm://` custom URI scheme (zero-copy via `g_bytes_new_static()`)
+- **Browser dev mode**: HTTP GET `/__anyar__/buffer/<name>` endpoint (copy, but works in any browser)
+- `fetchBuffer()` auto-detects runtime via `isNativeIpc()` and selects the appropriate path
 - CORS-enabled: `webkit_security_manager_register_uri_scheme_as_cors_enabled()`
 
 **SharedBufferPool** — Lock-free ring buffer for streaming:
@@ -322,6 +324,13 @@ Manages webview instances. Each window:
 - Falls back to WebSocket when opened in an external browser
 - Runs on the main thread (OS requirement for GUI)
 - Exposes `bind()`, `return_result()`, `init()`, `eval()`, `dispatch()` for native IPC plumbing
+
+**Window lifecycle events** (emitted automatically by the framework):
+| Event | Payload | Trigger |
+|-------|---------|---------|
+| `window:created` | `{ label, title }` | Window added to manager |
+| `window:closed` | `{ label }` | Window destroyed |
+| `window:focused` | `{ label }` | Window gains keyboard focus (GTK `focus-in-event`) |
 
 ### 5a. Window Behavior — Native App Feel
 
@@ -660,7 +669,6 @@ Each wrapped behind a platform-agnostic C++ interface in `anyar::native::`.
 libanyar/
 ├── CMakeLists.txt                  # Root build
 ├── README.md
-├── PLAN.md                         # Implementation roadmap
 ├── ARCHITECTURE.md                 # This file
 ├── .ai/                            # AI assistant context
 │   ├── context.md                  # Project context & conventions

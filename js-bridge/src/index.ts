@@ -21,6 +21,7 @@ export {
   getLabel,
   onWindowClosed,
   onWindowCreated,
+  onWindowFocused,
   setCloseConfirmation,
 } from './modules/window';
 

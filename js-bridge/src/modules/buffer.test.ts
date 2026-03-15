@@ -26,15 +26,28 @@ vi.mock('../events', () => ({
   listen: vi.fn(),
 }));
 
+vi.mock('../config', () => ({
+  isNativeIpc: vi.fn(() => true),
+  getBaseUrl: vi.fn(() => 'http://127.0.0.1:3080'),
+}));
+
 import { invoke } from '../invoke';
 import { listen } from '../events';
+import { isNativeIpc, getBaseUrl } from '../config';
 const mockInvoke = vi.mocked(invoke);
 const mockListen = vi.mocked(listen);
+const mockIsNativeIpc = vi.mocked(isNativeIpc);
+const mockGetBaseUrl = vi.mocked(getBaseUrl);
 
 describe('buffer module', () => {
   beforeEach(() => {
     mockInvoke.mockReset();
     mockListen.mockReset();
+    mockIsNativeIpc.mockReset();
+    mockGetBaseUrl.mockReset();
+    // Default to native mode
+    mockIsNativeIpc.mockReturnValue(true);
+    mockGetBaseUrl.mockReturnValue('http://127.0.0.1:3080');
   });
 
   describe('createBuffer', () => {
@@ -114,45 +127,114 @@ describe('buffer module', () => {
   });
 
   describe('fetchBuffer', () => {
-    it('fetches from anyar-shm:// URL', async () => {
-      const mockArrayBuffer = new ArrayBuffer(8);
-      const mockResponse = {
-        ok: true,
-        arrayBuffer: vi.fn().mockResolvedValue(mockArrayBuffer),
-      };
-      vi.stubGlobal('fetch', vi.fn().mockResolvedValue(mockResponse));
+    describe('native mode (anyar-shm://)', () => {
+      beforeEach(() => {
+        mockIsNativeIpc.mockReturnValue(true);
+      });
 
-      const result = await fetchBuffer('my-buffer');
-      expect(globalThis.fetch).toHaveBeenCalledWith('anyar-shm://my-buffer');
-      expect(result).toBe(mockArrayBuffer);
+      it('fetches from anyar-shm:// URL by name', async () => {
+        const mockArrayBuffer = new ArrayBuffer(8);
+        const mockResponse = {
+          ok: true,
+          arrayBuffer: vi.fn().mockResolvedValue(mockArrayBuffer),
+        };
+        vi.stubGlobal('fetch', vi.fn().mockResolvedValue(mockResponse));
+
+        const result = await fetchBuffer('my-buffer');
+        expect(globalThis.fetch).toHaveBeenCalledWith('anyar-shm://my-buffer');
+        expect(result).toBe(mockArrayBuffer);
+      });
+
+      it('extracts name from full anyar-shm:// URL', async () => {
+        const mockResponse = {
+          ok: true,
+          arrayBuffer: vi.fn().mockResolvedValue(new ArrayBuffer(0)),
+        };
+        vi.stubGlobal('fetch', vi.fn().mockResolvedValue(mockResponse));
+
+        await fetchBuffer('anyar-shm://existing-buf');
+        expect(globalThis.fetch).toHaveBeenCalledWith(
+          'anyar-shm://existing-buf',
+        );
+      });
+
+      it('throws on fetch failure', async () => {
+        vi.stubGlobal(
+          'fetch',
+          vi.fn().mockResolvedValue({
+            ok: false,
+            status: 404,
+            statusText: 'Not Found',
+          }),
+        );
+
+        await expect(fetchBuffer('missing')).rejects.toThrow(
+          'Failed to fetch buffer: 404 Not Found',
+        );
+      });
     });
 
-    it('passes through full anyar-shm:// URLs', async () => {
-      const mockResponse = {
-        ok: true,
-        arrayBuffer: vi.fn().mockResolvedValue(new ArrayBuffer(0)),
-      };
-      vi.stubGlobal('fetch', vi.fn().mockResolvedValue(mockResponse));
+    describe('browser dev mode (HTTP fallback)', () => {
+      beforeEach(() => {
+        mockIsNativeIpc.mockReturnValue(false);
+        mockGetBaseUrl.mockReturnValue('http://127.0.0.1:4321');
+      });
 
-      await fetchBuffer('anyar-shm://existing-buf');
-      expect(globalThis.fetch).toHaveBeenCalledWith(
-        'anyar-shm://existing-buf',
-      );
-    });
+      it('fetches from HTTP endpoint by name', async () => {
+        const mockArrayBuffer = new ArrayBuffer(16);
+        const mockResponse = {
+          ok: true,
+          arrayBuffer: vi.fn().mockResolvedValue(mockArrayBuffer),
+        };
+        vi.stubGlobal('fetch', vi.fn().mockResolvedValue(mockResponse));
 
-    it('throws on fetch failure', async () => {
-      vi.stubGlobal(
-        'fetch',
-        vi.fn().mockResolvedValue({
-          ok: false,
-          status: 404,
-          statusText: 'Not Found',
-        }),
-      );
+        const result = await fetchBuffer('video-frame');
+        expect(globalThis.fetch).toHaveBeenCalledWith(
+          'http://127.0.0.1:4321/__anyar__/buffer/video-frame',
+        );
+        expect(result).toBe(mockArrayBuffer);
+      });
 
-      await expect(fetchBuffer('missing')).rejects.toThrow(
-        'Failed to fetch buffer: 404 Not Found',
-      );
+      it('extracts name from anyar-shm:// URL and uses HTTP', async () => {
+        const mockResponse = {
+          ok: true,
+          arrayBuffer: vi.fn().mockResolvedValue(new ArrayBuffer(0)),
+        };
+        vi.stubGlobal('fetch', vi.fn().mockResolvedValue(mockResponse));
+
+        await fetchBuffer('anyar-shm://my-buf');
+        expect(globalThis.fetch).toHaveBeenCalledWith(
+          'http://127.0.0.1:4321/__anyar__/buffer/my-buf',
+        );
+      });
+
+      it('encodes special characters in buffer name', async () => {
+        const mockResponse = {
+          ok: true,
+          arrayBuffer: vi.fn().mockResolvedValue(new ArrayBuffer(0)),
+        };
+        vi.stubGlobal('fetch', vi.fn().mockResolvedValue(mockResponse));
+
+        await fetchBuffer('my buffer/special');
+        expect(globalThis.fetch).toHaveBeenCalledWith(
+          'http://127.0.0.1:4321/__anyar__/buffer/my%20buffer%2Fspecial',
+        );
+      });
+
+      it('throws on HTTP failure', async () => {
+        vi.stubGlobal(
+          'fetch',
+          vi.fn().mockResolvedValue({
+            ok: false,
+            status: 500,
+            statusText: 'Internal Server Error',
+          }),
+        );
+
+        await expect(fetchBuffer('broken')).rejects.toThrow(
+          'Failed to fetch buffer: 500 Internal Server Error',
+        );
+      });
     });
   });
 

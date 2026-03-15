@@ -16,6 +16,7 @@ import {
   getLabel,
   onWindowClosed,
   onWindowCreated,
+  onWindowFocused,
   setCloseConfirmation,
 } from './window';
 
@@ -192,6 +193,18 @@ describe('window module', () => {
 
       const result = onWindowCreated(handler);
       expect(mockListen).toHaveBeenCalledWith('window:created', handler);
+      expect(result).toBe(unlisten);
+    });
+  });
+
+  describe('onWindowFocused', () => {
+    it('subscribes to window:focused event', () => {
+      const handler = vi.fn();
+      const unlisten = vi.fn();
+      mockListen.mockReturnValue(unlisten);
+
+      const result = onWindowFocused(handler);
+      expect(mockListen).toHaveBeenCalledWith('window:focused', handler);
       expect(result).toBe(unlisten);
     });
   });

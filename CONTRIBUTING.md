@@ -49,8 +49,7 @@ libanyar/
 │   └── key-storage/
 ├── tests/                   # Catch2 unit tests
 ├── docs/                    # Guides and documentation
-├── ARCHITECTURE.md          # System architecture overview
-└── PLAN.md                  # Development roadmap
+└── ARCHITECTURE.md          # System architecture overview
 ```
 
 ## Code Style

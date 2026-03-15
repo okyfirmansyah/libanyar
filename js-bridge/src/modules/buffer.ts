@@ -10,6 +10,7 @@
 
 import { invoke } from '../invoke';
 import { listen } from '../events';
+import { isNativeIpc, getBaseUrl } from '../config';
 import type { UnlistenFn, EventHandler } from '../types';
 
 // ── Types ──────────────────────────────────────────────────────────────────
@@ -122,16 +123,23 @@ export async function notifyBuffer(
  * Fetch the raw bytes of a shared buffer.
  *
  * In native mode, this uses the `anyar-shm://` URI scheme for zero-copy
- * access to the mmap'd shared memory. In dev mode, it falls back to
- * fetching via HTTP.
+ * access to the mmap'd shared memory. In dev mode (browser), it falls back
+ * to an HTTP GET request to the backend server.
  *
  * @param nameOrUrl  Buffer name or full anyar-shm:// URL.
  * @returns          The raw buffer data as an ArrayBuffer.
  */
 export async function fetchBuffer(nameOrUrl: string): Promise<ArrayBuffer> {
-  const url = nameOrUrl.startsWith('anyar-shm://')
-    ? nameOrUrl
-    : `anyar-shm://${nameOrUrl}`;
+  // Extract just the buffer name from a full URL if needed
+  const name = nameOrUrl.startsWith('anyar-shm://')
+    ? nameOrUrl.slice('anyar-shm://'.length)
+    : nameOrUrl;
+
+  // Native webview: use zero-copy anyar-shm:// URI scheme
+  // Browser dev mode: fall back to HTTP GET endpoint
+  const url = isNativeIpc()
+    ? `anyar-shm://${name}`
+    : `${getBaseUrl()}/__anyar__/buffer/${encodeURIComponent(name)}`;
 
   const response = await fetch(url);
   if (!response.ok) {

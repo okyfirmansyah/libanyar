@@ -227,6 +227,29 @@ void App::start_server() {
     // Keep builtins alive for shutdown
     plugins_.insert(plugins_.begin(), builtins.begin(), builtins.end());
 
+    // ── SharedBuffer HTTP fallback (for browser dev mode) ───────────────────
+    // When running in a regular browser (`anyar dev`), the anyar-shm:// custom
+    // URI scheme is unavailable. This HTTP GET endpoint serves raw buffer bytes
+    // so the JS fetchBuffer() can fall back to HTTP.
+    server_->on_http_request("/__anyar__/buffer/<string>", "GET",
+        [](asyik::http_request_ptr req, asyik::http_route_args args) {
+            std::string name = args[1];
+            auto buf = SharedBufferRegistry::instance().get(name);
+            if (!buf) {
+                req->response.body = "Buffer not found: " + name;
+                req->response.headers.set("Content-Type", "text/plain");
+                req->response.result(404);
+                return;
+            }
+            req->response.body.assign(
+                reinterpret_cast<const char*>(buf->data()), buf->size());
+            req->response.headers.set("Content-Type", "application/octet-stream");
+            req->response.headers.set("Content-Length", std::to_string(buf->size()));
+            req->response.headers.set("Cache-Control", "no-store");
+            req->response.result(200);
+        }
+    );
+
     // ── Frontend serving ────────────────────────────────────────────────────
     if (frontend_resolver_) {
         // Embedded mode: serve frontend from compiled-in resources
@@ -310,6 +333,12 @@ int App::run() {
         window_mgr_.set_on_window_created(
             [this](Window& window, const WindowCreateOptions& opts) {
                 setup_native_ipc(&window);
+
+                // Emit window:focused when the window gains focus
+                std::string lbl = opts.label;
+                window.set_on_focus([this, lbl]() {
+                    events_.emit("window:focused", {{"label", lbl}});
+                });
             });
 
         // ── Window closed callback — cleanup sinks, stop app on last ──

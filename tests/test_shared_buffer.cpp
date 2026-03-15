@@ -862,6 +862,78 @@ TEST_CASE("IPC E2E: native C++ write → IPC notify → event verification", "[b
     SharedBufferRegistry::instance().clear();
 }
 
+// ── HTTP GET: SharedBuffer HTTP fallback endpoint ───────────────────────────
+
+TEST_CASE("HTTP GET: fetch buffer data via /__anyar__/buffer/<name>", "[buffer][integration][fallback]") {
+    SharedBufferRegistry::instance().clear();
+
+    // Create a buffer and write known data
+    auto buf = SharedBuffer::create("http-test-buf", 256);
+    REQUIRE(buf != nullptr);
+    for (size_t i = 0; i < 256; ++i) {
+        buf->data()[i] = static_cast<uint8_t>(i);
+    }
+
+    auto svc = asyik::make_service();
+    int port = pick_test_port();
+
+    svc->execute([&]() {
+        auto server = asyik::make_http_server(svc, "127.0.0.1", port);
+
+        // Register the HTTP GET route (mirrors what App::start_server does)
+        server->on_http_request("/__anyar__/buffer/<string>", "GET",
+            [](asyik::http_request_ptr req, asyik::http_route_args args) {
+                std::string name = args[1];
+                auto b = SharedBufferRegistry::instance().get(name);
+                if (!b) {
+                    req->response.body = "Buffer not found: " + name;
+                    req->response.headers.set("Content-Type", "text/plain");
+                    req->response.result(404);
+                    return;
+                }
+                req->response.body.assign(
+                    reinterpret_cast<const char*>(b->data()), b->size());
+                req->response.headers.set("Content-Type", "application/octet-stream");
+                req->response.headers.set("Content-Length", std::to_string(b->size()));
+                req->response.headers.set("Cache-Control", "no-store");
+                req->response.result(200);
+            }
+        );
+
+        // ── Test 1: successful fetch returns raw bytes ──────────────────
+        {
+            auto resp = asyik::http_easy_request(
+                svc, "GET",
+                "http://127.0.0.1:" + std::to_string(port) +
+                    "/__anyar__/buffer/http-test-buf");
+            int status = static_cast<int>(resp->response.result());
+            REQUIRE(status == 200);
+
+            const auto& body = resp->response.body;
+            REQUIRE(body.size() == 256);
+            // Verify data integrity
+            for (size_t i = 0; i < 256; ++i) {
+                REQUIRE(static_cast<uint8_t>(body[i]) == static_cast<uint8_t>(i));
+            }
+        }
+
+        // ── Test 2: unknown buffer returns 404 ─────────────────────────
+        {
+            auto resp = asyik::http_easy_request(
+                svc, "GET",
+                "http://127.0.0.1:" + std::to_string(port) +
+                    "/__anyar__/buffer/nonexistent");
+            int status = static_cast<int>(resp->response.result());
+            REQUIRE(status == 404);
+        }
+
+        svc->stop();
+    });
+
+    svc->run();
+    SharedBufferRegistry::instance().clear();
+}
+
 // ── Stress test: multiple buffers created and destroyed ─────────────────────
 
 TEST_CASE("Buffer stress: create and destroy many buffers", "[buffer][stress]") {

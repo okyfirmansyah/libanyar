@@ -25,11 +25,15 @@ struct Window::Impl {
     // Pointers to bound callback closures — must outlive the webview
     std::vector<std::unique_ptr<Window::BindCallback>> bind_cbs;
 
+    // Focus handler
+    Window::FocusHandler on_focus;
+
     // Close handlers
     Window::CloseHandler on_close;
     Window::CloseRequestedHandler on_close_requested;
 
 #ifdef __linux__
+    gulong focus_in_handler_id = 0;
     gulong delete_event_handler_id = 0;
     gulong destroy_handler_id = 0;
 #endif
@@ -143,6 +147,18 @@ struct Window::Impl {
         GtkWidget* win = static_cast<GtkWidget*>(native_handle());
         if (!win) return;
 
+        // focus-in-event: fires when the window gains keyboard focus
+        focus_in_handler_id = g_signal_connect(
+            G_OBJECT(win), "focus-in-event",
+            G_CALLBACK(+[](GtkWidget*, GdkEvent*, gpointer user_data) -> gboolean {
+                auto* self = static_cast<Impl*>(user_data);
+                if (self->on_focus) {
+                    self->on_focus();
+                }
+                return FALSE; // propagate the event
+            }),
+            this);
+
         // delete-event: fires when user tries to close (X button, Alt+F4)
         delete_event_handler_id = g_signal_connect(
             G_OBJECT(win), "delete-event",
@@ -195,6 +211,10 @@ struct Window::Impl {
     void disconnect_close_signals() {
         GtkWidget* win = static_cast<GtkWidget*>(webview_get_window(wv));
         if (!win || destroyed) return;
+        if (focus_in_handler_id) {
+            g_signal_handler_disconnect(G_OBJECT(win), focus_in_handler_id);
+            focus_in_handler_id = 0;
+        }
         if (delete_event_handler_id) {
             g_signal_handler_disconnect(G_OBJECT(win), delete_event_handler_id);
             delete_event_handler_id = 0;
@@ -502,7 +522,11 @@ void Window::focus() {
     impl_->focus();
 }
 
-// ── Close Event Handlers ────────────────────────────────────────────────────
+// ── Lifecycle Event Handlers ────────────────────────────────────────────────
+
+void Window::set_on_focus(FocusHandler handler) {
+    impl_->on_focus = std::move(handler);
+}
 
 void Window::set_on_close(CloseHandler handler) {
     impl_->on_close = std::move(handler);

@@ -187,6 +187,17 @@ export function onWindowCreated(
   return listen('window:created', handler);
 }
 
+/**
+ * Listen for the `window:focused` event.
+ *
+ * @param handler  Called with `{ label }` when any window gains focus.
+ */
+export function onWindowFocused(
+  handler: EventHandler<{ label: string }>,
+): UnlistenFn {
+  return listen('window:focused', handler);
+}
+
 // ── Close confirmation ─────────────────────────────────────────────────────
 
 /**

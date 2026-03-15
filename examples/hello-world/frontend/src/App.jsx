@@ -178,7 +178,7 @@ export default function App() {
   return (
     <div className="container">
       <header>
-        <h1>🚀 LibAnyar</h1>
+        <img src="/assets/libanyar.png" alt="LibAnyar" style={{ height: '96px', marginBottom: '4px' }} />
         <p className="subtitle">C++ Desktop Framework with Web Frontend</p>
         <span className={`status ${status.includes('✓') ? 'connected' : 'pending'}`}>
           {status}

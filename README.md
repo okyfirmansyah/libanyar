@@ -136,17 +136,6 @@ const { destroy } = createBufferRenderer({
 
 See the [Shared Memory & WebGL Guide](docs/shared-memory-webgl.md) for full API reference.
 
-## Project Status
-
-✅ **Phase 1** — Core prototype (Linux): HTTP/WS server, webview, IPC, event bus, plugin infrastructure
-✅ **Phase 2** — `@libanyar/api` TypeScript bridge: invoke, listen, emit, React hooks, module APIs
-✅ **Phase 3** — Native APIs & plugins: file system, dialogs (GTK3), shell/subprocess, clipboard
-✅ **Phase 4** — Database integration: SQLite & PostgreSQL via LibAsyik SOCI pool, parameterized queries, transactions
-✅ **Phase 4f** — Shared Memory IPC & WebGL Canvas: zero-copy binary transfer, buffer pools, RGBA/YUV420 rendering
-✅ **Phase 5** — CLI tool: project scaffolding (`anyar init`), dev server (`anyar dev`), production build, **Linux packaging (DEB + AppImage)**, **single-binary embed (cmrc)**
-
-See [PLAN.md](PLAN.md) for full roadmap.
-
 ## Example Projects
 
 ### Hello World
@@ -154,12 +143,12 @@ See [PLAN.md](PLAN.md) for full roadmap.
 A minimal example showing IPC commands, events, and built-in plugins.
 
 <p align="center">
-  <img src="docs/assets/hello_world.gif" alt="Hello World Example" height="240" />
+  <img src="docs/assets/hello_world.png" alt="Hello World Example" height="240" />
 </p>
 
 ### Local Video Player
 
-FFmpeg-powered video player with WebSocket streaming and Canvas rendering.
+FFmpeg-powered video player with zero-copy IPC and direct WebGL canvas rendering.
 <p align="center">
   <img src="docs/assets/video-player.gif" alt="Video Player Example" height="240" />
 </p>

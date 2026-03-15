@@ -26,4 +26,4 @@
 ## Contributing
 
 - [Contributing Guide](../CONTRIBUTING.md) — Code style, workflow, testing
-- [Development Roadmap](../PLAN.md) — Project phases and status
+- [Architecture](../ARCHITECTURE.md) — System design and component details

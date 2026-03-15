@@ -113,7 +113,11 @@ public:
     /// Bring this window to the front and give it focus.
     void focus();
 
-    // ── Close Event Handlers ────────────────────────────────────────────
+    // ── Lifecycle Event Handlers ─────────────────────────────────────────
+
+    /// Called when the window gains focus.
+    using FocusHandler = std::function<void()>;
+    void set_on_focus(FocusHandler handler);
 
     /// Called when the window is destroyed (after close). Non-interceptable.
     using CloseHandler = std::function<void()>;
