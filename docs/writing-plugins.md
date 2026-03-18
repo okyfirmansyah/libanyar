@@ -84,7 +84,7 @@ void WeatherPlugin::initialize(anyar::PluginContext& ctx) {
     });
 
     // Register an async command (for long-running operations)
-    cmds.add_async("weather:subscribe", [this, &events](const json& args, auto reply) {
+    cmds.add_async("weather:subscribe", [this, &events](const json& args, CommandReply reply) {
         std::string city = args.at("city").get<std::string>();
 
         // Simulate periodic updates
@@ -97,7 +97,7 @@ void WeatherPlugin::initialize(anyar::PluginContext& ctx) {
             asyik::sleep_for(std::chrono::seconds(5));
         }
 
-        reply({{"status", "done"}});
+        reply({{"status", "done"}}, "");  // data, error
     });
 
     std::cout << "[weather] Plugin initialized" << std::endl;
@@ -157,10 +157,10 @@ cmds.add("plugin:sync_command", [](const json& args) -> json {
 Use `cmds.add_async()` for long-running operations. The reply callback can be called later:
 
 ```cpp
-cmds.add_async("plugin:long_task", [](const json& args, auto reply) {
+cmds.add_async("plugin:long_task", [](const json& args, CommandReply reply) {
     // Runs in its own fiber — can sleep/await without blocking
     asyik::sleep_for(std::chrono::seconds(2));
-    reply({{"result", "done after 2s"}});
+    reply({{"result", "done after 2s"}}, "");  // data, error
 });
 ```
 

@@ -247,7 +247,7 @@ LibAnyar supports bidirectional events between C++ and the frontend.
 
 ```cpp
 // In main.cpp — emit an event every second
-app.command_async("start_clock", [&app](const json&, auto reply) {
+app.command_async("start_clock", [&app](const json&, CommandReply reply) {
     auto service = app.service();
     asyik::sleep_for(std::chrono::seconds(0));  // yield to fiber scheduler
 
@@ -258,7 +258,7 @@ app.command_async("start_clock", [&app](const json&, auto reply) {
         app.emit("clock:tick", {{"time", oss.str()}});
         asyik::sleep_for(std::chrono::seconds(1));
     }
-    reply({{"status", "done"}});
+    reply({{"status", "done"}}, "");  // data, error (empty = success)
 });
 ```
 

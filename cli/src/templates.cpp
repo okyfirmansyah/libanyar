@@ -47,6 +47,9 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 # Point to LibAnyar source tree
 set(LIBANYAR_DIR ")" + libanyar_root.string() + R"(" CACHE PATH "Path to libanyar source tree")
 
+# Make AnyarEmbed.cmake discoverable
+list(APPEND CMAKE_MODULE_PATH "${LIBANYAR_DIR}/cmake")
+
 # Include LibAnyar core library
 add_subdirectory(${LIBANYAR_DIR}/core ${CMAKE_BINARY_DIR}/anyar_core)
 
@@ -56,15 +59,22 @@ add_executable()" + name + R"(
 
 target_link_libraries()" + name + R"( PRIVATE anyar_core)
 
-# Copy frontend dist to build output
+# ── Frontend: embed into binary or copy to build dir ────────────────────────
 set(FRONTEND_DIST_DIR ${CMAKE_CURRENT_SOURCE_DIR}/frontend/dist)
-if(EXISTS ${FRONTEND_DIST_DIR})
-    add_custom_command(TARGET )" + name + R"( POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_directory
-            ${FRONTEND_DIST_DIR}
-            $<TARGET_FILE_DIR:)" + name + R"(>/dist
-        COMMENT "Copying frontend dist → build/dist"
-    )
+
+if(ANYAR_EMBED_FRONTEND AND EXISTS ${FRONTEND_DIST_DIR})
+    include(AnyarEmbed)
+    anyar_embed_frontend()" + name + R"( "${FRONTEND_DIST_DIR}")
+else()
+    # Copy frontend dist to build output
+    if(EXISTS ${FRONTEND_DIST_DIR})
+        add_custom_command(TARGET )" + name + R"( POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_directory
+                ${FRONTEND_DIST_DIR}
+                $<TARGET_FILE_DIR:)" + name + R"(>/dist
+            COMMENT "Copying frontend dist → build/dist"
+        )
+    endif()
 endif()
 )");
 }
@@ -75,6 +85,10 @@ R"(// )" + name + R"( — LibAnyar Application
 
 #include <anyar/app.h>
 #include <iostream>
+
+#ifdef ANYAR_EMBED_FRONTEND
+#include <anyar/embed.h>
+#endif
 
 int main() {
     anyar::AppConfig config;
@@ -102,6 +116,11 @@ int main() {
     win.debug = true;
 
     app.create_window(win);
+
+#ifdef ANYAR_EMBED_FRONTEND
+    app.set_frontend_resolver(anyar::make_embedded_resolver());
+    std::cout << "[)" + name + R"(] Frontend embedded in binary" << std::endl;
+#endif
 
     std::cout << "[)" + name + R"(] Starting..." << std::endl;
 

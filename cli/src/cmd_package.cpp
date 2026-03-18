@@ -124,6 +124,22 @@ static std::string make_default_icon_svg(const std::string& app_name) {
     return ss.str();
 }
 
+/// Detect whether the build used ANYAR_EMBED_FRONTEND=ON by checking CMakeCache
+static bool is_embed_build(const fs::path& build_dir) {
+    fs::path cache = build_dir / "CMakeCache.txt";
+    if (!fs::exists(cache)) return false;
+    std::ifstream f(cache);
+    std::string line;
+    while (std::getline(f, line)) {
+        // Look for ANYAR_EMBED_FRONTEND:BOOL=ON or ANYAR_EMBED_FRONTEND:UNINITIALIZED=ON
+        if (line.find("ANYAR_EMBED_FRONTEND") != std::string::npos &&
+            line.find("=ON") != std::string::npos) {
+            return true;
+        }
+    }
+    return false;
+}
+
 /// Turn "hello_world" or "hello-world" into "Hello World"
 static std::string humanize_name(const std::string& name) {
     std::string result;
@@ -206,31 +222,34 @@ int package_deb(const std::string& project_name,
     // Set executable permission
     chmod((bin_dir / project_name).c_str(), 0755);
 
-    // ── Copy frontend dist ─────────────────────────────────────────────
-    fs::path frontend_dist = build_dir / "dist";
-    if (!fs::exists(frontend_dist)) {
-        // Try project-level frontend/dist
-        frontend_dist = project_dir / "frontend" / "dist";
-    }
-    if (fs::exists(frontend_dist)) {
-        fs::copy(frontend_dist, share_dir / "dist",
-                 fs::copy_options::recursive | fs::copy_options::overwrite_existing);
+    // ── Copy frontend dist (skip when frontend is embedded in binary) ──
+    bool embedded = is_embed_build(build_dir);
 
-        // Create a wrapper script that sets the dist path
-        std::string wrapper = "#!/bin/sh\nexec /usr/share/" + project_name +
-                              "/run \"$@\"\n";
-        // Move binary to share_dir as "run", replace bin entry with wrapper
-        fs::rename(bin_dir / project_name, share_dir / "run");
-        chmod((share_dir / "run").c_str(), 0755);
-
-        {
-            std::ofstream f(bin_dir / project_name);
-            f << "#!/bin/sh\n"
-              << "cd /usr/share/" << project_name << "\n"
-              << "exec ./run \"$@\"\n";
+    if (!embedded) {
+        fs::path frontend_dist = build_dir / "dist";
+        if (!fs::exists(frontend_dist)) {
+            // Try project-level frontend/dist
+            frontend_dist = project_dir / "frontend" / "dist";
         }
-        chmod((bin_dir / project_name).c_str(), 0755);
+        if (fs::exists(frontend_dist)) {
+            fs::copy(frontend_dist, share_dir / "dist",
+                     fs::copy_options::recursive | fs::copy_options::overwrite_existing);
+
+            // Move binary to share_dir as "run", replace bin entry with wrapper
+            // so the app finds dist/ relative to its working directory
+            fs::rename(bin_dir / project_name, share_dir / "run");
+            chmod((share_dir / "run").c_str(), 0755);
+
+            {
+                std::ofstream f(bin_dir / project_name);
+                f << "#!/bin/sh\n"
+                  << "cd /usr/share/" << project_name << "\n"
+                  << "exec ./run \"$@\"\n";
+            }
+            chmod((bin_dir / project_name).c_str(), 0755);
+        }
     }
+    // When embedded, the binary in /usr/bin is self-contained (no dist/ needed)
 
     // ── Desktop entry ──────────────────────────────────────────────────
     {
@@ -377,14 +396,18 @@ int package_appimage(const std::string& project_name,
     fs::copy_file(binary, appdir_bin / project_name, fs::copy_options::overwrite_existing);
     chmod((appdir_bin / project_name).c_str(), 0755);
 
-    // ── Copy frontend dist ─────────────────────────────────────────────
-    fs::path frontend_dist = build_dir / "dist";
-    if (!fs::exists(frontend_dist)) {
-        frontend_dist = project_dir / "frontend" / "dist";
-    }
-    if (fs::exists(frontend_dist)) {
-        fs::copy(frontend_dist, appdir_share / "dist",
-                 fs::copy_options::recursive | fs::copy_options::overwrite_existing);
+    // ── Copy frontend dist (skip when frontend is embedded in binary) ──
+    bool embedded = is_embed_build(build_dir);
+
+    if (!embedded) {
+        fs::path frontend_dist = build_dir / "dist";
+        if (!fs::exists(frontend_dist)) {
+            frontend_dist = project_dir / "frontend" / "dist";
+        }
+        if (fs::exists(frontend_dist)) {
+            fs::copy(frontend_dist, appdir_share / "dist",
+                     fs::copy_options::recursive | fs::copy_options::overwrite_existing);
+        }
     }
 
     // ── AppRun script ──────────────────────────────────────────────────
@@ -394,9 +417,12 @@ int package_appimage(const std::string& project_name,
           << "SELF=$(readlink -f \"$0\")\n"
           << "HERE=$(dirname \"$SELF\")\n"
           << "export LD_LIBRARY_PATH=\"${HERE}/usr/lib:${LD_LIBRARY_PATH}\"\n"
-          << "export PATH=\"${HERE}/usr/bin:${PATH}\"\n"
-          << "cd \"${HERE}/usr/share/" << project_name << "\"\n"
-          << "exec \"${HERE}/usr/bin/" << project_name << "\" \"$@\"\n";
+          << "export PATH=\"${HERE}/usr/bin:${PATH}\"\n";
+        if (!embedded) {
+            // Non-embedded: cd into share dir so app finds dist/ relatively
+            f << "cd \"${HERE}/usr/share/" << project_name << "\"\n";
+        }
+        f << "exec \"${HERE}/usr/bin/" << project_name << "\" \"$@\"\n";
     }
     chmod((appdir / "AppRun").c_str(), 0755);
 

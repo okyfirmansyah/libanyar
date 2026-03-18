@@ -121,19 +121,31 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # Point to LibAnyar source tree
 set(LIBANYAR_DIR "/path/to/libanyar" CACHE PATH "Path to libanyar source tree")
-add_subdirectory(${LIBANYAR_DIR}/core anyar_core)
+
+# Make AnyarEmbed.cmake discoverable
+list(APPEND CMAKE_MODULE_PATH "${LIBANYAR_DIR}/cmake")
+
+add_subdirectory(${LIBANYAR_DIR}/core ${CMAKE_BINARY_DIR}/anyar_core)
 
 add_executable(myapp src-cpp/main.cpp)
 target_link_libraries(myapp PRIVATE anyar_core)
 
-# Copy frontend dist to build directory
-if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/frontend/dist)
-    add_custom_command(TARGET myapp POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_directory
-            ${CMAKE_CURRENT_SOURCE_DIR}/frontend/dist
-            $<TARGET_FILE_DIR:myapp>/dist
-        COMMENT "Copying frontend dist → build/dist"
-    )
+# ── Frontend: embed into binary or copy to build dir ────────────────────────
+set(FRONTEND_DIST_DIR ${CMAKE_CURRENT_SOURCE_DIR}/frontend/dist)
+
+if(ANYAR_EMBED_FRONTEND AND EXISTS ${FRONTEND_DIST_DIR})
+    include(AnyarEmbed)
+    anyar_embed_frontend(myapp "${FRONTEND_DIST_DIR}")
+else()
+    # Copy frontend dist to build directory
+    if(EXISTS ${FRONTEND_DIST_DIR})
+        add_custom_command(TARGET myapp POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_directory
+                ${FRONTEND_DIST_DIR}
+                $<TARGET_FILE_DIR:myapp>/dist
+            COMMENT "Copying frontend dist → build/dist"
+        )
+    endif()
 endif()
 ```
 

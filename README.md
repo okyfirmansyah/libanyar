@@ -140,7 +140,7 @@ sudo bash scripts/setup-ubuntu.sh
 
 # Build
 mkdir build && cd build
-cmake .. -DCMAKE_BUILD_TYPE=Debug -DANYAR_ENABLE_SOCI=OFF
+cmake .. -DCMAKE_BUILD_TYPE=Debug
 make -j$(nproc)
 
 # Run hello-world example
