@@ -646,7 +646,7 @@ Each wrapped behind a platform-agnostic C++ interface in `anyar::native::`.
 
 | Library | Version | Purpose | License |
 |---------|---------|---------|---------|
-| LibAsyik | >= 1.5.x | HTTP, WS, SQL, Fibers, Logging | MIT |
+| LibAsyik | >= 1.6.1 | HTTP, WS, SQL, Fibers, Logging | MIT |
 | Boost | >= 1.81 | Asio, Beast, Fiber, Context, URL | BSL-1.0 |
 | OpenSSL | >= 1.1 | TLS for HTTPS/WSS | Apache-2.0 |
 | webview/webview | latest | OS webview wrapper | MIT |

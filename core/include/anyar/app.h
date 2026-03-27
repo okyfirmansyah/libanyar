@@ -74,10 +74,33 @@ public:
     /// Register a plugin
     void use(std::shared_ptr<IAnyarPlugin> plugin);
 
+    // ── Custom HTTP Routes ──────────────────────────────────────────────────
+
+    /// Route handler type: void(request, route_args)
+    using RouteHandler = std::function<void(asyik::http_request_ptr,
+                                            asyik::http_route_args)>;
+
+    /// Register a GET route. Routes registered via http_get/http_post always
+    /// take priority over serve_static (uses insert_front when server is live).
+    void http_get(const std::string& path, RouteHandler handler);
+
+    /// Register a POST route (same priority semantics as http_get).
+    void http_post(const std::string& path, RouteHandler handler);
+
+    // ── Local File Access ───────────────────────────────────────────────────
+
+    /// Allow the webview to access files under the given directory via
+    /// the `anyar-file://` custom URI scheme.  Multiple directories can
+    /// be allowed.  Path traversal outside allowed roots is rejected.
+    void allow_file_access(const std::string& directory);
+
     // ── Accessors ───────────────────────────────────────────────────────────
 
     /// Get underlying LibAsyik service
     asyik::service_ptr service() const { return service_; }
+
+    /// Get the HTTP server (available after run() starts)
+    anyar_http_server_ptr server() const { return server_; }
 
     /// Get the HTTP server port
     int port() const { return port_; }
@@ -92,6 +115,19 @@ public:
     /// instead of the filesystem dist_path.
     /// @see anyar::make_embedded_resolver() in <anyar/embed.h>
     void set_frontend_resolver(FileResolver resolver);
+
+    /// Register a callback that is invoked after the HTTP server is created
+    /// and plugins are initialized, but before the window loads.
+    /// Use this for async setup that needs the running service.
+    using ReadyCallback = std::function<void()>;
+    void on_ready(ReadyCallback cb);
+
+    /// Register a callback that is invoked after the HTTP server is created
+    /// but before serve_static is set up. Use this to add custom HTTP routes
+    /// that should take priority over static file serving.
+    /// @deprecated Use http_get()/http_post() or on_ready() instead.
+    using ServerReadyCallback = std::function<void(anyar_http_server_ptr)>;
+    void set_on_server_ready(ServerReadyCallback cb);
 
 private:
     void start_server();
@@ -125,6 +161,23 @@ private:
 
     /// Optional resolver for embedded frontend resources
     FileResolver frontend_resolver_;
+
+    /// Optional callback for registering HTTP routes before serve_static
+    ServerReadyCallback on_server_ready_;
+
+    /// Optional on_ready callback (fires after server + plugins init)
+    ReadyCallback on_ready_;
+
+    /// Deferred HTTP routes: {method, path, handler} registered before run()
+    struct DeferredRoute {
+        std::string method;
+        std::string path;
+        RouteHandler handler;
+    };
+    std::vector<DeferredRoute> deferred_routes_;
+
+    /// Allowed directories for anyar-file:// URI scheme
+    std::vector<std::string> allowed_file_roots_;
 };
 
 } // namespace anyar

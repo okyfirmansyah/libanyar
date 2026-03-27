@@ -3,6 +3,8 @@
 #include <atomic>
 #include <cerrno>
 #include <cstring>
+#include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <mutex>
 #include <stdexcept>
@@ -303,11 +305,161 @@ void register_shm_uri_scheme() {
         security_mgr, "anyar-shm");
 }
 
+// ── anyar-file:// URI Scheme ────────────────────────────────────────────────
+
+// Store allowed roots in a file-static so the C callback can access them.
+static std::vector<std::string> g_allowed_file_roots;
+
+static const char* mime_for_extension(const std::string& ext) {
+    if (ext == ".png")  return "image/png";
+    if (ext == ".jpg" || ext == ".jpeg") return "image/jpeg";
+    if (ext == ".gif")  return "image/gif";
+    if (ext == ".webp") return "image/webp";
+    if (ext == ".svg")  return "image/svg+xml";
+    if (ext == ".mp4")  return "video/mp4";
+    if (ext == ".webm") return "video/webm";
+    if (ext == ".mp3")  return "audio/mpeg";
+    if (ext == ".wav")  return "audio/wav";
+    if (ext == ".ogg")  return "audio/ogg";
+    if (ext == ".pdf")  return "application/pdf";
+    if (ext == ".json") return "application/json";
+    if (ext == ".txt")  return "text/plain";
+    if (ext == ".html") return "text/html";
+    if (ext == ".css")  return "text/css";
+    if (ext == ".js")   return "text/javascript";
+    return "application/octet-stream";
+}
+
+static void handle_file_uri_request(WebKitURISchemeRequest* request,
+                                     gpointer /*user_data*/) {
+    const char* uri = webkit_uri_scheme_request_get_uri(request);
+    // URI format: anyar-file:///absolute/path/to/file
+    std::string uri_str(uri);
+    std::string prefix = "anyar-file://";
+    std::string file_path;
+
+    if (uri_str.size() > prefix.size()) {
+        file_path = uri_str.substr(prefix.size());
+        // Remove trailing slashes
+        while (file_path.size() > 1 && file_path.back() == '/') {
+            file_path.pop_back();
+        }
+    }
+
+    if (file_path.empty()) {
+        GError* error = g_error_new(
+            g_quark_from_string("anyar-file"), 400,
+            "Missing file path in URI: %s", uri);
+        webkit_uri_scheme_request_finish_error(request, error);
+        g_error_free(error);
+        return;
+    }
+
+    // Reject path traversal attempts
+    if (file_path.find("..") != std::string::npos) {
+        GError* error = g_error_new(
+            g_quark_from_string("anyar-file"), 403,
+            "Path traversal denied: %s", uri);
+        webkit_uri_scheme_request_finish_error(request, error);
+        g_error_free(error);
+        return;
+    }
+
+    // Resolve to canonical and verify it's under an allowed root
+    namespace fs = std::filesystem;
+    std::error_code ec;
+    fs::path canonical = fs::canonical(fs::path(file_path), ec);
+    if (ec || !fs::is_regular_file(canonical, ec)) {
+        GError* error = g_error_new(
+            g_quark_from_string("anyar-file"), 404,
+            "File not found: %s", file_path.c_str());
+        webkit_uri_scheme_request_finish_error(request, error);
+        g_error_free(error);
+        return;
+    }
+
+    std::string canon_str = canonical.string();
+    bool allowed = false;
+    for (const auto& root : g_allowed_file_roots) {
+        if (canon_str.rfind(root, 0) == 0) {
+            allowed = true;
+            break;
+        }
+    }
+    if (!allowed) {
+        GError* error = g_error_new(
+            g_quark_from_string("anyar-file"), 403,
+            "Access denied (not in allowed roots): %s", file_path.c_str());
+        webkit_uri_scheme_request_finish_error(request, error);
+        g_error_free(error);
+        return;
+    }
+
+    // Read the file
+    std::ifstream ifs(canonical, std::ios::binary | std::ios::ate);
+    if (!ifs) {
+        GError* error = g_error_new(
+            g_quark_from_string("anyar-file"), 500,
+            "Failed to read file: %s", canon_str.c_str());
+        webkit_uri_scheme_request_finish_error(request, error);
+        g_error_free(error);
+        return;
+    }
+    auto size = ifs.tellg();
+    ifs.seekg(0);
+    std::string body(static_cast<size_t>(size), '\0');
+    ifs.read(body.data(), size);
+
+    const char* content_type = mime_for_extension(canonical.extension().string());
+
+    GBytes* bytes = g_bytes_new(body.data(), body.size());
+    GInputStream* stream = g_memory_input_stream_new_from_bytes(bytes);
+    g_bytes_unref(bytes);
+
+    WebKitURISchemeResponse* response =
+        webkit_uri_scheme_response_new(stream, static_cast<gint64>(body.size()));
+    webkit_uri_scheme_response_set_content_type(response, content_type);
+
+    SoupMessageHeaders* headers = soup_message_headers_new(SOUP_MESSAGE_HEADERS_RESPONSE);
+    soup_message_headers_append(headers, "Access-Control-Allow-Origin", "*");
+    soup_message_headers_append(headers, "Cache-Control", "no-store");
+    webkit_uri_scheme_response_set_http_headers(response, headers);
+
+    webkit_uri_scheme_request_finish_with_response(request, response);
+
+    g_object_unref(response);
+    g_object_unref(stream);
+}
+
+void register_file_uri_scheme(const std::vector<std::string>& allowed_roots) {
+    g_allowed_file_roots = allowed_roots;
+
+    if (g_allowed_file_roots.empty()) return;
+
+    WebKitWebContext* context = webkit_web_context_get_default();
+
+    webkit_web_context_register_uri_scheme(
+        context,
+        "anyar-file",
+        handle_file_uri_request,
+        nullptr,
+        nullptr);
+
+    WebKitSecurityManager* security_mgr =
+        webkit_web_context_get_security_manager(context);
+    webkit_security_manager_register_uri_scheme_as_cors_enabled(
+        security_mgr, "anyar-file");
+}
+
 #else
 
 // Stub for non-Linux platforms (Phase 7)
 void register_shm_uri_scheme() {
     // No-op — Windows uses PostSharedBufferToScript, macOS uses WKURLSchemeHandler
+}
+
+void register_file_uri_scheme(const std::vector<std::string>& /*allowed_roots*/) {
+    // No-op — Phase 7
 }
 
 #endif // __linux__

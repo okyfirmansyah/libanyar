@@ -1,5 +1,14 @@
 # LibAnyar Documentation
 
+## Quick Start
+
+```bash
+anyar init myapp        # scaffold a new project (React, Vue, or Svelte)
+cd myapp && anyar dev   # start Vite HMR + C++ backend
+```
+
+See [Getting Started](getting-started.md) for prerequisites and full setup instructions.
+
 ## Guides
 
 - [Getting Started](getting-started.md) — Installation, prerequisites, and first build

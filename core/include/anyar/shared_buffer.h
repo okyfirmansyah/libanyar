@@ -162,4 +162,9 @@ private:
 /// On Linux, this uses webkit_web_context_register_uri_scheme().
 void register_shm_uri_scheme();
 
+/// Register the `anyar-file://` URI scheme handler for local file access.
+/// Must be called from the main thread BEFORE any webview is created.
+/// @param allowed_roots Canonical directory paths that may be accessed.
+void register_file_uri_scheme(const std::vector<std::string>& allowed_roots);
+
 } // namespace anyar

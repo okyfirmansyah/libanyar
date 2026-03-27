@@ -124,7 +124,7 @@ const result = await invoke('greet', { name: 'World' });
 
 - C++17 compiler (GCC 11+, Clang 10+, MSVC 2019+)
 - CMake >= 3.16
-- LibAsyik 1.5+ (with Boost >= 1.81, SOCI 4.0.3)
+- LibAsyik 1.6.1+ (with Boost >= 1.81, SOCI 4.0.3)
 - WebKitGTK 4.0 (Linux) / WebView2 (Windows) / WebKit (macOS)
 - nlohmann/json >= 3.11
 - Node.js >= 18 (for frontend build, optional for pre-built dist)

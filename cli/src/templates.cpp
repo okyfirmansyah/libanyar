@@ -82,6 +82,11 @@ endif()
 static void gen_main_cpp(const std::string& name, const fs::path& dest) {
     write_file(dest / "src-cpp" / "main.cpp",
 R"(// )" + name + R"( — LibAnyar Application
+//
+// Lifecycle:
+//   1. App constructor — creates the fiber service (app.service() is usable now)
+//   2. Register commands, HTTP routes, file access, plugins
+//   3. app.run() — starts HTTP server, opens window, blocks until exit
 
 #include <anyar/app.h>
 #include <iostream>
@@ -106,6 +111,25 @@ int main() {
         return {{"message", "Hello, " + name + "!"}};
     });
 
+    // ── Custom HTTP routes (served before static files) ─────────────────
+
+    app.http_get("/api/health", [](auto req, auto args) {
+        req->response.body = "{\"status\":\"ok\"}";
+        req->response.headers.set("Content-Type", "application/json");
+        req->response.result(200);
+    });
+
+    // ── Local file access (images, videos, etc.) ────────────────────────
+    // Uncomment to allow the webview to load files from a directory:
+    //   <img src="anyar-file:///home/user/photos/cat.jpg" />
+    // app.allow_file_access("/path/to/media");
+
+    // ── on_ready — runs after server + plugins are initialized ──────────
+
+    app.on_ready([&]() {
+        std::cout << "[)" + name + R"(] Ready on port " << app.port() << std::endl;
+    });
+
     // ── Create window ───────────────────────────────────────────────────
 
     anyar::WindowConfig win;
@@ -121,8 +145,6 @@ int main() {
     app.set_frontend_resolver(anyar::make_embedded_resolver());
     std::cout << "[)" + name + R"(] Frontend embedded in binary" << std::endl;
 #endif
-
-    std::cout << "[)" + name + R"(] Starting..." << std::endl;
 
     return app.run();
 }

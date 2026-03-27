@@ -14,6 +14,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <random>
 
@@ -71,6 +72,11 @@ App::App(AppConfig config) : config_(std::move(config)) {
     if (config_.dist_path.empty()) {
         config_.dist_path = "./dist";
     }
+
+    // Create the service (fiber engine) eagerly so app.service() is
+    // available immediately after construction — before run().
+    // The HTTP server and fibers will still start inside run().
+    service_ = asyik::make_service();
 }
 
 App::~App() {
@@ -141,6 +147,42 @@ void App::set_frontend_resolver(FileResolver resolver) {
     frontend_resolver_ = std::move(resolver);
 }
 
+void App::set_on_server_ready(ServerReadyCallback cb) {
+    on_server_ready_ = std::move(cb);
+}
+
+void App::on_ready(ReadyCallback cb) {
+    on_ready_ = std::move(cb);
+}
+
+// ── Custom HTTP Routes ──────────────────────────────────────────────────────
+
+void App::http_get(const std::string& path, RouteHandler handler) {
+    if (server_) {
+        // Server already running — register with insert_front for priority
+        server_->on_http_request(path, "GET", std::move(handler), /*insert_front=*/true);
+    } else {
+        deferred_routes_.push_back({"GET", path, std::move(handler)});
+    }
+}
+
+void App::http_post(const std::string& path, RouteHandler handler) {
+    if (server_) {
+        server_->on_http_request(path, "POST", std::move(handler), /*insert_front=*/true);
+    } else {
+        deferred_routes_.push_back({"POST", path, std::move(handler)});
+    }
+}
+
+// ── Local File Access ───────────────────────────────────────────────────────
+
+void App::allow_file_access(const std::string& directory) {
+    namespace fs = std::filesystem;
+    // Resolve to canonical path to prevent traversal via symlinks
+    std::string canonical = fs::canonical(fs::path(directory)).string();
+    allowed_file_roots_.push_back(std::move(canonical));
+}
+
 // ── Internal ────────────────────────────────────────────────────────────────
 
 int App::find_available_port() {
@@ -157,7 +199,6 @@ int App::find_available_port() {
 void App::start_server() {
     port_ = find_available_port();
 
-    service_ = asyik::make_service();
     server_ = asyik::make_http_server(service_, config_.host, static_cast<uint16_t>(port_));
 
     // ── IPC Router (commands + events) — must be registered before catch-all ──
@@ -250,6 +291,81 @@ void App::start_server() {
         }
     );
 
+    // ── User-registered HTTP routes (before serve_static) ─────────────────
+    // Deferred routes registered via http_get/http_post before run()
+    for (auto& route : deferred_routes_) {
+        server_->on_http_request(route.path, route.method,
+                                 std::move(route.handler));
+    }
+    deferred_routes_.clear();
+
+    // Legacy callback
+    if (on_server_ready_) {
+        on_server_ready_(server_);
+    }
+
+    // ── Local file serving HTTP fallback (for browser dev mode) ─────────
+    if (!allowed_file_roots_.empty()) {
+        auto roots = allowed_file_roots_;  // capture a copy
+        server_->on_http_request("/__anyar__/file/<path>", "GET",
+            [roots](asyik::http_request_ptr req, asyik::http_route_args args) {
+                std::string rel = args[1];
+                // Reject obvious traversal attempts
+                if (rel.find("..") != std::string::npos) {
+                    req->response.body = "Forbidden";
+                    req->response.result(403);
+                    return;
+                }
+                namespace fs = std::filesystem;
+                for (auto& root : roots) {
+                    fs::path candidate = fs::path(root) / rel;
+                    std::error_code ec;
+                    fs::path canon = fs::canonical(candidate, ec);
+                    if (ec || !fs::is_regular_file(canon, ec)) continue;
+                    // Verify the canonical path is under the allowed root
+                    if (canon.string().rfind(root, 0) != 0) continue;
+                    // Read and serve the file
+                    std::ifstream ifs(canon, std::ios::binary);
+                    if (!ifs) continue;
+                    std::string body((std::istreambuf_iterator<char>(ifs)),
+                                     std::istreambuf_iterator<char>());
+                    // Determine Content-Type from extension
+                    std::string ext = canon.extension().string();
+                    std::string ct = "application/octet-stream";
+                    if (ext == ".png") ct = "image/png";
+                    else if (ext == ".jpg" || ext == ".jpeg") ct = "image/jpeg";
+                    else if (ext == ".gif") ct = "image/gif";
+                    else if (ext == ".webp") ct = "image/webp";
+                    else if (ext == ".svg") ct = "image/svg+xml";
+                    else if (ext == ".mp4") ct = "video/mp4";
+                    else if (ext == ".webm") ct = "video/webm";
+                    else if (ext == ".mp3") ct = "audio/mpeg";
+                    else if (ext == ".wav") ct = "audio/wav";
+                    else if (ext == ".ogg") ct = "audio/ogg";
+                    else if (ext == ".pdf") ct = "application/pdf";
+                    else if (ext == ".json") ct = "application/json";
+                    else if (ext == ".txt") ct = "text/plain";
+                    else if (ext == ".html") ct = "text/html";
+                    else if (ext == ".css") ct = "text/css";
+                    else if (ext == ".js") ct = "text/javascript";
+                    req->response.body = std::move(body);
+                    req->response.headers.set("Content-Type", ct);
+                    req->response.headers.set("Cache-Control", "no-store");
+                    req->response.result(200);
+                    return;
+                }
+                req->response.body = "File not found or access denied";
+                req->response.headers.set("Content-Type", "text/plain");
+                req->response.result(404);
+            }
+        );
+    }
+
+    // ── on_ready callback (service + server + plugins all initialized) ───
+    if (on_ready_) {
+        on_ready_();
+    }
+
     // ── Frontend serving ────────────────────────────────────────────────────
     if (frontend_resolver_) {
         // Embedded mode: serve frontend from compiled-in resources
@@ -317,6 +433,9 @@ int App::run() {
     // Register the anyar-shm:// URI scheme BEFORE any webview is created.
     // This must happen on the main thread, before start_server().
     register_shm_uri_scheme();
+
+    // Register anyar-file:// if any directories were allowed
+    register_file_uri_scheme(allowed_file_roots_);
 
     start_server();
 

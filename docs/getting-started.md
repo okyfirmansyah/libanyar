@@ -25,7 +25,7 @@ sudo apt-get install -y \
 
 ### LibAsyik
 
-LibAnyar depends on [LibAsyik](https://github.com/okyfirmansyah/libasyik) 1.5+, which includes Boost 1.81+ and SOCI 4.0.3.
+LibAnyar depends on [LibAsyik](https://github.com/okyfirmansyah/libasyik) 1.6.1+, which includes Boost 1.81+ and SOCI 4.0.3.
 
 Install LibAsyik from source:
 

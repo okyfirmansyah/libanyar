@@ -9,7 +9,7 @@ Thank you for your interest in contributing to LibAnyar! This document covers th
 - GCC 11+ (C++17 required)
 - CMake ≥ 3.16
 - Node.js ≥ 18
-- [LibAsyik](https://github.com/okyfirmansyah/libasyik) 1.5+ installed
+- [LibAsyik](https://github.com/okyfirmansyah/libasyik) 1.6.1+ installed
 
 ### Build from Source
 
