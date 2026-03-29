@@ -698,10 +698,20 @@ void VideoPlugin::run_decode_loop() {
     //    3. The command handler stores that in audio_time_.
     //    4. This loop emits buffer:ready for the frame whose PTS
     //       best matches audio_time_.
+    //    For video-only files (no audio stream), a local wall-clock
+    //    is used instead so playback is self-driven.
     {
         bool eos = false;
         const double half_frame = 0.5 / fps;
         bool was_playing = false;
+
+        // Detect video-only (no audio stream in the file)
+        const bool has_audio = (audio_stream_ >= 0);
+
+        // Wall-clock timing for video-only playback
+        using wall_clock = std::chrono::steady_clock;
+        wall_clock::time_point wall_play_start = wall_clock::now();
+        double wall_time_offset = 0.0;  // accumulated time base (handles pause/seek)
 
         constexpr int POOL_CAP = 5;
         std::array<double, POOL_CAP> pool_pts{};
@@ -715,6 +725,12 @@ void VideoPlugin::run_decode_loop() {
                 double t = pending_seek_;
                 pending_seek_ = -1.0;
                 audio_time_   = -1.0;
+
+                // Reset wall-clock base to seek target
+                if (!has_audio) {
+                    wall_time_offset = t;
+                    wall_play_start = wall_clock::now();
+                }
 
                 // Release any held pool buffers
                 for (int i = 0; i < pool_count; ++i) {
@@ -767,6 +783,11 @@ void VideoPlugin::run_decode_loop() {
 
             // \u2500\u2500 Paused \u2014 idle wait \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
             if (!playing_) {
+                // On pause transition: save accumulated wall-clock time
+                if (was_playing && !has_audio) {
+                    auto now = wall_clock::now();
+                    wall_time_offset += std::chrono::duration<double>(now - wall_play_start).count();
+                }
                 was_playing = false;
                 boost::this_fiber::sleep_for(std::chrono::milliseconds(30));
                 continue;
@@ -775,9 +796,13 @@ void VideoPlugin::run_decode_loop() {
             // \u2500\u2500 Just resumed playing \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
             if (!was_playing) {
                 was_playing = true;
+                // Reset wall-clock start for video-only resume
+                if (!has_audio) {
+                    wall_play_start = wall_clock::now();
+                }
                 if (eos) {
                     eos = false;
-                    double atime = audio_time_;
+                    double atime = has_audio ? audio_time_ : wall_time_offset;
                     if (atime >= 0) {
                         int64_t ts = static_cast<int64_t>(atime * AV_TIME_BASE);
                         av_seek_frame(fmt, -1, ts, AVSEEK_FLAG_BACKWARD);
@@ -811,13 +836,21 @@ void VideoPlugin::run_decode_loop() {
 
             // \u2500\u2500 Audio-driven frame dispatch \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
             {
-                double atime = audio_time_;
-                if (atime < 0) {
-                    boost::this_fiber::sleep_for(std::chrono::milliseconds(5));
-                    continue;
+                double atime;
+                if (has_audio) {
+                    atime = audio_time_;
+                    if (atime < 0) {
+                        boost::this_fiber::sleep_for(std::chrono::milliseconds(5));
+                        continue;
+                    }
+                } else {
+                    // Video-only: compute time from local wall clock
+                    auto now = wall_clock::now();
+                    atime = wall_time_offset +
+                        std::chrono::duration<double>(now - wall_play_start).count();
                 }
 
-                // Drop frames the audio clock has already passed
+                // Drop frames the clock has already passed
                 while (pool_count > 1) {
                     int next_idx = (pool_head + 1) % POOL_CAP;
                     if (pool_pts[pool_head] < atime - half_frame &&
@@ -847,13 +880,16 @@ void VideoPlugin::run_decode_loop() {
 
             // \u2500\u2500 EOS: pool fully drained \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
             if (eos && pool_count == 0) {
-                double atime = audio_time_;
-                if (atime >= 0 && atime < probe_.duration - 1.0) {
-                    int64_t ts2 = static_cast<int64_t>(atime * AV_TIME_BASE);
-                    av_seek_frame(fmt, -1, ts2, AVSEEK_FLAG_BACKWARD);
-                    avcodec_flush_buffers(dec_ctx);
-                    eos = false;
-                    continue;
+                if (has_audio) {
+                    // Audio still playing — re-seek video to catch up
+                    double atime = audio_time_;
+                    if (atime >= 0 && atime < probe_.duration - 1.0) {
+                        int64_t ts2 = static_cast<int64_t>(atime * AV_TIME_BASE);
+                        av_seek_frame(fmt, -1, ts2, AVSEEK_FLAG_BACKWARD);
+                        avcodec_flush_buffers(dec_ctx);
+                        eos = false;
+                        continue;
+                    }
                 }
                 if (events_) events_->emit("video:ended", {});
                 playing_ = false;

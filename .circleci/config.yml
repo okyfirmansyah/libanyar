@@ -52,7 +52,7 @@ jobs:
       #    entire /usr/local/lib and /usr/local/include directories.
       - restore_cache:
           keys:
-            - cpp-deps-v2-{{ arch }}
+            - cpp-deps-v3-{{ arch }}
 
       # ── Boost 1.81 ────────────────────────────────────────────────────
       - run:
@@ -108,7 +108,7 @@ jobs:
               exit 0
             fi
             cd /tmp
-            git clone --depth=1 https://github.com/okyfirmansyah/libasyik libasyik-src
+            git clone --branch 1.6.1 --depth=1 https://github.com/okyfirmansyah/libasyik libasyik-src
             cd libasyik-src
             git submodule update --init --recursive
             mkdir build_ci && cd build_ci
@@ -122,7 +122,7 @@ jobs:
 
       # ── Save combined C++ dependency cache ────────────────────────────
       - save_cache:
-          key: cpp-deps-v2-{{ arch }}
+          key: cpp-deps-v3-{{ arch }}
           paths:
             - /usr/local/lib
             - /usr/local/include

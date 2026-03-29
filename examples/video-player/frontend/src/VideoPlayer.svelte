@@ -36,6 +36,13 @@
   let audioEl   = $state(null);
   let renderer  = $state(null);
 
+  // Detect whether the file has an audio stream
+  let hasAudio = $derived(videoInfo && videoInfo.audioCodec && videoInfo.audioCodec.length > 0);
+
+  // Wall-clock timing state (used when no audio stream)
+  let playStartTime   = 0;   // performance.now() when play/resume started
+  let playStartOffset = 0;   // video time at which play/resume started
+
   // Track which seekTarget id we've already applied
   let appliedSeekId = 0;
 
@@ -124,13 +131,21 @@
   });
 
   // ── Play loop: audio-driven timeline + sync messages to C++ ─────────
+  //    When the file has no audio stream, uses wall-clock timing instead.
   function startPlayLoop() {
     stopPlayLoop();
     function tick() {
       if (playing) {
-        const t = (audioEl && !audioEl.paused)
-          ? audioEl.currentTime
-          : currentTime;
+        let t;
+        if (hasAudio && audioEl && !audioEl.paused) {
+          // Audio-driven: audio element is the master clock
+          t = audioEl.currentTime;
+        } else if (!hasAudio) {
+          // Wall-clock-driven: compute elapsed time since play/resume
+          t = playStartOffset + (performance.now() - playStartTime) / 1000;
+        } else {
+          t = currentTime;
+        }
         currentTime = t;
         invoke('video:sync', { time: t }).catch(() => {});
       }
@@ -150,8 +165,11 @@
   function play() {
     invoke('video:play').catch(() => {});
     playing = true;
+    // Set wall-clock reference for video-only mode
+    playStartOffset = currentTime;
+    playStartTime = performance.now();
     startPlayLoop();
-    if (audioEl) {
+    if (hasAudio && audioEl) {
       audioEl.currentTime = currentTime;
       audioEl.play().catch(() => {});
     }
@@ -160,13 +178,16 @@
   function pause() {
     invoke('video:pause').catch(() => {});
     playing = false;
-    if (audioEl) audioEl.pause();
+    if (hasAudio && audioEl) audioEl.pause();
     stopPlayLoop();
   }
 
   function seek(time) {
     currentTime = time;
-    if (audioEl) audioEl.currentTime = time;
+    // Reset wall-clock reference so video-only mode continues from seek point
+    playStartOffset = time;
+    playStartTime = performance.now();
+    if (hasAudio && audioEl) audioEl.currentTime = time;
 
     seekPending = time;
     if (seekTimer) clearTimeout(seekTimer);
@@ -175,7 +196,7 @@
       const t = seekPending;
       seekPending = null;
       invoke('video:seek', { time: t }).catch(() => {});
-      if (audioEl && playing) audioEl.play().catch(() => {});
+      if (hasAudio && audioEl && playing) audioEl.play().catch(() => {});
       if (playing) {
         invoke('video:sync', { time: t }).catch(() => {});
       }
@@ -202,10 +223,17 @@
 
   // ── Audio metadata → duration ─────────────────────────────────────────
   function onAudioLoaded() {
-    if (audioEl) {
+    if (audioEl && hasAudio) {
       duration = audioEl.duration || 0;
     }
   }
+
+  // ── Fallback duration from probe when no audio ────────────────────────
+  $effect(() => {
+    if (!hasAudio && videoInfo && videoInfo.duration) {
+      duration = videoInfo.duration;
+    }
+  });
 
   // ── Time formatting ───────────────────────────────────────────────────
   function fmtTime(s) {
@@ -223,12 +251,14 @@
     style="object-fit: contain; background: #000;"
   ></canvas>
 
-  <!-- Hidden audio element — plays audio from the HTTP stream endpoint -->
-  <audio
-    bind:this={audioEl}
-    src={audioSrc}
-    preload="auto"
-    onloadedmetadata={onAudioLoaded}
-    style="display: none;"
-  ></audio>
+  <!-- Hidden audio element — plays audio from the HTTP stream endpoint (only when audio stream exists) -->
+  {#if hasAudio}
+    <audio
+      bind:this={audioEl}
+      src={audioSrc}
+      preload="auto"
+      onloadedmetadata={onAudioLoaded}
+      style="display: none;"
+    ></audio>
+  {/if}
 </div>
