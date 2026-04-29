@@ -23,6 +23,7 @@ Building desktop apps shouldn't force a choice between powerful native performan
 | Native IPC | Custom | — | webview msg | **webview_bind** |
 | IPC HTTP/WS Fallback | — | — | — | **Built-in** |
 | Zero-copy Binary IPC | — | — | — | **Shared Memory** |
+| Native Pinhole Rendering | — | — | — | **Built-in (direct native surface compositing)** |
 | WebGL Canvas Rendering | Native OpenGL | Manual | Manual | **Built-in (RGB and YUV formats supported)** |
 
 ## Example Projects
@@ -37,7 +38,7 @@ Building desktop apps shouldn't force a choice between powerful native performan
 <td width="50%" align="center">
 <h3>Local Video Player</h3>
 <img src="docs/assets/video-player.gif" alt="Video Player" height="200" /><br/>
-<sub>FFmpeg-powered with zero-copy IPC and direct WebGL rendering.</sub>
+<sub>FFmpeg-powered with pinhole native rendering and zero-copy WebGL fallback.</sub>
 </td>
 </tr>
 <tr>
@@ -63,7 +64,7 @@ block-beta
   A["🌐 Web Frontend — React / Vue / Svelte"]
   B["📡 @libanyar/api — JS Bridge\n★ Native IPC (webview_bind, ~0.01ms)\n★ Shared Memory (anyar-shm://, zero-copy)\n○ HTTP/WS fallback (browser dev mode)"]
   C["🖼️ OS WebView — WebKit / WebView2"]
-  D["⚙️ LibAnyar Core (C++17)\nIPC Router · Commands · Event Bus\nWindow Mgr · Plugins · Native APIs\nSharedBuffer · BufferPool · WebGL"]
+  D["⚙️ LibAnyar Core (C++17)\nIPC Router · Commands · Event Bus\nWindow Mgr · Plugins · Native APIs\nSharedBuffer · BufferPool · Pinhole · WebGL"]
   E["🧱 LibAsyik — Foundation\nHTTP/WS Server · SOCI/SQL · Boost Fibers"]
 
   A -- " " --> B
@@ -147,6 +148,19 @@ make -j$(nproc)
 cd examples/hello-world
 ./hello_world
 ```
+
+## Pinhole Native Rendering
+
+LibAnyar includes **Pinhole**, a direct native renderer for high-throughput surfaces such as video, camera feeds, waveform views, and dashboards that need to minimize JS and canvas upload overhead.
+
+A pinhole reserves a transparent DOM placeholder and composites a native GPU surface inside the same OS window, underneath the webview content. That gives you native drawing latency while still letting HTML/CSS handle surrounding controls and layout.
+
+| Renderer | Best for | Tradeoff |
+|---|---|---|
+| **Pinhole** | Lowest-latency video or data surfaces | The surface itself does not participate in full DOM styling |
+| **WebGL Canvas** | CSS-styled, cross-platform canvas rendering | Frame uploads still flow through the webview |
+
+See the [Pinhole Native Overlay Rendering Guide](docs/pinhole-rendering.md) for API details and architecture notes.
 
 ## Shared Memory IPC & WebGL Canvas
 

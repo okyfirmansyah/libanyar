@@ -17,6 +17,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     target_sources(anyar_core PRIVATE
         src/main_thread_linux.cpp
         src/shared_buffer_linux.cpp
+        src/pinhole_linux.cpp
         src/plugins/dialog_linux.cpp
         src/plugins/clipboard_linux.cpp
         src/plugins/shell_linux.cpp
@@ -29,6 +30,7 @@ elseif(WIN32)
     #     src/plugins/clipboard_win32.cpp
     #     src/plugins/shell_win32.cpp
     # )
+    target_sources(anyar_core PRIVATE src/pinhole_stub.cpp)
 elseif(APPLE)
     # Phase 7: add macOS implementations
     # target_sources(anyar_core PRIVATE
@@ -37,6 +39,7 @@ elseif(APPLE)
     #     src/plugins/clipboard_macos.mm
     #     src/plugins/shell_macos.mm
     # )
+    target_sources(anyar_core PRIVATE src/pinhole_stub.cpp)
 endif()
 
 target_include_directories(anyar_core
@@ -132,6 +135,12 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     pkg_check_modules(GTK3 REQUIRED gtk+-3.0)
     target_include_directories(anyar_core PUBLIC ${GTK3_INCLUDE_DIRS})
     target_link_libraries(anyar_core PUBLIC ${GTK3_LIBRARIES})
+
+    # libepoxy — OpenGL function loading for GtkGLArea (pinhole rendering)
+    # libepoxy is a transitive dependency of WebKitGTK so it is always present.
+    pkg_check_modules(EPOXY REQUIRED epoxy)
+    target_include_directories(anyar_core PUBLIC ${EPOXY_INCLUDE_DIRS})
+    target_link_libraries(anyar_core PUBLIC ${EPOXY_LIBRARIES})
 
     # POSIX shared memory (shm_open, shm_unlink)
     target_link_libraries(anyar_core PUBLIC rt)

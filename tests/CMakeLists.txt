@@ -63,3 +63,11 @@ anyar_add_test(test_shared_buffer
 
 # ── WebGL E2E Tests (requires display) ───────────────────────────────────────
 add_subdirectory(webgl)
+
+# ── Pinhole: lifecycle + unit tests ─────────────────────────────────────────
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    anyar_add_test(test_pinhole_linux
+        $<TARGET_OBJECTS:catch2_main>
+        test_pinhole_linux.cpp
+    )
+endif()

@@ -12,6 +12,7 @@
 /// Platform-specific code lives in the pimpl (`Window::Impl`).
 
 #include <anyar/app_config.h>
+#include <anyar/pinhole.h>
 #include <anyar/types.h>
 
 #include <functional>
@@ -155,6 +156,25 @@ public:
     /// Inject JavaScript that will be executed on every page load,
     /// before window.onload.  Can be called multiple times.
     void init(const std::string& js);
+
+    // ── Pinhole Native Overlay ───────────────────────────────────────────
+
+    /// Create a native GPU overlay ("pinhole") associated with this window.
+    ///
+    /// The returned Pinhole must outlive the Window's webview — destroy it
+    /// (or let its shared_ptr refcount drop to zero) before the Window is
+    /// closed.  Failure to do so is safe but will produce a log warning.
+    ///
+    /// @param id    Unique ID matching the DOM data-anyar-pinhole attribute.
+    /// @param opts  Creation options (pixel format, continuous render, etc.)
+    /// @returns     Shared pointer to the new Pinhole.  is_native() may be
+    ///              false if the platform does not support native overlay.
+    std::shared_ptr<Pinhole> create_pinhole(const std::string& id,
+                                            const PinholeOptions& opts = {});
+
+    /// Look up a previously-created pinhole by id.
+    /// Returns nullptr if no pinhole with that id exists on this window.
+    std::shared_ptr<Pinhole> find_pinhole(const std::string& id) const;
 
 private:
     struct Impl;

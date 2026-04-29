@@ -670,9 +670,12 @@ libanyar/
 ├── CMakeLists.txt                  # Root build
 ├── README.md
 ├── ARCHITECTURE.md                 # This file
-├── .ai/                            # AI assistant context
-│   ├── context.md                  # Project context & conventions
-│   ├── decisions.md                # Architecture decision log
+├── CLAUDE.md                       # Root agent context (#imports .github/copilot-instructions.md)
+├── .github/
+│   └── copilot-instructions.md     # Global agent context (Copilot + Claude)
+├── docs/
+│   ├── decisions.md                # Architecture decision log (ADR-001..007)
+│   ├── roadmap.md                  # Phased plan + status
 │   └── progress.md                 # Current progress tracking
 │
 ├── cmake/                          # CMake modules

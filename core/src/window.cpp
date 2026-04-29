@@ -1,14 +1,18 @@
 #include <anyar/window.h>
+#include <anyar/pinhole.h>
 #include "webview/webview.h"
 
 #include <memory>
 #include <sstream>
 #include <stdexcept>
+#include <algorithm>
+#include <map>
 #include <vector>
 
 // Platform-specific GTK includes (Linux only)
 #ifdef __linux__
 #include <gtk/gtk.h>
+#include <webkit2/webkit2.h>
 #endif
 
 namespace anyar {
@@ -36,6 +40,19 @@ struct Window::Impl {
     gulong focus_in_handler_id = 0;
     gulong delete_event_handler_id = 0;
     gulong destroy_handler_id = 0;
+    gulong window_state_handler_id = 0;
+
+    // Inner GtkOverlay where pinhole GtkGLAreas are attached. Pinholes are
+    // composited UNDER a transparent WebKitWebView so HTML can render on top
+    // of native GL surfaces. Non-owning: GTK widget tree owns the lifetime.
+    GtkOverlay* overlay = nullptr;
+
+    // Live pinhole objects owned by this window (keyed by id for O(1) lookup).
+    std::map<std::string, std::shared_ptr<Pinhole>> pinholes;
+
+    // Tracks whether the pinhole JS tracking snippet has been injected
+    // via webview_init() on this window (injected once per window).
+    bool pinhole_js_injected = false;
 #endif
 
     Impl(const WindowCreateOptions& opts, int port)
@@ -85,6 +102,82 @@ struct Window::Impl {
                              WEBVIEW_HINT_MIN);
         }
         webview_set_size(wv, stored_width, stored_height, stored_hint);
+
+#ifdef __linux__
+        // Reparent the WebKitWebView so pinholes can be composited UNDER it.
+        // webview/webview places the WebKitWebView as the direct child of
+        // GtkWindow (gtk_container_add in GTK3). We rebuild that subtree as:
+        //
+        //   GtkWindow → GtkOverlay (outer)
+        //                 ├── GtkOverlay (inner)        ← `overlay`
+        //                 │     ├── GtkEventBox (main, transparent)
+        //                 │     └── GtkGLArea (overlay)  ← pinholes
+        //                 └── WebKitWebView (transparent, on top)
+        //
+        // The webview gets a transparent background so HTML can blend with
+        // whatever the pinhole(s) underneath are rendering. HTML controls
+        // (timelines, panels, buttons) thus composite freely on top of
+        // native GL surfaces.
+        //
+        // Trade-offs (versus a fully opaque webview):
+        //  - Disables WebKit's opaque-blit fast path (slightly higher
+        //    CPU/GPU cost).
+        //  - Native widget input is masked by the webview; pinholes are
+        //    visual-only unless the page explicitly forwards events.
+        //  - Subpixel text antialiasing degrades to grayscale on a
+        //    transparent webview.
+        {
+            GtkWidget* gtk_win = static_cast<GtkWidget*>(webview_get_window(wv));
+            GtkWidget* child = gtk_bin_get_child(GTK_BIN(gtk_win));
+            if (child && !GTK_IS_OVERLAY(child)) {
+                g_object_ref(child);  // keep alive while detached
+                gtk_container_remove(GTK_CONTAINER(gtk_win), child);
+
+                GtkOverlay* outer = GTK_OVERLAY(gtk_overlay_new());
+
+                // Inner overlay: holds pinhole GtkGLAreas. Its main child is
+                // a transparent event box that fills the overlay; pinholes
+                // are added later as overlay children of `inner`.
+                GtkOverlay* inner = GTK_OVERLAY(gtk_overlay_new());
+                GtkWidget*  bg    = gtk_event_box_new();
+                gtk_event_box_set_visible_window(GTK_EVENT_BOX(bg), FALSE);
+                gtk_widget_set_halign(GTK_WIDGET(inner), GTK_ALIGN_FILL);
+                gtk_widget_set_valign(GTK_WIDGET(inner), GTK_ALIGN_FILL);
+                gtk_widget_set_hexpand(GTK_WIDGET(inner), TRUE);
+                gtk_widget_set_vexpand(GTK_WIDGET(inner), TRUE);
+                gtk_widget_set_halign(bg, GTK_ALIGN_FILL);
+                gtk_widget_set_valign(bg, GTK_ALIGN_FILL);
+                gtk_widget_set_hexpand(bg, TRUE);
+                gtk_widget_set_vexpand(bg, TRUE);
+                gtk_container_add(GTK_CONTAINER(inner), bg);
+                overlay = inner;
+
+                // Outer overlay: inner is the main child (drawn first, bottom
+                // of the stack); WebKitWebView is the overlay child (drawn
+                // last, top of the stack).
+                gtk_container_add(GTK_CONTAINER(outer), GTK_WIDGET(inner));
+                gtk_overlay_add_overlay(outer, child);
+                gtk_widget_set_halign(child, GTK_ALIGN_FILL);
+                gtk_widget_set_valign(child, GTK_ALIGN_FILL);
+                gtk_widget_set_hexpand(child, TRUE);
+                gtk_widget_set_vexpand(child, TRUE);
+
+                // Make WebKit render with a transparent backdrop so the
+                // pinhole layer underneath is visible through any HTML
+                // element that sets `background: transparent`.
+                if (WEBKIT_IS_WEB_VIEW(child)) {
+                    GdkRGBA transparent = {0.0, 0.0, 0.0, 0.0};
+                    webkit_web_view_set_background_color(
+                        WEBKIT_WEB_VIEW(child), &transparent);
+                }
+
+                g_object_unref(child);
+                gtk_container_add(GTK_CONTAINER(gtk_win), GTK_WIDGET(outer));
+                gtk_widget_show_all(gtk_win);
+            }
+        }
+#endif
+
         connect_close_signals();
     }
 
@@ -104,6 +197,10 @@ struct Window::Impl {
             disconnect_close_signals();
             destroyed = true;
 #ifdef __linux__
+            // Destroy all pinholes BEFORE webview_destroy() (ADR-008 / ADR-007 step 5b).
+            // Pinhole::~Impl() runs GL cleanup on the main thread.
+            pinholes.clear();
+
             // Drain a bounded number of stale g_idle_add callbacks
             // BEFORE webview_destroy().  This prevents webview’s
             // internal deplete_run_loop_event_queue() from processing
@@ -206,6 +303,22 @@ struct Window::Impl {
                 }
             }),
             this);
+
+        // window-state-event: pause/resume pinholes on OS minimize/restore.
+        window_state_handler_id = g_signal_connect(
+            G_OBJECT(win), "window-state-event",
+            G_CALLBACK(+[](GtkWidget*, GdkEventWindowState* ev,
+                           gpointer user_data) -> gboolean {
+                auto* self = static_cast<Impl*>(user_data);
+                if (ev->changed_mask & GDK_WINDOW_STATE_ICONIFIED) {
+                    bool minimized = static_cast<bool>(
+                        ev->new_window_state & GDK_WINDOW_STATE_ICONIFIED);
+                    for (auto& [wid, pin] : self->pinholes) {
+                        pin->set_window_active(!minimized);
+                    }
+                }
+                return FALSE;
+            }), this);
     }
 
     void disconnect_close_signals() {
@@ -222,6 +335,10 @@ struct Window::Impl {
         if (destroy_handler_id) {
             g_signal_handler_disconnect(G_OBJECT(win), destroy_handler_id);
             destroy_handler_id = 0;
+        }
+        if (window_state_handler_id) {
+            g_signal_handler_disconnect(G_OBJECT(win), window_state_handler_id);
+            window_state_handler_id = 0;
         }
     }
 
@@ -301,6 +418,27 @@ struct Window::Impl {
         if (win) {
             gtk_window_present(win);
         }
+    }
+
+    void reorder_pinholes_by_z() {
+        // Sort pinholes by z_index (ascending).  GtkOverlay draws last-added
+        // on top, so the highest-z pinhole must be re-inserted last.
+        std::vector<std::shared_ptr<Pinhole>> sorted;
+        sorted.reserve(pinholes.size());
+        for (auto& [id, p] : pinholes) sorted.push_back(p);
+        std::sort(sorted.begin(), sorted.end(),
+            [](const std::shared_ptr<Pinhole>& a,
+               const std::shared_ptr<Pinhole>& b) {
+                return a->z_index() < b->z_index();
+            });
+        // Dispatch re-insertion to the GTK main thread.
+        auto* payload = new std::vector<std::shared_ptr<Pinhole>>(std::move(sorted));
+        g_idle_add(+[](gpointer data) -> gboolean {
+            auto* pins = static_cast<std::vector<std::shared_ptr<Pinhole>>*>(data);
+            for (auto& pin : *pins) pin->reorder_in_overlay();
+            delete pins;
+            return G_SOURCE_REMOVE;
+        }, payload);
     }
 
     void set_size(int w, int h) {
@@ -596,6 +734,49 @@ void Window::init(const std::string& js) {
     if (impl_->wv) {
         webview_init(impl_->wv, js.c_str());
     }
+}
+
+// ── Pinhole Native Overlay ───────────────────────────────────────────────────
+
+std::shared_ptr<Pinhole> Window::create_pinhole(const std::string& id,
+                                                 const PinholeOptions& opts)
+{
+    auto pin = std::shared_ptr<Pinhole>(new Pinhole());
+#ifdef __linux__
+    // Build the JS eval function up front so the canvas fallback path (4g.5)
+    // is wired immediately during platform_init() rather than via a separate
+    // post-construction call.
+    webview_t wv = impl_->wv;
+    auto eval_fn = [wv](const std::string& js) {
+        if (wv) webview_eval(wv, js.c_str());
+    };
+    pin->platform_init(id, opts, impl_->overlay, std::move(eval_fn));
+    impl_->pinholes.emplace(id, pin);
+    // Wire set_z_index() → Window reorder so z-order changes propagate.
+    {
+        Impl* impl_ptr = impl_.get();
+        pin->set_reorder_callback([impl_ptr]() { impl_ptr->reorder_pinholes_by_z(); });
+    }
+    // Inject the JS tracking bootstrap once per window
+    if (!impl_->pinhole_js_injected) {
+        impl_->pinhole_js_injected = true;
+        const std::string& js = Pinhole::tracking_js();
+        if (!js.empty() && impl_->wv) {
+            webview_init(impl_->wv, js.c_str());
+        }
+    }
+#else
+    pin->platform_init(id, opts, nullptr, {});
+#endif
+    return pin;
+}
+
+std::shared_ptr<Pinhole> Window::find_pinhole(const std::string& id) const {
+#ifdef __linux__
+    auto it = impl_->pinholes.find(id);
+    if (it != impl_->pinholes.end()) return it->second;
+#endif
+    return nullptr;
 }
 
 } // namespace anyar

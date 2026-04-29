@@ -33,6 +33,11 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
+html.anyar-pinhole,
+body.anyar-pinhole {
+  background: transparent !important;
+}
+
 /* Scrollbar */
 ::-webkit-scrollbar { width: 6px; }
 ::-webkit-scrollbar-track { background: var(--bg); }

@@ -141,7 +141,9 @@ The binary is at `build/examples/video-player/video_player`.
 
 ```bash
 cd build/examples/video-player
-./video_player
+./video_player                # default: native pinhole overlay (Phase 4g)
+./video_player --mode=pinhole # explicit
+./video_player --mode=webgl   # legacy SharedBuffer + WebGL canvas path
 ```
 
 > **Note (Snap VS Code users):** If running from a VS Code terminal installed via Snap, use the `run.sh` wrapper to clean GTK environment variables:
@@ -149,6 +151,15 @@ cd build/examples/video-player
 > cd build/examples/video-player
 > ../../../run.sh ./video_player
 > ```
+
+### Render modes
+
+| Mode | Path | Notes |
+|---|---|---|
+| `pinhole` (default) | FFmpeg decode → `SharedBuffer` → C++ `Pinhole::on_render` → native `GtkGLArea` | No JS in the hot path; sub-millisecond latency. Falls back to canvas-2D if GL unavailable (logged warning). |
+| `webgl` | FFmpeg decode → `SharedBufferPool` → `buffer:ready` event → JS `fetchBuffer` → WebGL `texImage2D` | Same JS-driven pipeline as the original example. Use this if the GL overlay is unsupported on your target. |
+
+The mode is selected at startup; switching requires relaunching the binary. See [docs/pinhole-rendering.md](../../docs/pinhole-rendering.md) for the full Pinhole API and architecture.
 
 ## Usage
 

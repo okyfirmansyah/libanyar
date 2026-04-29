@@ -25,6 +25,7 @@
 
 #include <boost/fiber/mutex.hpp>
 #include <boost/fiber/condition_variable.hpp>
+#include <mutex>
 #include <string>
 #include <memory>
 
@@ -33,7 +34,7 @@ struct AVFormatContext;
 struct AVCodecContext;
 struct SwsContext;
 
-namespace anyar { class EventBus; }
+namespace anyar { class EventBus; class Pinhole; }
 
 namespace videoplayer {
 
@@ -62,6 +63,11 @@ struct WaveformData {
     std::vector<float>   peaks;        // min/max interleaved: [min0, max0, min1, max1, …]
 };
 
+/// Renderer selected at startup.  WebGL routes raw frames to the JS canvas
+/// via the SharedBufferPool + buffer:ready event; Pinhole routes them to the
+/// native GtkGLArea overlay (no JS in the hot path).
+enum class RenderMode { WebGL, Pinhole };
+
 /// Shared state for a frame streaming WebSocket session
 struct FrameStreamState {
     boost::fibers::mutex mtx;
@@ -73,9 +79,20 @@ struct FrameStreamState {
 
 class VideoPlugin : public anyar::IAnyarPlugin {
 public:
+    /// @param mode  Default render mode reported via `video:get-mode`.
+    ///              Pinhole mode also requires set_pinhole() to be called
+    ///              before the first `video:play` command.
+    explicit VideoPlugin(RenderMode mode = RenderMode::Pinhole) : mode_(mode) {}
+
     std::string name() const override { return "video"; }
     void initialize(anyar::PluginContext& ctx) override;
     void shutdown() override;
+
+    /// Bind a Pinhole to drive in pinhole mode.  Must be called from main
+    /// before `video:play`; the plugin installs an `on_render` callback
+    /// that draws whatever frame the decode loop most recently published.
+    /// No-op in WebGL mode.
+    void set_pinhole(std::shared_ptr<anyar::Pinhole> pin);
 
 private:
     // Currently opened file state (single-file model for simplicity)
@@ -107,6 +124,21 @@ private:
     // SharedBufferPool for zero-copy frame delivery
     std::unique_ptr<anyar::SharedBufferPool> frame_pool_;
 
+    // ── Pinhole-mode state ───────────────────────────────────────────────
+    RenderMode                       mode_       = RenderMode::Pinhole;
+    std::shared_ptr<anyar::Pinhole>  pinhole_;
+
+    // Latest frame published to the pinhole.  Owned by `frame_pool_`;
+    // we hold the WRITING-side reference until the next frame swaps in,
+    // at which point the previous slot is recycled (release_write+release_read).
+    // Guarded by `latest_mu_` (std::mutex — locked from both fiber thread
+    // and GTK main thread, neither of which may use boost::fibers::mutex).
+    std::mutex                       latest_mu_;
+    anyar::SharedBuffer*             latest_buf_ = nullptr;
+    int                              latest_w_   = 0;
+    int                              latest_h_   = 0;
+    std::string                      latest_fmt_;  // "yuv420" / "nv12" / "rgba" / ...
+
     // ── Internal helpers ────────────────────────────────────────────────────
     void open_file(const std::string& path);
     void close_file();
@@ -115,6 +147,9 @@ private:
     void register_stream_route();
     void stop_streaming();
     void run_decode_loop();
+    /// Drop the currently-held latest frame back into the pool (FREE).
+    /// Caller must NOT hold latest_mu_.
+    void release_latest_frame();
 };
 
 } // namespace videoplayer

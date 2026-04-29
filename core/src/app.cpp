@@ -1,5 +1,6 @@
 #include <anyar/app.h>
 #include <anyar/main_thread.h>
+#include <anyar/pinhole.h>
 #include <anyar/shared_buffer.h>
 
 #include <anyar/plugins/fs_plugin.h>
@@ -155,6 +156,10 @@ void App::on_ready(ReadyCallback cb) {
     on_ready_ = std::move(cb);
 }
 
+void App::on_window_ready(WindowReadyCallback cb) {
+    on_window_ready_ = std::move(cb);
+}
+
 // ── Custom HTTP Routes ──────────────────────────────────────────────────────
 
 void App::http_get(const std::string& path, RouteHandler handler) {
@@ -247,6 +252,9 @@ void App::start_server() {
 
     // ── Register shared buffer commands ──────────────────────────────────
     register_buffer_commands();
+
+    // ── Register pinhole IPC commands ────────────────────────────────────
+    register_pinhole_commands();
 
     // ── Auto-register built-in plugins ─────────────────────────────────────
     std::vector<std::shared_ptr<IAnyarPlugin>> builtins;
@@ -505,6 +513,12 @@ int App::run() {
             {"label", "main"},
             {"title", main_window_opts_.title}
         });
+
+        // User hook: window exists, GTK loop not yet running.
+        // Correct place for create_pinhole() and similar setup.
+        if (on_window_ready_) {
+            on_window_ready_(*main_win);
+        }
 
         // Block on the main window's event loop.
         // This also processes events for all child windows.
@@ -1124,6 +1138,75 @@ void App::setup_native_ipc(Window* window) {
         std::cout << "[LibAnyar] Native IPC bound for window '"
                   << label << "'" << std::endl;
     }
+}
+
+// ── Pinhole IPC Commands ─────────────────────────────────────────────────────
+
+void App::register_pinhole_commands() {
+    // pinhole:update_rect — JS tracking protocol sends updated CSS-pixel rect
+    // Args: { id, window_label, x, y, width, height, dpr }
+    commands_.add("pinhole:update_rect", [this](const json& args) -> json {
+        std::string win_label = args.value("window_label", std::string("main"));
+        std::string id  = args.at("id").get<std::string>();
+        int x  = static_cast<int>(args.value("x",      0.0));
+        int y  = static_cast<int>(args.value("y",      0.0));
+        int w  = static_cast<int>(args.value("width",  0.0));
+        int h  = static_cast<int>(args.value("height", 0.0));
+
+        Window* win = window_mgr_.get(win_label);
+        if (!win) return {{"ok", false}, {"error", "window not found"}};
+        auto pin = win->find_pinhole(id);
+        if (!pin) return {{"ok", false}, {"error", "pinhole not found"}};
+        // set_rect dispatches gtk_widget_queue_resize to main thread internally
+        pin->set_rect(x, y, w, h);
+        return {{"ok", true}};
+    });
+
+    // pinhole:set_visible — JS scroll-hide protocol
+    // Args: { id, window_label, visible }
+    commands_.add("pinhole:set_visible", [this](const json& args) -> json {
+        std::string win_label = args.value("window_label", std::string("main"));
+        std::string id  = args.at("id").get<std::string>();
+        bool visible    = args.value("visible", true);
+
+        Window* win = window_mgr_.get(win_label);
+        if (!win) return {{"ok", false}, {"error", "window not found"}};
+        auto pin = win->find_pinhole(id);
+        if (!pin) return {{"ok", false}, {"error", "pinhole not found"}};
+        pin->set_visible(visible);
+        return {{"ok", true}};
+    });
+
+    // pinhole:get_metrics — query current pinhole state from JS
+    // Args: { id, window_label }
+    commands_.add("pinhole:get_metrics", [this](const json& args) -> json {
+        std::string win_label = args.value("window_label", std::string("main"));
+        std::string id  = args.at("id").get<std::string>();
+
+        Window* win = window_mgr_.get(win_label);
+        if (!win) return {{"ok", false}, {"error", "window not found"}};
+        auto pin = win->find_pinhole(id);
+        if (!pin) return {{"ok", false}, {"error", "pinhole not found"}};
+        return {
+            {"ok",        true},
+            {"id",        pin->id()},
+            {"is_native", pin->is_native()},
+        };
+    });
+
+    // pinhole:dom_detached — JS tracking reports placeholder element removed from DOM.
+    // Args: { id, window_label }
+    commands_.add("pinhole:dom_detached", [this](const json& args) -> json {
+        std::string win_label = args.value("window_label", std::string("main"));
+        std::string id  = args.at("id").get<std::string>();
+
+        Window* win = window_mgr_.get(win_label);
+        if (!win) return {{"ok", false}, {"error", "window not found"}};
+        auto pin = win->find_pinhole(id);
+        if (!pin) return {{"ok", false}, {"error", "pinhole not found"}};
+        pin->notify_dom_detached();
+        return {{"ok", true}};
+    });
 }
 
 } // namespace anyar

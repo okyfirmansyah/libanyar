@@ -14,6 +14,8 @@
 
 #include <anyar/types.h>
 #include <anyar/event_bus.h>
+#include <anyar/pinhole.h>
+#include <anyar/window.h>
 
 #include <libasyik/service.hpp>
 #include <libasyik/http.hpp>
@@ -29,6 +31,10 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+
+#ifdef __linux__
+#include <epoxy/gl.h>
+#endif
 
 // ── FFmpeg C headers ────────────────────────────────────────────────────────
 extern "C" {
@@ -50,6 +56,19 @@ namespace videoplayer {
 static double ts_to_sec(int64_t ts, AVRational tb) {
     if (ts == AV_NOPTS_VALUE) return 0.0;
     return static_cast<double>(ts) * av_q2d(tb);
+}
+
+/// Map a webgl_format string (used by the existing decode loop) to the
+/// public Pinhole pixel_format enum.  Falls back to rgba on unknown input
+/// so we never throw from the GTK main-thread render callback.
+static anyar::pixel_format pixel_format_from_str(const std::string& s) {
+    if (s == "yuv420")    return anyar::pixel_format::yuv420;
+    if (s == "nv12")      return anyar::pixel_format::nv12;
+    if (s == "nv21")      return anyar::pixel_format::nv21;
+    if (s == "rgb")       return anyar::pixel_format::rgb;
+    if (s == "grayscale") return anyar::pixel_format::grayscale;
+    if (s == "bgra")      return anyar::pixel_format::bgra;
+    return anyar::pixel_format::rgba;
 }
 
 // ── Open / Close ────────────────────────────────────────────────────────────
@@ -126,6 +145,80 @@ void VideoPlugin::close_file() {
 void VideoPlugin::stop_streaming() {
     playing_   = false;
     streaming_ = false;
+    release_latest_frame();
+}
+
+// Recycle the pinhole "latest frame" slot back to the pool.  Called from
+// stop_streaming() and from set_pinhole() if the prior pinhole is being
+// replaced.  Safe to call multiple times.
+void VideoPlugin::release_latest_frame() {
+    anyar::SharedBuffer* prev = nullptr;
+    {
+        std::lock_guard<std::mutex> lk(latest_mu_);
+        prev        = latest_buf_;
+        latest_buf_ = nullptr;
+    }
+    if (prev && frame_pool_) {
+        frame_pool_->release_write(*prev, "{}");
+        frame_pool_->release_read(prev->name());
+    }
+}
+
+// ── set_pinhole ─────────────────────────────────────────────────────────────
+//
+// Wires the on_render callback that draws the most-recently published frame
+// onto the native overlay surface.  Runs on the GTK main thread (NOT a fiber).
+void VideoPlugin::set_pinhole(std::shared_ptr<anyar::Pinhole> pin) {
+    pinhole_ = std::move(pin);
+    if (!pinhole_) return;
+
+    pinhole_->on_render([this](anyar::PinholeRenderContext& ctx) {
+        anyar::SharedBuffer* buf = nullptr;
+        int w = 0, h = 0;
+        std::string fmt;
+        {
+            std::lock_guard<std::mutex> lk(latest_mu_);
+            buf = latest_buf_;
+            w   = latest_w_;
+            h   = latest_h_;
+            fmt = latest_fmt_;
+        }
+        if (!buf || w <= 0 || h <= 0) {
+            ctx.clear(0.0f, 0.0f, 0.0f, 1.0f);
+            return;
+        }
+
+        // Fill the surface with opaque black so letterbox/pillarbox bars
+        // are black rather than transparent (which would show the desktop).
+        ctx.clear(0.0f, 0.0f, 0.0f, 1.0f);
+
+        // Compute a letterbox viewport that preserves the video's aspect ratio.
+        auto [vw, vh] = ctx.size_px();
+        const float video_ar  = static_cast<float>(w) / static_cast<float>(h);
+        const float canvas_ar = static_cast<float>(vw) / static_cast<float>(vh);
+        int lx, ly, lw, lh;
+        if (video_ar >= canvas_ar) {
+            // Wider than canvas → pillarbox (black top/bottom)
+            lw = vw;
+            lh = static_cast<int>(vw / video_ar + 0.5f);
+            lx = 0;
+            ly = (vh - lh) / 2;
+        } else {
+            // Taller than canvas → letterbox (black left/right)
+            lh = vh;
+            lw = static_cast<int>(vh * video_ar + 0.5f);
+            lx = (vw - lw) / 2;
+            ly = 0;
+        }
+#ifdef __linux__
+        glViewport(lx, ly, lw, lh);
+#endif
+        ctx.draw_image(reinterpret_cast<const uint8_t*>(buf->data()),
+                       buf->size(), w, h, pixel_format_from_str(fmt));
+#ifdef __linux__
+        glViewport(0, 0, vw, vh);  // restore for any subsequent draws
+#endif
+    });
 }
 
 // ── Bitrate analysis ────────────────────────────────────────────────────────
@@ -622,8 +715,42 @@ void VideoPlugin::run_decode_loop() {
         return pts;
     };
 
-    // Helper: emit buffer:ready for a completed frame
+    // Helper: publish a completed frame.
+    //
+    // WebGL mode: transition WRITING→READY and emit `buffer:ready`; the JS
+    // frontend will fetch + render + call `video:pool-release` to recycle.
+    //
+    // Pinhole mode: keep the slot in WRITING state (we own it), swap it
+    // into `latest_buf_` under `latest_mu_`, recycle the previous holder,
+    // and request a redraw.  No JS round-trip; on_render reads the bytes
+    // directly via SharedBuffer::data().
     auto emit_frame = [&](anyar::SharedBuffer& buf, double pts) {
+        if (mode_ == RenderMode::Pinhole) {
+            anyar::SharedBuffer* prev = nullptr;
+            {
+                std::lock_guard<std::mutex> lk(latest_mu_);
+                prev        = latest_buf_;
+                latest_buf_ = &buf;
+                latest_w_   = static_cast<int>(w);
+                latest_h_   = static_cast<int>(h);
+                latest_fmt_ = webgl_format;
+            }
+            if (prev && frame_pool_) {
+                frame_pool_->release_write(*prev, "{}");
+                frame_pool_->release_read(prev->name());
+            }
+            if (pinhole_) pinhole_->request_redraw();
+            // Lightweight progress event so the timeline still advances.
+            if (events_) {
+                events_->emit("video:frame-pts", {
+                    {"pts", pts},
+                    {"frame", fnum},
+                });
+            }
+            return;
+        }
+
+        // WebGL mode (legacy path)
         if (!events_) return;
         frame_pool_->release_write(buf, "{}");
         events_->emit("buffer:ready", {
@@ -668,8 +795,13 @@ void VideoPlugin::run_decode_loop() {
     }
 
     // \u2500\u2500 Create SharedBufferPool \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+    // ── Create SharedBufferPool ──────────────────────────────────────────
+    // Pinhole mode permanently holds one slot in `latest_buf_` (WRITING)
+    // until the next emit_frame replaces it, so it needs one extra slot
+    // beyond the working capacity to avoid deadlocking acquire_write().
+    const int pool_slots = (mode_ == RenderMode::Pinhole) ? 6 : 5;
     frame_pool_ = std::make_unique<anyar::SharedBufferPool>(
-        "video-frames", frame_bytes, 5);
+        "video-frames", frame_bytes, pool_slots);
 
     // \u2500\u2500 Send ready event + poster frame \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
     if (events_) {
@@ -732,10 +864,13 @@ void VideoPlugin::run_decode_loop() {
                     wall_play_start = wall_clock::now();
                 }
 
-                // Release any held pool buffers
+                // Release any held pool buffers (queued via acquire_write
+                // but never emitted — must transition WRITING→READY→FREE,
+                // not just READING→FREE, otherwise slots leak).
                 for (int i = 0; i < pool_count; ++i) {
                     int idx = (pool_head + i) % POOL_CAP;
                     if (pool_bufs[idx]) {
+                        frame_pool_->release_write(*pool_bufs[idx], "{}");
                         frame_pool_->release_read(pool_bufs[idx]->name());
                         pool_bufs[idx] = nullptr;
                     }
@@ -807,10 +942,12 @@ void VideoPlugin::run_decode_loop() {
                         int64_t ts = static_cast<int64_t>(atime * AV_TIME_BASE);
                         av_seek_frame(fmt, -1, ts, AVSEEK_FLAG_BACKWARD);
                         avcodec_flush_buffers(dec_ctx);
-                        // Release held buffers
+                        // Release held buffers (queued via acquire_write
+                        // but never emitted — must transition WRITING→FREE).
                         for (int i = 0; i < pool_count; ++i) {
                             int idx2 = (pool_head + i) % POOL_CAP;
                             if (pool_bufs[idx2]) {
+                                frame_pool_->release_write(*pool_bufs[idx2], "{}");
                                 frame_pool_->release_read(pool_bufs[idx2]->name());
                                 pool_bufs[idx2] = nullptr;
                             }
@@ -1137,15 +1274,24 @@ void VideoPlugin::initialize(anyar::PluginContext& ctx) {
         return {{"closed", true}};
     });
 
+    // ── video:get-mode — frontend asks which renderer to use ───────────
+    cmds.add("video:get-mode", [this](const json& /*args*/) -> json {
+        return {
+            {"mode", mode_ == RenderMode::Pinhole ? "pinhole" : "webgl"}
+        };
+    });
+
     std::cout << "[VideoPlugin] Initialized — video:open/close/bitrate/waveform/play/pause/seek/sync"
               << " + SharedBuffer pool + /video/stream HTTP"
+              << " + render mode=" << (mode_ == RenderMode::Pinhole ? "pinhole" : "webgl")
               << std::endl;
 }
 
 void VideoPlugin::shutdown() {
-    
+
     std::lock_guard<boost::fibers::mutex> lock(mtx_);
     close_file();
+    pinhole_.reset();
     std::cout << "[VideoPlugin] Shutdown" << std::endl;
 }
 

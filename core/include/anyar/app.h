@@ -122,6 +122,16 @@ public:
     using ReadyCallback = std::function<void()>;
     void on_ready(ReadyCallback cb);
 
+    /// Register a callback that is invoked on the GTK main thread after the
+    /// main window has been created and is ready to accept pinhole/IPC
+    /// operations, but BEFORE the GTK event loop blocks.
+    ///
+    /// This is the correct place to call `window.create_pinhole()`, install
+    /// render callbacks, etc.  The callback receives a reference to the main
+    /// window.  It must NOT start a nested GTK event loop.
+    using WindowReadyCallback = std::function<void(Window&)>;
+    void on_window_ready(WindowReadyCallback cb);
+
     /// Register a callback that is invoked after the HTTP server is created
     /// but before serve_static is set up. Use this to add custom HTTP routes
     /// that should take priority over static file serving.
@@ -134,6 +144,7 @@ private:
     void setup_native_ipc(Window* window);
     void register_window_commands();
     void register_buffer_commands();
+    void register_pinhole_commands();
     int find_available_port();
 
     AppConfig config_;
@@ -167,6 +178,7 @@ private:
 
     /// Optional on_ready callback (fires after server + plugins init)
     ReadyCallback on_ready_;
+    WindowReadyCallback on_window_ready_;
 
     /// Deferred HTTP routes: {method, path, handler} registered before run()
     struct DeferredRoute {

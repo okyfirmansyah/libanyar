@@ -44,6 +44,11 @@ export { buffer };
 import * as canvas from './modules/canvas';
 export { canvas };
 
+// ── Pinhole ───────────────────────────────────────────────────────────────────
+import * as pinhole from './modules/pinhole';
+export { pinhole };
+export type { PinholeRect, PinholeMetrics } from './modules/pinhole';
+
 export type {
   DialogFilter,
   OpenDialogOptions,
@@ -78,6 +83,7 @@ import {
 import * as _dialog from './modules/dialog';
 import * as _buffer from './modules/buffer';
 import * as _canvas from './modules/canvas';
+import * as _pinhole from './modules/pinhole';
 
 if (typeof window !== 'undefined') {
   (window as any).__anyar__ = {
@@ -99,5 +105,6 @@ if (typeof window !== 'undefined') {
     dialog: _dialog,
     buffer: _buffer,
     canvas: _canvas,
+    pinhole: _pinhole,
   };
 }

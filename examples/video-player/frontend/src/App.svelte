@@ -15,6 +15,15 @@
   let loading = $state(false);
   let errorMsg = $state('');
   let gpuRenderer = $state('');
+  let renderMode = $state('webgl');  // overwritten by video:get-mode at boot
+
+  // Ask the C++ plugin which renderer it was launched with.
+  // Done once on app boot — switching modes requires restarting the binary.
+  invoke('video:get-mode', {})
+    .then((r) => {
+      if (r && r.mode) renderMode = r.mode;
+    })
+    .catch(() => { /* keep default */ });
 
   // Detect GPU renderer used by WebGL (runs once)
   try {
@@ -38,7 +47,12 @@
   let panelVisible = $state(true);   // show/hide bottom panel
   let panelHideTimer = null;
   let contentEl = $state(null);      // ref for the content area
-  let bottomPanelEl = $state(null);  // ref for measuring panel height
+
+  // True once a video is loaded in pinhole mode — the page background goes
+  // transparent so the native GL surface underneath the webview shows through.
+  // Before any video is opened we keep an opaque background to hide the
+  // GtkWindow's native (white-ish) backdrop.
+  let pinholeActive = $derived(renderMode === 'pinhole' && !!videoUrl);
 
   function showPanel() {
     panelVisible = true;
@@ -83,6 +97,15 @@
     } else {
       scheduleHidePanel();
     }
+  });
+
+  $effect(() => {
+    document.documentElement.classList.toggle('anyar-pinhole', pinholeActive);
+    document.body.classList.toggle('anyar-pinhole', pinholeActive);
+    return () => {
+      document.documentElement.classList.remove('anyar-pinhole');
+      document.body.classList.remove('anyar-pinhole');
+    };
   });
 
   async function openFile() {
@@ -141,9 +164,9 @@
   }
 </script>
 
-<main class="h-screen flex flex-col overflow-hidden" style="background: var(--bg); color: var(--text);">
+<main class="h-screen flex flex-col overflow-hidden" style="background: {pinholeActive ? 'transparent' : 'var(--bg)'}; color: var(--text);">
   <!-- Header -->
-  <header class="flex items-center gap-4 px-6 py-3 shrink-0" style="border-bottom: 1px solid var(--border);">
+  <header class="flex items-center gap-4 px-6 py-3 shrink-0" style="border-bottom: 1px solid var(--border); background: {pinholeActive ? 'rgba(11, 19, 24, 0.76)' : 'transparent'};">
     <div class="flex items-center gap-2.5 pl-4">
       <h1 class="text-base font-semibold tracking-tight whitespace-nowrap" style="color: var(--text);">
         Video Player
@@ -198,6 +221,7 @@
         <VideoPlayer
           audioSrc={videoUrl}
           {videoInfo}
+          {renderMode}
           bind:currentTime
           bind:duration
           bind:playing
@@ -235,7 +259,6 @@
       <!-- Bottom panel: absolutely positioned overlay, slides up/down -->
       <!-- svelte-ignore a11y_no_static_element_interactions -->
       <div
-        bind:this={bottomPanelEl}
         class="absolute left-0 right-0 flex flex-col gap-1 px-2 pb-1 z-20"
         style="bottom: 2.5rem; background: linear-gradient(transparent, var(--bg) 24px); transition: transform 0.35s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.35s ease; transform: translateY({panelVisible ? '0' : '100%'}); opacity: {panelVisible ? '1' : '0'}; pointer-events: {panelVisible ? 'auto' : 'none'};"
         onmouseenter={showPanel}

@@ -96,6 +96,16 @@
         "types": "./dist/cjs/modules/canvas.d.ts",
         "default": "./dist/cjs/modules/canvas.js"
       }
+    },
+    "./pinhole": {
+      "import": {
+        "types": "./dist/esm/modules/pinhole.d.ts",
+        "default": "./dist/esm/modules/pinhole.js"
+      },
+      "require": {
+        "types": "./dist/cjs/modules/pinhole.d.ts",
+        "default": "./dist/cjs/modules/pinhole.js"
+      }
     }
   },
   "files": [

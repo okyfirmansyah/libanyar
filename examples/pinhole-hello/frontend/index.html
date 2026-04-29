@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Pinhole Hello</title>
+  <style>
+    :root {
+      --pin-x: 200px;
+      --pin-y: 150px;
+      --pin-w: 400px;
+      --pin-h: 300px;
+      --pin-right: calc(var(--pin-x) + var(--pin-w));
+      --pin-bottom: calc(var(--pin-y) + var(--pin-h));
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    html, body {
+      width: 100%;
+      height: 100%;
+      background: transparent;
+    }
+
+    body {
+      background: transparent;
+      color: #e0e0e0;
+      font-family: system-ui, sans-serif;
+      position: relative;
+      overflow: hidden;
+      background:
+        radial-gradient(circle at 50% 0%, rgba(160, 196, 255, 0.16), transparent 38%)
+          top / 100% var(--pin-y) no-repeat,
+        linear-gradient(180deg, rgba(18, 27, 46, 0.96), rgba(10, 15, 27, 0.96))
+          top / 100% var(--pin-y) no-repeat,
+        linear-gradient(180deg, rgba(12, 18, 31, 0.92), rgba(8, 12, 22, 0.92))
+          0 var(--pin-y) / var(--pin-x) var(--pin-h) no-repeat,
+        linear-gradient(180deg, rgba(12, 18, 31, 0.92), rgba(8, 12, 22, 0.92))
+          var(--pin-right) var(--pin-y) / calc(100% - var(--pin-right)) var(--pin-h) no-repeat,
+        linear-gradient(180deg, rgba(18, 27, 46, 0.96), rgba(10, 15, 27, 0.96))
+          0 var(--pin-bottom) / 100% calc(100% - var(--pin-bottom)) no-repeat;
+    }
+
+    .hero {
+      position: absolute;
+      left: 24px;
+      top: 24px;
+      width: min(360px, calc(100% - 48px));
+      padding: 18px 20px;
+      border: 1px solid rgba(160, 196, 255, 0.16);
+      border-radius: 18px;
+      background: linear-gradient(180deg, rgba(17, 25, 42, 0.92), rgba(9, 13, 23, 0.88));
+      box-shadow: 0 18px 40px rgba(0, 0, 0, 0.32);
+    }
+
+    h1 { font-size: 1.4rem; margin-bottom: 8px; color: #a0c4ff; }
+    p  { font-size: 0.85rem; color: #92a0bb; line-height: 1.5; }
+
+     /* Placeholder div — marks where the native surface will appear.
+       Must match the set_rect() call in main.cpp: x=200 y=150 w=400 h=300.
+       On Linux the GtkGLArea is composited underneath this transparent area. */
+    #pinhole-placeholder {
+      position: absolute;
+      left: var(--pin-x);
+      top: var(--pin-y);
+      width: var(--pin-w);
+      height: var(--pin-h);
+      /* Visible dashed border so you can see the placeholder in dev mode */
+      outline: 2px dashed rgba(160, 196, 255, 0.4);
+      border-radius: 0;      /* border-radius not supported by Phase 1 overlay */
+      pointer-events: none;
+      background: transparent;
+      box-shadow:
+        0 0 0 1px rgba(160, 196, 255, 0.12),
+        0 24px 60px rgba(0, 0, 0, 0.28);
+    }
+
+    #info {
+      position: absolute;
+      bottom: 16px;
+      left: 50%;
+      transform: translateX(-50%);
+      padding: 8px 12px;
+      border: 1px solid rgba(160, 196, 255, 0.14);
+      border-radius: 999px;
+      background: rgba(9, 13, 23, 0.86);
+      font-size: 0.75rem;
+      color: #7f8ba4;
+      white-space: nowrap;
+    }
+  </style>
+</head>
+<body>
+  <section class="hero">
+    <h1>Pinhole Hello</h1>
+    <p>Native GL renders below the webview now. The page chrome stays in HTML, and the dashed rectangle remains transparent so the animation shows through.</p>
+  </section>
+
+  <!-- Pinhole placeholder div — data attribute matches the C++ id -->
+  <div id="pinhole-placeholder" data-anyar-pinhole="animated-rect"></div>
+
+  <span id="info">Querying pinhole info…</span>
+
+  <script type="module">
+    // Query C++ for pinhole metadata
+    async function queryInfo() {
+      try {
+        const info = await window.__anyar?.invoke('pinhole:info', {});
+        if (info) {
+          document.getElementById('info').textContent =
+            `Pinhole "${info.id}" — native=${info.is_native}`;
+        }
+      } catch {
+        document.getElementById('info').textContent = 'IPC not ready';
+      }
+    }
+
+    // Give the IPC bridge a moment to initialise
+    setTimeout(queryInfo, 500);
+  </script>
+</body>
+</html>

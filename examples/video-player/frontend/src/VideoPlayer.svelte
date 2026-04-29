@@ -29,6 +29,10 @@
     seekTarget  = null,
     videoInfo   = null,
     audioSrc    = '',
+    /** 'pinhole' (native overlay; C++ draws into a GtkGLArea layered
+        BELOW a transparent webview) or 'webgl' (legacy: SharedBuffer +
+        buffer:ready event + WebGL canvas). */
+    renderMode  = 'webgl',
     ontoggleplay = null,
   } = $props();
 
@@ -59,8 +63,35 @@
   // buffer:ready event so we know the actual pixel format (yuv420, rgba,
   // etc.).  If the format or resolution changes mid-stream the renderer
   // is destroyed and recreated automatically.
+  //
+  // In pinhole mode this entire setup is skipped — C++ draws directly to
+  // a native GtkGLArea positioned over the [data-anyar-pinhole] placeholder
+  // div, and only the timeline cursor (`video:frame-pts`) needs JS handling.
   $effect(() => {
-    if (!videoInfo || !canvasEl) return;
+    if (!videoInfo) return;
+
+    // ── Pinhole mode: lightweight branch ────────────────────────────────
+    if (renderMode === 'pinhole') {
+      const unlistenPts = listen('video:frame-pts', (event) => {
+        if (!playing && typeof event?.pts === 'number') {
+          currentTime = event.pts;
+        }
+      });
+      const unlistenEndedP = listen('video:ended', () => {
+        playing = false;
+        if (audioEl) audioEl.pause();
+        stopPlayLoop();
+      });
+      return () => {
+        stopPlayLoop();
+        if (seekTimer) { clearTimeout(seekTimer); seekTimer = null; }
+        unlistenPts();
+        unlistenEndedP();
+      };
+    }
+
+    // ── WebGL mode (legacy) ─────────────────────────────────────────────
+    if (!canvasEl) return;
 
     /** @type {ReturnType<typeof createFrameRenderer> | null} */
     let r = null;
@@ -244,12 +275,24 @@
   }
 </script>
 
-<div class="relative w-full h-full overflow-hidden" style="background: #000;">
-  <canvas
-    bind:this={canvasEl}
-    class="absolute inset-0 w-full h-full"
-    style="object-fit: contain; background: #000;"
-  ></canvas>
+<div class="relative w-full h-full overflow-hidden" style="background: {renderMode === 'pinhole' ? 'transparent' : '#000'};">
+  {#if renderMode === 'pinhole'}
+    <!-- Native overlay placeholder. The Pinhole tracking JS positions a
+         GtkGLArea exactly over this div. The GL widget is drawn UNDER a
+         transparent webview, so HTML composites freely on top of the GL
+         surface. The placeholder fills the full container at all times. -->
+    <div
+      data-anyar-pinhole="video"
+      class="absolute inset-0"
+      style="background: transparent;"
+    ></div>
+  {:else}
+    <canvas
+      bind:this={canvasEl}
+      class="absolute inset-0 w-full h-full"
+      style="object-fit: contain; background: #000;"
+    ></canvas>
+  {/if}
 
   <!-- Hidden audio element — plays audio from the HTTP stream endpoint (only when audio stream exists) -->
   {#if hasAudio}

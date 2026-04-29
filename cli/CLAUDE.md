@@ -1,0 +1,1 @@
+#import .copilot/instructions.md
