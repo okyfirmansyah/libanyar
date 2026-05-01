@@ -58,9 +58,10 @@ After Pinhole init restructure:
 ```
 
 **Shutdown ordering** (extends ADR-007):
+- Plugin-owned background work must be stopped from `shutdown()` before `server_->close()` / `service_->stop()`.
 - Step 5b added: destroy all `Pinhole` objects belonging to a window BEFORE calling `webview_destroy()`.
 - GL context cleanup dispatched via `run_on_main_thread()`.
-- Render callback fibers must be cancelled before service stop.
+- Any back-pressure wait used by plugin-owned producers must have a close/cancel path so shutdown cannot strand a fiber.
 
 **Platform dependencies added (Linux)**:
 - `libepoxy` (already a transitive dep of WebKitGTK; adds `pkg_check_modules(EPOXY REQUIRED epoxy)`)
@@ -89,31 +90,34 @@ After Pinhole init restructure:
 
 5. **Unbounded GTK drain loops under xvfb**: `while (g_main_context_pending())` loops in Window destructor and `App::run()` ran indefinitely because WebKitGTK continuously generates events during web process teardown under xvfb. **Fix**: Cap all drain loops to 200 iterations with `for (int i = 0; i < 200 && ...; ++i)`.
 
-**Correct Shutdown Sequence** (in `App::run()` after `main_win->run()` returns):
+**Current Shutdown Sequence** (in `App::run()` after `main_win->run()` returns):
 ```
 1. Drain GTK idle callbacks (bounded, 200 iterations max)
    → fulfils run_on_main_thread() promises so blocked fibers can resume
-2. server_->close()
+2. Plugin shutdown
+   → stop plugin-owned background work while the service thread is still alive
+3. server_->close()
    → cancels accept-loop fiber
-3. service_->stop() + service_thread_.join()
+4. service_->stop() + service_thread_.join()
    → drains 1s for active fibers, then returns
-4. Remove event sinks
+5. Remove event sinks
    → prevents eval on dying webviews
-5. window_mgr_.close_all()
+6. window_mgr_.close_all()
    → for each window:
-      5a. set destroyed=true, bounded GTK drain
-      5b. pinholes.clear() — destroy all Pinhole objects (GL context still live)
+      6a. set destroyed=true, bounded GTK drain
+      6b. pinholes.clear() — destroy all Pinhole objects (GL context still live)
           • GL objects freed via GtkGLArea unrealize → destroy_gl_objects()
           • Non-main-thread destruction dispatched via g_idle_add (safe because
-            step 5b runs before webview_destroy keeps the main loop alive)
-      5c. webview_destroy()
-6. Plugin shutdown
+            step 6b runs before webview_destroy keeps the main loop alive)
+      6c. webview_destroy()
 ```
 
 **Key Invariants** (must be maintained in future changes):
 - `destroyed` must be set to `true` BEFORE calling `webview_destroy()`
 - Never use unbounded `while(g_main_context_pending())` loops — always cap iterations
+- Plugin-owned long-lived fibers must stop in `shutdown()` before `service_->stop()`
 - `server_->close()` must precede `service_->stop()`
+- Any back-pressure or wait loop used by plugin background work needs a close/cancel path
 - `webview_terminate()` is thread-safe — never wrap it in `post_to_main_thread()` from a fiber (deadlock risk)
 - Any `GBytes` wrapping shared memory must capture the `shared_ptr` via destroy callback, not hold a stack-local ref
 - `pinholes.clear()` (step 5b) MUST precede `webview_destroy()` (step 5c) — GL context cleanup requires the GTK main loop to still be running

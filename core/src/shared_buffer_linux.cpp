@@ -172,6 +172,9 @@ SharedBuffer& SharedBufferPool::acquire_write() {
     // Try to find a FREE slot, starting from write_idx_
     const size_t n = buffers_.size();
     for (int spins = 0; ; ++spins) {
+        if (closed_.load()) {
+            throw SharedBufferPoolClosed();
+        }
         for (size_t i = 0; i < n; ++i) {
             size_t idx = (write_idx_.load() + i) % n;
             Slot::State expected = Slot::FREE;
@@ -212,6 +215,10 @@ void SharedBufferPool::release_read(const std::string& buffer_name) {
             return;
         }
     }
+}
+
+void SharedBufferPool::close() {
+    closed_.store(true);
 }
 
 // ── URI Scheme Registration (Linux) ─────────────────────────────────────────

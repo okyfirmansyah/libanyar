@@ -145,6 +145,9 @@ void VideoPlugin::close_file() {
 void VideoPlugin::stop_streaming() {
     playing_   = false;
     streaming_ = false;
+    if (frame_pool_) {
+        frame_pool_->close();
+    }
     release_latest_frame();
 }
 
@@ -1077,6 +1080,9 @@ void VideoPlugin::initialize(anyar::PluginContext& ctx) {
             service_->execute([this]() {
                 try {
                     run_decode_loop();
+                } catch (const anyar::SharedBufferPoolClosed&) {
+                    // Normal shutdown path: stop_streaming() closes the pool to
+                    // unblock a decode loop waiting in acquire_write().
                 } catch (const std::exception& ex) {
                     std::cerr << "[VideoPlugin] Exception in decode loop: " << ex.what() << std::endl;
                 } catch (...) {

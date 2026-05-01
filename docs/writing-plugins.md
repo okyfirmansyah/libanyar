@@ -187,18 +187,26 @@ Built-in plugins use: `fs:`, `dialog:`, `shell:`, `clipboard:`, `db:`.
 app.use(plugin)           → plugin stored
 app.run()                 → plugin.initialize(ctx) called
   ... app running ...
-  window closed
-app.~App()                → plugin.shutdown() called
+    native window closed
+App::run() orderly shutdown → plugin.shutdown() called while the service thread is still alive
 ```
 
-The `shutdown()` method is optional — override it to clean up resources:
+For simple plugins, `shutdown()` can stay empty. For anything that owns background fibres, streams, pools, sockets, or temp resources, treat it as required:
 
 ```cpp
 void shutdown() override {
-    // Close connections, free resources
-    std::cout << "[weather] Plugin shutting down" << std::endl;
+        stop_ = true;
+        if (pool_) pool_->close();  // Optional: unblock waits / back-pressure
 }
 ```
+
+Shutdown checklist:
+- Stop long-lived `service_->execute()` loops in `shutdown()`.
+- Unblock waiting loops with a close/cancel path.
+- Do not call `service_->stop()` from plugin code or window-close handlers.
+- Verify by closing the native window while background work is active.
+
+See [Graceful Shutdown](graceful-shutdown.md).
 
 ## Accessing the HTTP Server
 

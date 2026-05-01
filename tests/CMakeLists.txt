@@ -64,6 +64,11 @@ anyar_add_test(test_shared_buffer
 # ── WebGL E2E Tests (requires display) ───────────────────────────────────────
 add_subdirectory(webgl)
 
+# ── Native window close regression (requires display) ───────────────────────
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    add_subdirectory(window_close)
+endif()
+
 # ── Pinhole: lifecycle + unit tests ─────────────────────────────────────────
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     anyar_add_test(test_pinhole_linux

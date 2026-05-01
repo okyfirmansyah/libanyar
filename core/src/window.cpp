@@ -25,6 +25,7 @@ struct Window::Impl {
     std::string label;
     bool destroyed = false;
     bool closable = true;
+    bool owns_run_loop = false;
 
     // Pointers to bound callback closures — must outlive the webview
     std::vector<std::unique_ptr<Window::BindCallback>> bind_cbs;
@@ -182,6 +183,11 @@ struct Window::Impl {
     }
 
     ~Impl() {
+        for (auto& [id, pin] : pinholes) {
+            pin->notify_window_destroyed();
+        }
+        pinholes.clear();
+
         // Re-enable parent if this was a modal child
         if (is_modal && parent_window) {
             gtk_widget_set_sensitive(
@@ -197,10 +203,6 @@ struct Window::Impl {
             disconnect_close_signals();
             destroyed = true;
 #ifdef __linux__
-            // Destroy all pinholes BEFORE webview_destroy() (ADR-008 / ADR-007 step 5b).
-            // Pinhole::~Impl() runs GL cleanup on the main thread.
-            pinholes.clear();
-
             // Drain a bounded number of stale g_idle_add callbacks
             // BEFORE webview_destroy().  This prevents webview’s
             // internal deplete_run_loop_event_queue() from processing
@@ -277,6 +279,12 @@ struct Window::Impl {
             G_OBJECT(win), "destroy",
             G_CALLBACK(+[](GtkWidget*, gpointer user_data) {
                 auto* self = static_cast<Impl*>(user_data);
+                for (auto& [id, pin] : self->pinholes) {
+                    pin->notify_window_destroyed();
+                }
+                if (self->owns_run_loop && self->wv) {
+                    webview_terminate(self->wv);
+                }
                 self->destroyed = true;
                 self->wv = nullptr;  // library handles cleanup — prevent double-destroy in ~Impl
                 self->delete_event_handler_id = 0;
@@ -521,7 +529,9 @@ const std::string& Window::label() const {
 // ── Lifecycle ───────────────────────────────────────────────────────────────
 
 void Window::run() {
+    impl_->owns_run_loop = true;
     webview_run(impl_->wv);
+    impl_->owns_run_loop = false;
 }
 
 void Window::terminate() {
@@ -530,6 +540,12 @@ void Window::terminate() {
 
 void Window::destroy() {
     if (impl_->wv && !impl_->destroyed) {
+        for (auto& [id, pin] : impl_->pinholes) {
+            pin->notify_window_destroyed();
+        }
+        if (impl_->owns_run_loop) {
+            webview_terminate(impl_->wv);
+        }
         impl_->disconnect_close_signals();
         impl_->destroyed = true;
 

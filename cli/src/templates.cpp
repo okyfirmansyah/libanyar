@@ -87,6 +87,8 @@ R"(// )" + name + R"( — LibAnyar Application
 //   1. App constructor — creates the fiber service (app.service() is usable now)
 //   2. Register commands, HTTP routes, file access, plugins
 //   3. app.run() — starts HTTP server, opens window, blocks until exit
+//      Ordered shutdown runs on native window close. If you add long-lived
+//      service_->execute() work, stop it from plugin.shutdown().
 
 #include <anyar/app.h>
 #include <iostream>
@@ -148,6 +150,22 @@ int main() {
 
     return app.run();
 }
+)");
+}
+
+static void gen_agent_instructions(const fs::path& dest) {
+  write_file(dest / ".github" / "copilot-instructions.md",
+R"(# LibAnyar App Notes
+
+## Shutdown
+- `app.run()` owns shutdown order. Do not call `service_->stop()` from window-close handlers or plugin code.
+- If you start long-lived work with `service_->execute()`, stop it from `shutdown()`.
+- Any wait or back-pressure loop needs a close/cancel path so shutdown can unblock it.
+- Validate by closing the native window while background work is active.
+)");
+
+  write_file(dest / "CLAUDE.md",
+R"(#import .github/copilot-instructions.md
 )");
 }
 
@@ -684,6 +702,7 @@ void generate_template(const std::string& template_name,
     // Shared files
     gen_cmake(project_name, dest_dir, libanyar_root);
     gen_main_cpp(project_name, dest_dir);
+  gen_agent_instructions(dest_dir);
     gen_gitignore(dest_dir);
     gen_readme(project_name, template_name, dest_dir);
 

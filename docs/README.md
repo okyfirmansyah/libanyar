@@ -13,6 +13,7 @@ See [Getting Started](getting-started.md) for prerequisites and full setup instr
 
 - [Getting Started](getting-started.md) — Installation, prerequisites, and first build
 - [Building Your First App](building-first-app.md) — Step-by-step tutorial
+- [Graceful Shutdown](graceful-shutdown.md) — Brief rules for plugin teardown and background work
 - [Writing Plugins](writing-plugins.md) — Create custom C++ plugins
 - [Dialog Guide](dialogs.md) — Native message, file open/save, and confirmation dialogs
 - [Multi-Window Guide](multi-window.md) — Creating, managing, and communicating between windows

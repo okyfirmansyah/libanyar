@@ -1318,6 +1318,21 @@ void Pinhole::notify_dom_detached() {
     if (fn) fn();
 }
 
+void Pinhole::notify_window_destroyed() {
+    impl_->destroyed_.store(true, std::memory_order_release);
+    impl_->gl_area_ = nullptr;
+    impl_->overlay_ = nullptr;
+    impl_->sig_child_pos_ = 0;
+    impl_->tick_id_ = 0;
+    impl_->window_active_ = false;
+    impl_->reorder_fn_ = nullptr;
+
+    if (impl_->fb_state_) {
+        std::lock_guard<std::mutex> lk(impl_->fb_state_->mu);
+        impl_->fb_state_->eval = nullptr;
+    }
+}
+
 int Pinhole::z_index() const { return impl_->z_index_; }
 
 void Pinhole::set_z_index(int z) {

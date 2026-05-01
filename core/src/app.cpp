@@ -438,6 +438,17 @@ void App::start_server() {
 // ── Run ─────────────────────────────────────────────────────────────────────
 
 int App::run() {
+    bool plugins_shutdown = false;
+    auto shutdown_plugins = [&]() {
+        if (plugins_shutdown) {
+            return;
+        }
+        for (auto& plugin : plugins_) {
+            plugin->shutdown();
+        }
+        plugins_shutdown = true;
+    };
+
     // Register the anyar-shm:// URI scheme BEFORE any webview is created.
     // This must happen on the main thread, before start_server().
     register_shm_uri_scheme();
@@ -491,9 +502,6 @@ int App::run() {
                 if (label == "main" || window_mgr_.count() == 0) {
                     // Close remaining child windows
                     window_mgr_.close_all();
-                    if (service_) {
-                        service_->stop();
-                    }
                 }
             });
 
@@ -503,6 +511,7 @@ int App::run() {
         Window* main_win = window_mgr_.main_window();
         if (!main_win) {
             std::cerr << "[LibAnyar] Failed to create main window" << std::endl;
+            shutdown_plugins();
             if (service_) service_->stop();
             if (service_thread_.joinable()) service_thread_.join();
             return 1;
@@ -536,7 +545,11 @@ int App::run() {
         }
 #endif
 
-        // 1) Close the HTTP server acceptor so the accept-loop fiber
+        // 1) Stop plugin-owned background work while the service thread is
+        //    still alive so fibres can observe shutdown flags and unwind.
+        shutdown_plugins();
+
+        // 2) Close the HTTP server acceptor so the accept-loop fiber
         //    can exit, then stop the service.
         if (server_) {
             server_->close();
@@ -548,14 +561,14 @@ int App::run() {
             service_thread_.join();
         }
 
-        // 2) Clean up event sinks BEFORE window destruction so that
+        // 3) Clean up event sinks BEFORE window destruction so that
         //    no event dispatch tries to eval JS on a dying webview.
         for (auto& [lbl, sink_id] : native_event_sinks_) {
             events_.remove_window_sink(lbl);
         }
         native_event_sinks_.clear();
 
-        // 3) Explicitly destroy all windows.  Each Window::destroy()
+        // 4) Explicitly destroy all windows.  Each Window::destroy()
         //    sets destroyed=true, so any stale g_idle_add callbacks
         //    processed during webview’s deplete_run_loop_event_queue()
         //    will bail out via the is_destroyed() guard.
@@ -572,11 +585,6 @@ int App::run() {
         // No window — run headless (useful for testing)
         service_thread_.join();
         return 0;
-    }
-
-    // Shutdown plugins
-    for (auto& plugin : plugins_) {
-        plugin->shutdown();
     }
 
     return 0;

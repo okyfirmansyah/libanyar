@@ -253,6 +253,20 @@ TEST_CASE("SharedBufferPool: release_read makes slot reusable", "[buffer][pool]"
     SharedBufferRegistry::instance().clear();
 }
 
+TEST_CASE("SharedBufferPool: close rejects blocked acquire_write", "[buffer][pool]") {
+    SharedBufferRegistry::instance().clear();
+
+    SharedBufferPool pool("closed-pool", 512, 1);
+
+    SharedBuffer& buf = pool.acquire_write();
+    pool.release_write(buf, "{}");
+    pool.close();
+
+    REQUIRE_THROWS_AS(pool.acquire_write(), SharedBufferPoolClosed);
+
+    SharedBufferRegistry::instance().clear();
+}
+
 TEST_CASE("SharedBufferPool: destroy cleans up registry", "[buffer][pool]") {
     SharedBufferRegistry::instance().clear();
 

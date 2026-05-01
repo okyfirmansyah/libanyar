@@ -15,6 +15,7 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <stdexcept>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -106,6 +107,12 @@ private:
 /// The consumer (JS) reads the buffer and calls release when done.
 /// Back-pressure: if all buffers are in use, acquire_write() blocks.
 ///
+class SharedBufferPoolClosed : public std::runtime_error {
+public:
+    SharedBufferPoolClosed()
+        : std::runtime_error("SharedBufferPool closed") {}
+};
+
 class SharedBufferPool {
 public:
     /// Create a pool of `count` buffers, each of `buffer_size` bytes.
@@ -117,6 +124,7 @@ public:
 
     /// Producer: get the next writable buffer.
     /// Blocks (spins/yields) if all buffers are currently held by the consumer.
+    /// Throws SharedBufferPoolClosed if the pool is closed while waiting.
     SharedBuffer& acquire_write();
 
     /// Producer: mark the buffer as ready and notify the frontend.
@@ -126,6 +134,9 @@ public:
 
     /// Consumer (called from IPC): mark a buffer as available for reuse.
     void release_read(const std::string& buffer_name);
+
+    /// Cancel any blocked producers and reject future acquire_write() calls.
+    void close();
 
     /// Get the pool size
     size_t count() const { return buffers_.size(); }
@@ -153,6 +164,7 @@ private:
 
     std::vector<Slot> buffers_;
     std::atomic<size_t> write_idx_{0};
+    std::atomic<bool> closed_{false};
 };
 
 // ── URI Scheme Registration (Linux) ─────────────────────────────────────────

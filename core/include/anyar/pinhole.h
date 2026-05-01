@@ -198,6 +198,11 @@ public:
     /// Called by the IPC handler for `pinhole:dom_detached`.
     void notify_dom_detached();
 
+    /// @internal  Called by Window when the owning native window is being
+    /// destroyed. Drops non-owning GTK/WebView-backed state so later pinhole
+    /// destruction does not touch already-destroyed native widgets.
+    void notify_window_destroyed();
+
     /// Z-order of this pinhole relative to siblings in the same window.
     /// Higher value = drawn on top.  Default: 0 (creation order).
     /// Thread-safe; dispatches the GTK reorder to the main thread.

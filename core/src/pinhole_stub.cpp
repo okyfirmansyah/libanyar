@@ -44,6 +44,7 @@ void Pinhole::on_resize(std::function<void(int,int,double)>) {}
 void Pinhole::on_visibility(std::function<void(bool)>)       {}
 void Pinhole::on_dom_detached(std::function<void()>)         {}
 void Pinhole::notify_dom_detached()           {}
+void Pinhole::notify_window_destroyed()       {}
 void Pinhole::request_redraw()                {}
 void Pinhole::set_continuous(bool)            {}
 void Pinhole::set_rect(int, int, int, int)    {}

@@ -218,6 +218,7 @@ make -j$(nproc)
 ## Next Steps
 
 - [Building Your First App](building-first-app.md) — Step-by-step tutorial
+- [Graceful Shutdown](graceful-shutdown.md) — Brief rules for plugin teardown and background fibers
 - [Writing Plugins](writing-plugins.md) — Extend your app with custom C++ plugins
 - [Database Integration](database-integration.md) — SQLite and PostgreSQL guide
 - [Architecture Overview](../ARCHITECTURE.md) — How LibAnyar works internally

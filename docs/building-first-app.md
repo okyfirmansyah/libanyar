@@ -62,7 +62,9 @@ Key concepts:
 - **`app.command(name, handler)`** registers a synchronous IPC command
 - The handler receives a `json` object (arguments from the frontend) and returns a `json` result
 - **`app.create_window(config)`** opens a webview window pointing to the frontend
-- **`app.run()`** starts the HTTP server + event loop (blocks until the window closes)
+- **`app.run()`** starts the HTTP server + event loop (blocks until the window closes) and performs ordered shutdown when the last window closes
+
+If you later add plugins or long-lived `service_->execute()` work, stop that work in `shutdown()` and let `app.run()` own the final shutdown order. See [Graceful Shutdown](graceful-shutdown.md).
 
 ## 3. Understand the Frontend
 
