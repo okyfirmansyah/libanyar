@@ -16,6 +16,7 @@
 
 #include <nlohmann/json.hpp>
 
+#include <filesystem>
 #include <thread>
 #include <chrono>
 #include <atomic>
@@ -333,3 +334,52 @@ TEST_CASE("Full IPC round-trip: register command + HTTP invoke", "[integration]"
 
     svc->run();
 }
+
+// ── resolve_dist_path ───────────────────────────────────────────────────────
+
+TEST_CASE("resolve_dist_path: cwd first, then next to the executable",
+          "[app][dist]")
+{
+    namespace fs = std::filesystem;
+    const fs::path exe_dir = fs::read_symlink("/proc/self/exe").parent_path();
+    const fs::path old_cwd = fs::current_path();
+    const std::string name =
+        "dist-resolve-" + std::to_string(std::random_device{}());
+
+    // A scratch cwd that never contains `name`.
+    const fs::path cwd = fs::temp_directory_path() / (name + "-cwd");
+    fs::create_directories(cwd);
+    fs::current_path(cwd);
+
+    SECTION("absolute path is used as-is") {
+        auto r = anyar::resolve_dist_path(cwd.string());
+        REQUIRE(r.path == cwd.lexically_normal().string());
+        REQUIRE(r.tried.size() == 1);
+    }
+
+    SECTION("relative path found next to the executable") {
+        fs::create_directories(exe_dir / name);
+        auto r = anyar::resolve_dist_path("./" + name);
+        REQUIRE(r.path == (exe_dir / name).lexically_normal().string());
+        REQUIRE(r.tried.size() == 2);
+        fs::remove_all(exe_dir / name);
+    }
+
+    SECTION("cwd wins over the executable directory") {
+        fs::create_directories(cwd / name);
+        fs::create_directories(exe_dir / name);
+        auto r = anyar::resolve_dist_path(name);
+        REQUIRE(r.path == (cwd / name).lexically_normal().string());
+        fs::remove_all(exe_dir / name);
+    }
+
+    SECTION("nothing found lists every candidate") {
+        auto r = anyar::resolve_dist_path("./" + name + "-missing");
+        REQUIRE(r.path.empty());
+        REQUIRE(r.tried.size() == 2);
+    }
+
+    fs::current_path(old_cwd);
+    fs::remove_all(cwd);
+}
+

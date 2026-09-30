@@ -4,6 +4,38 @@
 
 ---
 
+## ADR-009: Background Work, Async Commands and Cross-Thread Frame Handoff
+
+**Date**: 2026-09-24
+**Status**: Accepted
+
+**Context**: A review of `examples/video-player` traced its crashes, stalls and seek stutter to gaps in the platform, not only in the example:
+- Every command, HTTP route, event and plugin loop shares ONE fiber thread. Blocking calls (FFmpeg, `ifstream`) froze all IPC for seconds. `add_async` returned an error unless the handler replied before returning, so there was no real offload path.
+- `service_->execute()` loops could be flagged to stop but not joined. Stopping one session and starting the next could overlap them, and the old loop's teardown clobbered the new one.
+- `SharedBufferPool::acquire_write()` hands out a raw `SharedBuffer&`. Pinhole's `on_render` (GTK thread) read slots the producer fiber was recycling or unmapping.
+- No Range-capable file serving existed. `anyar-file://` and `/__anyar__/file` loaded whole files into memory.
+
+**Decision**: Four framework primitives, used by the example and recommended for all plugins:
+1. `anyar::run_blocking(service, fn)` (`<anyar/task.h>`) runs `fn` on LibAsyik's worker pool (`service::async`) and suspends only the calling fiber.
+2. `anyar::BackgroundTask` (`<anyar/task.h>`): `start(service, body(StopToken))`, `request_stop()`, `join()` / `join_for()` / `stop(timeout)`. Joinable from a fiber or a plain thread (plugin `shutdown()`), and restartable.
+3. `CommandRegistry::add_async` resolves when `reply` is called, from any fiber or thread, at any time. Dropping every copy of `reply` without calling it yields a "did not complete" error.
+4. `anyar::FrameMailbox` + `anyar::Frame` (`<anyar/frame_mailbox.h>`) form a non-blocking, ref-counted "latest frame" handoff. A consumer's `shared_ptr` pins the frame; the producer recycles only unreferenced frames. `PinholeRenderContext::draw_frame(frame, preserve_aspect)` draws one letterboxed.
+
+Plus: `anyar::serve_file()` (`<anyar/http_file.h>`), with Range/206/416 support. It always answers the full requested range; the streaming overload writes it in chunks read on the worker pool. An early version shortened open-ended ranges to 4 MB, which WebKitGTK media does not handle: `<audio>` stalled after one chunk and later seeks failed with MEDIA_ERR_DECODE. `anyar-file://` now streams from a `GFileInputStream`. `SharedBufferPool` gains `try_acquire_write()`, `release_unpublished()` and `buffer(name)` (shared ownership), and state transitions are now validated.
+
+**Rationale**:
+- Keeps the single-service-thread model (no data races between command fibers) and moves only the blocking work off it.
+- Ownership (`shared_ptr`) is the only handoff that stays safe when producer and consumer live on different threads with different lifetimes. Locks alone cannot stop a consumer from reading memory the producer frees afterwards.
+- Frame pacing belongs to the producer. A live producer drops frames (`try_acquire_write`) instead of blocking on a slow consumer.
+
+**Consequence**:
+- Plugins should wrap long-lived loops in `BackgroundTask` and call `stop()` in `shutdown()`, and wrap blocking calls in `run_blocking()`.
+- Fibers still alive at `service_->stop()` can make process exit spin (LibAsyik). `BackgroundTask::stop()` before shutdown avoids this.
+- `SharedBufferPool::release_write()` now requires the slot to be WRITING. Callers relying on the old unconditional transition must acquire first.
+- `draw_image()` validates 4:2:0 sizes with ⌈w/2⌉×⌈h/2⌉ chroma (`pixel_format_byte_size`). Undersized odd-dimension buffers are now rejected instead of over-read.
+
+---
+
 ## ADR-008: Pinhole (Native Overlay) Rendering Architecture
 
 **Date**: 2026-04-28

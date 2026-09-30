@@ -14,6 +14,7 @@
 #ifdef __linux__
 
 #include <anyar/pinhole.h>
+#include <anyar/frame_mailbox.h>
 #include <anyar/shared_buffer.h>
 #include <anyar/window.h>
 
@@ -250,7 +251,57 @@ struct PinholeRenderContext::Impl {
 
 // ── Pinhole::Impl ─────────────────────────────────────────────────────────────
 
+// ── ImplGuard ────────────────────────────────────────────────────────────────
+//
+// Liveness token for Pinhole::Impl.  Every g_idle_add task and GTK signal
+// handler that targets an Impl holds a shared_ptr<ImplGuard> instead of a raw
+// Impl*.  ~Impl() nulls `self` under `mu`, so work that runs after the Impl is
+// gone (or while it is being destroyed on another thread) becomes a no-op.
+// Recursive: GTK may re-enter (e.g. realize fires inside a guarded idle).
+
+struct ImplGuard {
+    std::recursive_mutex mu;
+    Pinhole::Impl*       self = nullptr;
+};
+
 struct Pinhole::Impl {
+    Impl() : guard_(std::make_shared<ImplGuard>()) { guard_->self = this; }
+
+    std::shared_ptr<ImplGuard> guard_;
+
+    /// Run `fn(*this)` on the GTK main thread, only if this Impl is still
+    /// alive then.  Thread-safe.  Never capture raw Impl* / widget pointers in
+    /// g_idle_add directly — read them from the Impl inside `fn`.
+    void post_main(std::function<void(Impl&)> fn) {
+        struct Task {
+            std::shared_ptr<ImplGuard> guard;
+            std::function<void(Impl&)> fn;
+        };
+        g_idle_add(+[](gpointer data) -> gboolean {
+            std::unique_ptr<Task> t(static_cast<Task*>(data));
+            std::lock_guard<std::recursive_mutex> lk(t->guard->mu);
+            if (t->guard->self) t->fn(*t->guard->self);
+            return G_SOURCE_REMOVE;
+        }, new Task{guard_, std::move(fn)});
+    }
+
+    /// Heap copy of guard_ used as GTK signal user_data; freed by
+    /// release_guard_ref when the handler is disconnected / widget finalized.
+    gpointer new_guard_ref() { return new std::shared_ptr<ImplGuard>(guard_); }
+    static void release_guard_ref(gpointer data, GClosure*) {
+        delete static_cast<std::shared_ptr<ImplGuard>*>(data);
+    }
+    /// Resolve signal user_data to a live Impl while holding the guard lock.
+    struct GuardedSelf {
+        std::unique_lock<std::recursive_mutex> lk;
+        Impl* self;
+    };
+    static GuardedSelf lock_guard_ref(gpointer data) {
+        auto& g = **static_cast<std::shared_ptr<ImplGuard>*>(data);
+        std::unique_lock<std::recursive_mutex> lk(g.mu);
+        return {std::move(lk), g.self};
+    }
+
     // Identity
     std::string       id_;
     PinholeOptions    opts_;
@@ -347,10 +398,7 @@ struct Pinhole::Impl {
         }
 
         // Defer GTK widget creation to main thread
-        g_idle_add(+[](gpointer data) -> gboolean {
-            static_cast<Impl*>(data)->create_gl_area();
-            return G_SOURCE_REMOVE;
-        }, this);
+        post_main([](Impl& self) { self.create_gl_area(); });
     }
 
     // ── activate_fallback_canvas() ───────────────────────────────────────
@@ -448,10 +496,7 @@ struct Pinhole::Impl {
         // has been called.  If it isn't set yet (race: pinhole created before
         // the window is shown), defer again.
         if (!overlay_) {
-            g_idle_add(+[](gpointer data) -> gboolean {
-                static_cast<Impl*>(data)->create_gl_area();
-                return G_SOURCE_REMOVE;
-            }, this);
+            post_main([](Impl& self) { self.create_gl_area(); });
             return;
         }
 
@@ -468,31 +513,37 @@ struct Pinhole::Impl {
         gtk_gl_area_set_auto_render(gl_area_, TRUE);
 
         // Signals
-        sig_realize_ = g_signal_connect(
+        // Signal handlers resolve the Impl through the liveness guard: the
+        // widget can outlive the Impl when ~Impl() runs off the main thread.
+        sig_realize_ = g_signal_connect_data(
             gl_area_, "realize",
             G_CALLBACK(+[](GtkGLArea* area, gpointer d) {
-                static_cast<Impl*>(d)->on_realize(area);
-            }), this);
+                auto g = lock_guard_ref(d);
+                if (g.self) g.self->on_realize(area);
+            }), new_guard_ref(), &Impl::release_guard_ref, GConnectFlags(0));
 
-        sig_unrealize_ = g_signal_connect(
+        sig_unrealize_ = g_signal_connect_data(
             gl_area_, "unrealize",
             G_CALLBACK(+[](GtkGLArea* area, gpointer d) {
-                static_cast<Impl*>(d)->on_unrealize(area);
-            }), this);
+                auto g = lock_guard_ref(d);
+                if (g.self) g.self->on_unrealize(area);
+            }), new_guard_ref(), &Impl::release_guard_ref, GConnectFlags(0));
 
-        sig_render_ = g_signal_connect(
+        sig_render_ = g_signal_connect_data(
             gl_area_, "render",
             G_CALLBACK(+[](GtkGLArea* area, GdkGLContext* ctx, gpointer d) -> gboolean {
-                return static_cast<Impl*>(d)->on_render(area, ctx);
-            }), this);
+                auto g = lock_guard_ref(d);
+                return g.self ? g.self->on_render(area, ctx) : FALSE;
+            }), new_guard_ref(), &Impl::release_guard_ref, GConnectFlags(0));
 
         // get-child-position: GtkOverlay calls this to position overlay children
-        sig_child_pos_ = g_signal_connect(
+        sig_child_pos_ = g_signal_connect_data(
             overlay_, "get-child-position",
             G_CALLBACK(+[](GtkOverlay* /*ov*/, GtkWidget* child,
                            GdkRectangle* alloc, gpointer d) -> gboolean {
-                auto* self = static_cast<Impl*>(d);
-                if (child != GTK_WIDGET(self->gl_area_)) return FALSE;
+                auto g = lock_guard_ref(d);
+                auto* self = g.self;
+                if (!self || child != GTK_WIDGET(self->gl_area_)) return FALSE;
                 // Convert CSS px rect to device px (scale factor)
                 int sf = gtk_widget_get_scale_factor(child);
                 alloc->x      = self->rect_x_;
@@ -501,7 +552,7 @@ struct Pinhole::Impl {
                 alloc->height = self->rect_h_;
                 (void)sf;  // GtkAllocation is in logical (CSS) pixels
                 return TRUE;
-            }), this);
+            }), new_guard_ref(), &Impl::release_guard_ref, GConnectFlags(0));
 
         // Add as overlay child (drawn above the main WebKitWebView)
         gtk_overlay_add_overlay(overlay_, GTK_WIDGET(gl_area_));
@@ -724,17 +775,31 @@ struct Pinhole::Impl {
             }
         }
 
-        if (!gl_area_) {
-            // GTK widget was never created (e.g. window never shown, headless
-            // test, or destroy() was already called).  Nothing to do.
-            return;
-        }
-
         if (g_main_context_is_owner(g_main_context_default())) {
             // Normal path: Window::~Impl calls pinholes.clear() on main thread
             // before webview_destroy(), so we get here with the loop running.
+            // destroy() first so unrealize (→ destroy_gl_objects) still sees
+            // a live Impl through the guard; then retire the guard.
             destroy();
-        } else {
+            std::lock_guard<std::recursive_mutex> lk(guard_->mu);
+            guard_->self = nullptr;
+            return;
+        }
+
+        // Off-main-thread (or loop not running): retire the guard first.
+        // Blocks until any in-flight guarded idle / signal handler finishes;
+        // afterwards none can reach this Impl.  Also makes the gl_area_ /
+        // overlay_ reads below race-free (they are written under the guard).
+        std::lock_guard<std::recursive_mutex> lk(guard_->mu);
+        guard_->self = nullptr;
+
+        if (!gl_area_) {
+            // GTK widget was never created (e.g. window never shown, headless
+            // test, or destroy() / notify_window_destroyed() already ran).
+            return;
+        }
+
+        {
             // Non-main-thread path (e.g. a fiber drops its shared_ptr<Pinhole>).
             // We cannot call GTK from this thread.  Extract the GTK handles and
             // schedule their cleanup on the main thread via g_idle_add().
@@ -973,24 +1038,41 @@ void PinholeRenderContext::clear(float r, float g, float b, float a) {
     glClear(GL_COLOR_BUFFER_BIT);
 }
 
+void PinholeRenderContext::draw_frame(const Frame& frame, bool preserve_aspect) {
+    const int vw = impl_->width_px;
+    const int vh = impl_->height_px;
+    if (!preserve_aspect || impl_->cpu_mode || vw <= 0 || vh <= 0 ||
+        frame.width <= 0 || frame.height <= 0) {
+        draw_image(frame.data.data(), frame.data.size(),
+                   frame.width, frame.height, frame.format);
+        return;
+    }
+
+    // Fit the image inside the surface, centred.  Compare aspect ratios
+    // with integer cross-multiplication to avoid float rounding at 1:1.
+    int lx = 0, ly = 0, lw = vw, lh = vh;
+    const int64_t img_w = frame.width, img_h = frame.height;
+    if (img_w * vh >= img_h * vw) {
+        lh = static_cast<int>((img_h * vw + img_w / 2) / img_w);   // bars top/bottom
+        ly = (vh - lh) / 2;
+    } else {
+        lw = static_cast<int>((img_w * vh + img_h / 2) / img_h);   // bars left/right
+        lx = (vw - lw) / 2;
+    }
+    glViewport(lx, ly, lw, lh);
+    draw_image(frame.data.data(), frame.data.size(),
+               frame.width, frame.height, frame.format);
+    glViewport(0, 0, vw, vh);
+}
+
 void PinholeRenderContext::draw_image(const uint8_t* data, std::size_t size,
                                       int width, int height, pixel_format fmt)
 {
     // ── Size validation ─────────────────────────────────────────────────────
-    std::size_t expected = 0;
-    switch (fmt) {
-        case pixel_format::rgba:
-        case pixel_format::bgra:
-            expected = static_cast<std::size_t>(width) * height * 4; break;
-        case pixel_format::rgb:
-            expected = static_cast<std::size_t>(width) * height * 3; break;
-        case pixel_format::grayscale:
-            expected = static_cast<std::size_t>(width) * height;     break;
-        case pixel_format::yuv420:
-        case pixel_format::nv12:
-        case pixel_format::nv21:
-            expected = static_cast<std::size_t>(width) * height * 3 / 2; break;
-    }
+    // Chroma planes are ⌈w/2⌉ × ⌈h/2⌉ (see upload below); w*h*3/2 would
+    // under-count odd sizes and let the upload read past the buffer.
+    if (width <= 0 || height <= 0) return;
+    const std::size_t expected = pixel_format_byte_size(fmt, width, height);
     if (size < expected) {
         g_warning("anyar::Pinhole::draw_image: buffer too small "
                   "(%zu bytes, need %zu). Skipping frame.", size, expected);
@@ -1207,13 +1289,12 @@ void Pinhole::request_redraw() {
         }, task);
         return;
     }
-    if (!impl_->gl_area_) return;
-    GtkGLArea* area = impl_->gl_area_;
-    // gtk_gl_area_queue_render is not thread-safe — use g_idle_add
-    g_idle_add(+[](gpointer data) -> gboolean {
-        gtk_gl_area_queue_render(static_cast<GtkGLArea*>(data));
-        return G_SOURCE_REMOVE;
-    }, area);
+    // gtk_gl_area_queue_render is not thread-safe — marshal to main thread.
+    // gl_area_ is read there: it may be null (not created yet) or already
+    // gone (window closed → notify_window_destroyed()).
+    impl_->post_main([](Impl& self) {
+        if (self.gl_area_) gtk_gl_area_queue_render(self.gl_area_);
+    });
 }
 
 void Pinhole::set_continuous(bool enabled) {
@@ -1226,15 +1307,10 @@ void Pinhole::set_continuous(bool enabled) {
         return;
     }
     // Marshal tick install/remove to the main thread.
-    struct Task { Impl* self; bool on; };
-    auto* t = new Task{impl_.get(), enabled && impl_->window_active_};
-    g_idle_add(+[](gpointer data) -> gboolean {
-        auto* tk = static_cast<Task*>(data);
-        if (tk->on) tk->self->install_tick_cb_if_needed();
-        else        tk->self->remove_tick_cb();
-        delete tk;
-        return G_SOURCE_REMOVE;
-    }, t);
+    impl_->post_main([enabled](Impl& self) {
+        if (enabled && self.window_active_) self.install_tick_cb_if_needed();
+        else                                self.remove_tick_cb();
+    });
 }
 
 void Pinhole::set_rect(int x_css, int y_css, int width_css, int height_css) {
@@ -1250,13 +1326,9 @@ void Pinhole::set_rect(int x_css, int y_css, int width_css, int height_css) {
     }
 
     // GL path: notify GtkOverlay to reposition the GL area.
-    if (impl_->overlay_) {
-        GtkWidget* ov = GTK_WIDGET(impl_->overlay_);
-        g_idle_add(+[](gpointer data) -> gboolean {
-            gtk_widget_queue_resize(static_cast<GtkWidget*>(data));
-            return G_SOURCE_REMOVE;
-        }, ov);
-    }
+    impl_->post_main([](Impl& self) {
+        if (self.overlay_) gtk_widget_queue_resize(GTK_WIDGET(self.overlay_));
+    });
 }
 
 void Pinhole::set_visible(bool visible) {
@@ -1289,16 +1361,11 @@ void Pinhole::set_visible(bool visible) {
         return;  // don't show/hide the (invisible) failed GL area
     }
     // GL path: effective visibility honours OS window active state
-    bool effective = visible && impl_->window_active_;
-    struct Payload { GtkWidget* w; bool vis; };
-    auto* p = new Payload{GTK_WIDGET(impl_->gl_area_), effective};
-    g_idle_add(+[](gpointer data) -> gboolean {
-        auto* pl = static_cast<Payload*>(data);
-        if (pl->vis) gtk_widget_show(pl->w);
-        else         gtk_widget_hide(pl->w);
-        delete pl;
-        return G_SOURCE_REMOVE;
-    }, p);
+    impl_->post_main([visible](Impl& self) {
+        if (!self.gl_area_) return;
+        if (visible && self.window_active_) gtk_widget_show(GTK_WIDGET(self.gl_area_));
+        else                                gtk_widget_hide(GTK_WIDGET(self.gl_area_));
+    });
 }
 
 void Pinhole::on_dom_detached(std::function<void()> fn) {
@@ -1362,23 +1429,15 @@ void Pinhole::reorder_in_overlay() {
 
 void Pinhole::set_window_active(bool active) {
     impl_->window_active_ = active;
-    if (!impl_->gl_area_) return;
-    GtkGLArea* area    = impl_->gl_area_;
-    bool effective_vis = active && impl_->user_visible_;
-    bool tick_on       = active && impl_->opts_.continuous;
-    struct Payload { GtkWidget* w; Impl* self; bool vis; bool tick_on; };
-    auto* p = new Payload{GTK_WIDGET(area), impl_.get(), effective_vis, tick_on};
-    g_idle_add(+[](gpointer data) -> gboolean {
-        auto* pl = static_cast<Payload*>(data);
-        if (pl->vis) gtk_widget_show(pl->w);
-        else         gtk_widget_hide(pl->w);
+    impl_->post_main([active](Impl& self) {
+        if (!self.gl_area_) return;
+        if (active && self.user_visible_) gtk_widget_show(GTK_WIDGET(self.gl_area_));
+        else                              gtk_widget_hide(GTK_WIDGET(self.gl_area_));
         // Pause the per-frame tick when window is inactive/minimised
         // to avoid wasted GPU cycles.
-        if (pl->tick_on) pl->self->install_tick_cb_if_needed();
-        else             pl->self->remove_tick_cb();
-        delete pl;
-        return G_SOURCE_REMOVE;
-    }, p);
+        if (active && self.opts_.continuous) self.install_tick_cb_if_needed();
+        else                                 self.remove_tick_cb();
+    });
 }
 
 // ── tracking_js() ─────────────────────────────────────────────────────────────

@@ -6,6 +6,8 @@ add_library(anyar_core STATIC
     src/ipc_router.cpp
     src/command_registry.cpp
     src/event_bus.cpp
+    src/frame_mailbox.cpp
+    src/http_file.cpp
     src/window.cpp
     src/window_manager.cpp
     src/plugins/fs_plugin.cpp

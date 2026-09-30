@@ -33,6 +33,7 @@
 ///   - macOS  (Phase 7): core/src/pinhole_macos.mm  (CAMetalLayer)
 
 #include <anyar/types.h>
+#include <anyar/pixel_format.h>
 
 #include <cstddef>
 #include <cstdint>
@@ -43,19 +44,7 @@
 
 namespace anyar {
 
-// ── Pixel formats (same enum as FrameRenderer for drop-in compatibility) ────
-
-/// Pixel formats supported by PinholeRenderContext::draw_image().
-/// Matches the pixel_format enum in @libanyar/api/canvas on the JS side.
-enum class pixel_format {
-    rgba,       ///< 4 bytes/px — RGBA 8-bit each
-    rgb,        ///< 3 bytes/px — RGB 8-bit (no alpha)
-    bgra,       ///< 4 bytes/px — BGRA byte order (Windows / Direct3D cameras)
-    grayscale,  ///< 1 byte/px  — single luminance channel
-    yuv420,     ///< 1.5 bytes/px — YUV 4:2:0 planar (Y + U + V planes)
-    nv12,       ///< 1.5 bytes/px — YUV 4:2:0 semi-planar, UV interleaved
-    nv21,       ///< 1.5 bytes/px — YUV 4:2:0 semi-planar, VU interleaved
-};
+struct Frame;  // <anyar/frame_mailbox.h>
 
 // ── PinholeOptions ───────────────────────────────────────────────────────────
 
@@ -113,6 +102,15 @@ public:
     void draw_image(const uint8_t* data, std::size_t size,
                     int width, int height,
                     pixel_format fmt = pixel_format::rgba);
+
+    /// Draw a Frame (see <anyar/frame_mailbox.h>).
+    /// @param frame            Frame to draw; its size/format are validated
+    ///                         like draw_image().
+    /// @param preserve_aspect  true (default): letterbox/pillarbox the image
+    ///                         inside the surface, leaving the rest of the
+    ///                         surface as previously cleared.  false: stretch.
+    /// In the canvas fallback path the image is always stretched.
+    void draw_frame(const Frame& frame, bool preserve_aspect = true);
 
     class Impl;
     ~PinholeRenderContext();

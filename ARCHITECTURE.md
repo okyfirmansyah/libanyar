@@ -1,6 +1,6 @@
 # LibAnyar — Architecture Document
 
-> Last updated: 2026-03-07
+> Last updated: 2026-09-24
 
 ## Table of Contents
 
@@ -9,6 +9,8 @@
 3. [Component Details](#component-details)
    - [Window Behavior — Native App Feel](#5a-window-behavior--native-app-feel)
    - [Shared Memory IPC & WebGL Canvas](#2d-shared-memory-ipc-channel-binary-data)
+   - [Pinhole Native Overlay](#2e-pinhole-native-overlay-linux)
+   - [Shutdown Sequence](#shutdown-sequence)
 4. [IPC Protocol](#ipc-protocol)
 5. [Threading & Concurrency Model](#threading--concurrency-model)
 6. [Platform Abstraction](#platform-abstraction)
@@ -132,29 +134,42 @@ Central entry point. Owns the LibAsyik service, HTTP server, and window manager.
 class App {
 public:
     App();
-    App(AppConfig config);
+    explicit App(AppConfig config);
 
     // Command registration
     void command(const std::string& name, CommandHandler handler);
-    void command(const std::string& name, AsyncCommandHandler handler);
+    void command_async(const std::string& name, AsyncCommandHandler handler);
 
     // Event system
-    void emit(const std::string& event, const json& payload = {});
-    void on(const std::string& event, EventHandler handler);
+    void emit(const std::string& event, const json& payload = json::object());
+    void emit_to(const std::string& label, const std::string& event, const json& payload = json::object());
+    UnsubscribeFn on(const std::string& event, EventHandler handler);
 
     // Window management
-    WindowHandle create_window(WindowConfig config);
-
-    // Database (optional, via LibAsyik SOCI)
-    std::shared_ptr<asyik::sql_pool> sql_pool(int backend, const std::string& conn, int pool_size);
+    void create_window(WindowConfig config = {});
+    void create_window(WindowCreateOptions opts);
+    WindowManager& window_manager();
 
     // Plugin system
     void use(std::shared_ptr<IAnyarPlugin> plugin);
 
-    // Access to underlying LibAsyik service
-    asyik::service_ptr service() const;
+    // Custom HTTP routes (always take priority over serve_static)
+    void http_get(const std::string& path, RouteHandler handler);
+    void http_post(const std::string& path, RouteHandler handler);
 
-    // Run the application (blocks until all windows closed)
+    // Local file access via anyar-file:// (path traversal rejected)
+    void allow_file_access(const std::string& directory);
+
+    // Lifecycle hooks
+    void on_ready(ReadyCallback cb);                // server + plugins initialized
+    void on_window_ready(WindowReadyCallback cb);   // main thread, main Window exists,
+                                                    // GTK loop not yet running (create_pinhole here)
+
+    asyik::service_ptr service() const;
+    anyar_http_server_ptr server() const;
+    int port() const;
+
+    // Run the application (blocks until the main window closes; owns shutdown order)
     int run();
 };
 ```
@@ -233,7 +248,7 @@ C++ (producer)                          WebView (consumer)
 - Created via `buffer:create` command (IPC) or `SharedBuffer::create()` (C++)
 - Backed by POSIX `shm_open("/anyar_<pid>_<name>")` + `mmap()`
 - C++ writes directly to `buf->data()` (raw pointer), JS reads via `fetchBuffer(name)`
-- **Native webview**: `anyar-shm://` custom URI scheme (zero-copy via `g_bytes_new_static()`)
+- **Native webview**: `anyar-shm://` custom URI scheme (zero-copy via `g_bytes_new_with_free_func()` holding a `shared_ptr` to the buffer)
 - **Browser dev mode**: HTTP GET `/__anyar__/buffer/<name>` endpoint (copy, but works in any browser)
 - `fetchBuffer()` auto-detects runtime via `isNativeIpc()` and selects the appropriate path
 - CORS-enabled: `webkit_security_manager_register_uri_scheme_as_cors_enabled()`
@@ -245,6 +260,7 @@ C++ (producer)                          WebView (consumer)
 - `buffer:pool-acquire` → find next FREE slot → atomically transition to WRITING
 - `buffer:pool-release-write` → transition WRITING → READY, emit `buffer:ready`
 - `buffer:pool-release-read` → transition READING → FREE
+- `close()` cancels producers blocked in `acquire_write()` (they throw `SharedBufferPoolClosed`) — call it from plugin `shutdown()`
 
 **IPC Commands (10 total):**
 
@@ -271,6 +287,38 @@ C++ (producer)                          WebView (consumer)
 - Suitable for 30fps+ video streaming at 1080p/4K
 - Buffer creation: ~0.1ms (one-time `shm_open` + `mmap`)
 - Frame delivery: `memcpy` to shared mem + event push (~0.05ms overhead)
+
+#### 2e. Pinhole Native Overlay (Linux)
+
+For latency-critical surfaces (video, camera, charts) a **Pinhole** renders a native GL surface under a transparent DOM placeholder, in the same OS window — no JS, `fetch`, or `texImage2D` in the hot path. Parallel to (not a replacement for) SharedBuffer + `FrameRenderer`. See [ADR-008](docs/decisions.md) and [docs/pinhole-rendering.md](docs/pinhole-rendering.md).
+
+```
+GtkWindow
+  └── GtkOverlay (outer)
+        ├── GtkOverlay (inner, main child — bottom)
+        │     ├── GtkEventBox            transparent filler
+        │     └── GtkGLArea × N          one per pinhole, GL 3.3 core (libepoxy)
+        └── WebKitWebView (overlay child — top, transparent background)
+```
+
+```cpp
+app.on_window_ready([&](anyar::Window& win) {
+    anyar::PinholeOptions opts;              // format, continuous, show_during_scroll, force_fallback
+    opts.format = anyar::pixel_format::yuv420;
+    pin = win.create_pinhole("video", opts); // matches <div data-anyar-pinhole="video">
+    pin->on_render([&](anyar::PinholeRenderContext& ctx) {
+        ctx.draw_image(data, size, w, h, anyar::pixel_format::yuv420);  // or ctx.clear(r,g,b,a)
+    });
+});
+pin->request_redraw();   // from any thread; or set_continuous(true) for vsync
+```
+
+- **Rect tracking**: `create_pinhole()` injects a tracking script once per window (`webview_init`) that mirrors the placeholder's rect/DPR via `pinhole:update_rect`, hides the overlay during scroll (`pinhole:set_visible`), and reports removal (`pinhole:dom_detached`). `set_rect()` positions manually.
+- **Formats**: same 7 as `FrameRenderer` (RGBA, RGB, BGRA, Grayscale, YUV420, NV12, NV21); YUV→RGB in shader.
+- **Fallback**: never throws. If GL init fails (or `force_fallback`), `is_native()` is false and rendering goes CPU → `SharedBuffer` → injected canvas-2D; `set_continuous(true)` is a no-op there.
+- **Threading**: `on_render` runs on the GTK main thread (not a fiber) with GL current; exceptions are caught and the frame dropped. `request_redraw`/`set_rect`/`set_visible`/`set_z_index` are thread-safe.
+- **Limits**: the overlay is a flat rectangle — `border-radius`, transforms, opacity/filter/blend, and `position: sticky` are not honored; DOM above the placeholder must be transparent. Linux only today (Windows/macOS: Phase 7; `pinhole_stub.cpp` elsewhere).
+- **JS**: `@libanyar/api/pinhole` offers optional typed helpers (`onPinholeMounted`, `getPinholeMetrics`, …); the tracking itself needs no JS import.
 
 ### 3. CommandRegistry
 
@@ -467,11 +515,24 @@ public:
 
 struct PluginContext {
     asyik::service_ptr service;
+    anyar_http_server_ptr server;   // for custom routes
     CommandRegistry& commands;
     EventBus& events;
     AppConfig& config;
 };
 ```
+
+**`shutdown()` contract**: called once by `App::run()` while the service thread is still alive. Stop any long-lived `service_->execute()` loops (stop flag) and close back-pressure waits (e.g. `SharedBufferPool::close()`). Never call `service_->stop()` from a plugin. See [docs/graceful-shutdown.md](docs/graceful-shutdown.md).
+
+### Shutdown Sequence
+
+`App::run()` owns teardown after the main window's loop returns ([ADR-007](docs/decisions.md)):
+
+1. Drain pending GTK idle callbacks (bounded to 200 iterations — never unbounded under xvfb)
+2. `plugin->shutdown()` for every plugin
+3. `server_->close()` (cancels the accept-loop fiber), then `service_->stop()` + join
+4. Remove per-window event sinks
+5. `close_all()` windows — per window: `notify_window_destroyed()` on each pinhole, `webview_terminate()` if it owns the run loop, set `destroyed=true`, bounded drain, `webview_destroy()`
 
 ---
 
@@ -608,7 +669,7 @@ Main Thread (OS/GUI)                     LibAsyik Service Thread
 
 This ensures:
 - The **GTK main thread** is never blocked by command handlers
-- Command handlers can call `run_on_gtk_main()` for native dialogs without deadlock
+- Command handlers can call `run_on_main_thread()` (`<anyar/main_thread.h>`) for native dialogs without deadlock
 - `webview_return()` is thread-safe (per webview docs) but we dispatch to GTK thread for consistency
 - Event push via `webview_eval()` is always dispatched through `webview_dispatch()`
 
@@ -646,7 +707,7 @@ Each wrapped behind a platform-agnostic C++ interface in `anyar::native::`.
 
 | Library | Version | Purpose | License |
 |---------|---------|---------|---------|
-| LibAsyik | >= 1.6.1 | HTTP, WS, SQL, Fibers, Logging | MIT |
+| LibAsyik | >= 1.7.1 | HTTP, WS, SQL, Fibers, Logging | MIT |
 | Boost | >= 1.81 | Asio, Beast, Fiber, Context, URL | BSL-1.0 |
 | OpenSSL | >= 1.1 | TLS for HTTPS/WSS | Apache-2.0 |
 | webview/webview | latest | OS webview wrapper | MIT |
@@ -669,71 +730,65 @@ Each wrapped behind a platform-agnostic C++ interface in `anyar::native::`.
 libanyar/
 ├── CMakeLists.txt                  # Root build
 ├── README.md
-├── ARCHITECTURE.md                 # This file
+├── ARCHITECTURE.md                 # This file (also the CLI's repo-root marker)
 ├── CLAUDE.md                       # Root agent context (#imports .github/copilot-instructions.md)
+├── run.sh                          # Launch helper: clears snap GTK env
 ├── .github/
 │   └── copilot-instructions.md     # Global agent context (Copilot + Claude)
 ├── docs/
-│   ├── decisions.md                # Architecture decision log (ADR-001..007)
+│   ├── decisions.md                # Architecture decision log (ADR-001..008)
 │   ├── roadmap.md                  # Phased plan + status
-│   └── progress.md                 # Current progress tracking
+│   ├── progress.md                 # Current progress tracking
+│   ├── pinhole-rendering.md        # Pinhole native overlay guide
+│   ├── graceful-shutdown.md        # Plugin shutdown rules
+│   └── ...                         # getting-started, writing-plugins, multi-window, packaging, ...
 │
 ├── cmake/                          # CMake modules
 │   ├── CMakeRC.cmake               # CMake Resource Compiler (cmrc)
 │   └── AnyarEmbed.cmake            # anyar_embed_frontend() helper
 │
-├── core/                           # LibAnyar framework library
+├── core/                           # LibAnyar framework library (anyar_core)
 │   ├── CMakeLists.txt
 │   ├── include/anyar/
 │   │   ├── app.h                   # anyar::App
 │   │   ├── app_config.h            # Configuration structs + FileResolver
 │   │   ├── embed.h                 # cmrc-backed embedded frontend resolver
-│   │   ├── window.h                # Window management
+│   │   ├── window.h                # Window (incl. create_pinhole)
+│   │   ├── window_manager.h        # Multi-window registry
 │   │   ├── ipc_router.h            # HTTP + WS IPC routing
 │   │   ├── command_registry.h      # Command dispatch
 │   │   ├── event_bus.h             # Pub/sub events
-│   │   ├── shared_buffer.h         # SharedBuffer, Pool, SHM URI scheme
+│   │   ├── shared_buffer.h         # SharedBuffer, Pool, SHM/file URI schemes
+│   │   ├── pinhole.h               # Pinhole native overlay API
+│   │   ├── main_thread.h           # run_on_main_thread()
+│   │   ├── gtk_dispatch.h          # Deprecated shim → main_thread.h
 │   │   ├── plugin.h                # Plugin interface
 │   │   ├── types.h                 # Common types & aliases
-│   │   └── native/                 # Platform API wrappers
-│   │       ├── dialog.h
-│   │       ├── tray.h
-│   │       ├── clipboard.h
-│   │       ├── notification.h
-│   │       └── shell.h
+│   │   └── plugins/                # fs, dialog, shell, clipboard, db
 │   └── src/
 │       ├── app.cpp
 │       ├── ipc_router.cpp
 │       ├── command_registry.cpp
 │       ├── event_bus.cpp
 │       ├── window.cpp
-│       ├── shared_buffer_linux.cpp  # POSIX shm + anyar-shm:// URI scheme
-│       ├── asset_server.cpp        # serve_static configuration
-│       └── platform/
-│           ├── linux/
-│           ├── windows/
-│           └── macos/
-│
-├── plugins/                        # Built-in plugins
-│   ├── fs/                         # Filesystem commands
-│   ├── dialog/                     # Native dialog commands
-│   ├── sqlite/                     # SQLite via SOCI
-│   ├── shell/                      # Shell/subprocess
-│   └── http_client/                # HTTP proxy for frontend
+│       ├── window_manager.cpp
+│       ├── main_thread_linux.cpp
+│       ├── shared_buffer_linux.cpp # POSIX shm + anyar-shm:// / anyar-file:// URI schemes
+│       ├── pinhole_linux.cpp       # GtkOverlay + GtkGLArea + canvas-2D fallback
+│       ├── pinhole_stub.cpp        # Non-Linux stub
+│       └── plugins/                # fs_plugin, db_plugin, {dialog,clipboard,shell}_linux
 │
 ├── js-bridge/                      # NPM: @libanyar/api
 │   ├── package.json
 │   ├── tsconfig.json
 │   └── src/
-│       ├── index.ts                # invoke(), listen(), emit()
-│       ├── modules/
-│       │   ├── buffer.ts           # Shared memory buffer API
-│       │   └── canvas.ts           # WebGL frame renderer
-│       ├── fs.ts
-│       ├── dialog.ts
-│       ├── db.ts
-│       ├── event.ts
-│       └── http.ts
+│       ├── index.ts                # Public re-exports
+│       ├── invoke.ts / events.ts / config.ts / react.ts / types.ts
+│       └── modules/
+│           ├── fs.ts, dialog.ts, shell.ts, db.ts, event.ts, window.ts
+│           ├── buffer.ts           # Shared memory buffer API
+│           ├── canvas.ts           # WebGL frame renderer
+│           └── pinhole.ts          # Optional pinhole helpers
 │
 ├── cli/                            # `anyar` CLI tool
 │   ├── CMakeLists.txt
@@ -742,31 +797,24 @@ libanyar/
 │       ├── cmd_init.cpp
 │       ├── cmd_dev.cpp
 │       ├── cmd_build.cpp
-│       └── cmd_package.cpp  # DEB + AppImage packaging
-│
-├── templates/                      # Project templates
-│   ├── react-ts/
-│   ├── vue-ts/
-│   └── vanilla/
+│       ├── cmd_package.cpp         # DEB + AppImage packaging
+│       ├── templates.cpp           # svelte-ts / react-ts / vanilla project templates
+│       └── util.cpp
 │
 ├── examples/
 │   ├── hello-world/
-│   ├── todo-app/
-│   └── file-explorer/
+│   ├── pinhole-hello/              # Minimal Pinhole demo
+│   ├── key-storage/
+│   ├── video-player/               # FFmpeg; --mode=pinhole (default) | --mode=webgl
+│   └── wifi-analyzer/
 │
 ├── tests/
-│   ├── test_shared_buffer.cpp      # 17 Catch2 tests for SharedBuffer/Pool
+│   ├── test_*.cpp                  # Catch2 unit/integration (incl. test_pinhole_linux.cpp)
 │   ├── webgl/                      # WebGL canvas E2E pixel verification
-│   │   ├── main.cpp
-│   │   ├── dist/index.html
-│   │   └── CMakeLists.txt
-│   ├── unit/
-│   └── integration/
+│   └── window_close/               # Native window-close shutdown regression
 │
-└── third_party/                    # Git submodules or FetchContent
-    ├── webview/
-    ├── nlohmann_json/
-    └── nfd/
+└── third_party/
+    └── webview/
 ```
 
 ---

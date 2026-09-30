@@ -16,14 +16,25 @@
 #include <anyar/window.h>
 #include "video_plugin.h"
 
+#include <cstdlib>
 #include <cstring>
+#include <fstream>
 #include <iostream>
+#include <sstream>
+
+#ifdef __linux__
+#include <anyar/main_thread.h>
+#include <gtk/gtk.h>
+#include <webkit2/webkit2.h>
+#endif
 #include <memory>
 #include <string>
 
 #ifdef ANYAR_EMBED_FRONTEND
 #include <anyar/embed.h>
 #endif
+
+using json = nlohmann::json;
 
 namespace {
 
@@ -42,6 +53,39 @@ videoplayer::RenderMode parse_mode(int argc, char** argv) {
     }
     return RenderMode::Pinhole;
 }
+
+#ifdef __linux__
+GtkWidget* find_webview(GtkWidget* w) {
+    if (WEBKIT_IS_WEB_VIEW(w)) return w;
+    if (!GTK_IS_CONTAINER(w)) return nullptr;
+    GtkWidget* found = nullptr;
+    GList* kids = gtk_container_get_children(GTK_CONTAINER(w));
+    for (GList* k = kids; k && !found; k = k->next) found = find_webview(GTK_WIDGET(k->data));
+    g_list_free(kids);
+    return found;
+}
+
+/// Inject a real left click (press + release) at CSS-ish pixel (x, y).
+/// Unlike a JS-dispatched event this counts as a user gesture, so it can
+/// start unmuted <audio> playback.
+void inject_click(GtkWidget* webview, double x, double y) {
+    GdkWindow* gw = gtk_widget_get_window(webview);
+    if (!gw) return;
+    GdkSeat* seat = gdk_display_get_default_seat(gdk_window_get_display(gw));
+    for (GdkEventType t : {GDK_BUTTON_PRESS, GDK_BUTTON_RELEASE}) {
+        GdkEvent* ev = gdk_event_new(t);
+        ev->button.window = GDK_WINDOW(g_object_ref(gw));
+        ev->button.send_event = TRUE;
+        ev->button.time = GDK_CURRENT_TIME;
+        ev->button.x = x;
+        ev->button.y = y;
+        ev->button.button = 1;
+        gdk_event_set_device(ev, gdk_seat_get_pointer(seat));
+        gtk_main_do_event(ev);
+        gdk_event_free(ev);
+    }
+}
+#endif
 
 } // namespace
 
@@ -70,11 +114,47 @@ int main(int argc, char** argv) {
 
     app.create_window(win);
 
-    if (mode == videoplayer::RenderMode::Pinhole) {
-        // on_window_ready fires on the main thread after the Window is created
-        // but before the GTK event loop starts — the correct place for
-        // create_pinhole().
-        app.on_window_ready([&](anyar::Window& window) {
+    // ── Test mode (VIDEO_PLAYER_TEST_SCRIPT=<file.js>) ──────────────────
+    // Injects a driver script into the page and exposes test:* commands so
+    // an automated run can exercise the real UI (see README "Automated
+    // UI test").  Off unless the env var is set.
+    std::string test_script;
+    if (const char* ts = std::getenv("VIDEO_PLAYER_TEST_SCRIPT")) {
+        std::ifstream f(ts);
+        std::stringstream ss;
+        ss << f.rdbuf();
+        test_script = "window.__VIDEO_PLAYER_TEST__ = true;\n" + ss.str();
+        app.command("test:log", [](const json& a) -> json {
+            std::cout << "[test] " << a.value("msg", a.dump()) << std::endl;
+            return nullptr;
+        });
+        app.command("test:quit", [](const json& a) -> json {
+            std::cout << "[test] quit code=" << a.value("code", 0) << std::endl;
+            std::_Exit(a.value("code", 0));
+        });
+#ifdef __linux__
+        app.command("test:click", [](const json& a) -> json {
+            const double x = a.value("x", 0.0), y = a.value("y", 0.0);
+            anyar::post_to_main_thread([x, y] {
+                for (GList* l = gtk_window_list_toplevels(); l; l = l->next) {
+                    if (GtkWidget* wv = find_webview(GTK_WIDGET(l->data))) { inject_click(wv, x, y); break; }
+                }
+            });
+            return nullptr;
+        });
+#endif
+    }
+
+    // on_window_ready fires on the main thread after the Window is created
+    // but before the GTK event loop starts — the correct place for
+    // create_pinhole().
+    app.on_window_ready([&](anyar::Window& window) {
+        if (!test_script.empty()) {
+            window.init(test_script);
+            std::cout << "[test] driver script injected (" << test_script.size() << " bytes)" << std::endl;
+        }
+        if (mode != videoplayer::RenderMode::Pinhole) return;
+        {
             anyar::PinholeOptions pin_opts;
             pin_opts.format     = anyar::pixel_format::yuv420;  // hint; redetected per-frame
             pin_opts.continuous = false;                        // request_redraw on each frame
@@ -90,8 +170,8 @@ int main(int argc, char** argv) {
             }
 
             plugin->set_pinhole(pin);
-        });
-    }
+        }
+    });
 
 #ifdef ANYAR_EMBED_FRONTEND
     app.set_frontend_resolver(anyar::make_embedded_resolver());

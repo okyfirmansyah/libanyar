@@ -91,7 +91,8 @@ std::shared_ptr<SharedBuffer> SharedBuffer::create(const std::string& name,
     // Check for duplicate
     if (SharedBufferRegistry::instance().get(name)) {
         throw std::runtime_error(
-            "SharedBuffer: buffer '" + name + "' already exists");
+            "SharedBuffer: buffer '" + name + "' already exists (buffer names "
+            "are process-global; destroy the previous owner first)");
     }
 
     // Use the private constructor via a helper since make_shared needs public ctor
@@ -168,20 +169,26 @@ SharedBufferPool::~SharedBufferPool() {
     }
 }
 
-SharedBuffer& SharedBufferPool::acquire_write() {
-    // Try to find a FREE slot, starting from write_idx_
+SharedBuffer* SharedBufferPool::try_acquire_write() {
+    if (closed_.load()) {
+        throw SharedBufferPoolClosed();
+    }
     const size_t n = buffers_.size();
-    for (int spins = 0; ; ++spins) {
-        if (closed_.load()) {
-            throw SharedBufferPoolClosed();
+    for (size_t i = 0; i < n; ++i) {
+        size_t idx = (write_idx_.load() + i) % n;
+        Slot::State expected = Slot::FREE;
+        if (buffers_[idx].state.compare_exchange_strong(expected, Slot::WRITING)) {
+            write_idx_.store((idx + 1) % n);
+            return buffers_[idx].buffer.get();
         }
-        for (size_t i = 0; i < n; ++i) {
-            size_t idx = (write_idx_.load() + i) % n;
-            Slot::State expected = Slot::FREE;
-            if (buffers_[idx].state.compare_exchange_strong(expected, Slot::WRITING)) {
-                write_idx_.store((idx + 1) % n);
-                return *buffers_[idx].buffer;
-            }
+    }
+    return nullptr;
+}
+
+SharedBuffer& SharedBufferPool::acquire_write() {
+    for (int spins = 0; ; ++spins) {
+        if (SharedBuffer* buf = try_acquire_write()) {
+            return *buf;
         }
         // All slots busy — yield the FIBRE (not the thread) so that
         // other fibres (e.g. IPC handlers that release buffers) can run.
@@ -194,10 +201,21 @@ SharedBuffer& SharedBufferPool::acquire_write() {
 }
 
 void SharedBufferPool::release_write(SharedBuffer& buf,
-                                     const std::string& metadata_json) {
+                                     const std::string& /*metadata_json*/) {
     for (auto& slot : buffers_) {
         if (slot.buffer.get() == &buf) {
-            slot.state.store(Slot::READY);
+            Slot::State expected = Slot::WRITING;
+            slot.state.compare_exchange_strong(expected, Slot::READY);
+            return;
+        }
+    }
+}
+
+void SharedBufferPool::release_unpublished(SharedBuffer& buf) {
+    for (auto& slot : buffers_) {
+        if (slot.buffer.get() == &buf) {
+            Slot::State expected = Slot::WRITING;
+            slot.state.compare_exchange_strong(expected, Slot::FREE);
             return;
         }
     }
@@ -215,6 +233,13 @@ void SharedBufferPool::release_read(const std::string& buffer_name) {
             return;
         }
     }
+}
+
+std::shared_ptr<SharedBuffer> SharedBufferPool::buffer(const std::string& buffer_name) const {
+    for (auto& slot : buffers_) {
+        if (slot.buffer && slot.buffer->name() == buffer_name) return slot.buffer;
+    }
+    return nullptr;
 }
 
 void SharedBufferPool::close() {
@@ -402,9 +427,18 @@ static void handle_file_uri_request(WebKitURISchemeRequest* request,
         return;
     }
 
-    // Read the file
-    std::ifstream ifs(canonical, std::ios::binary | std::ios::ate);
-    if (!ifs) {
+    // Stream the file from disk instead of loading it into memory: WebKit
+    // pulls from the GFileInputStream as it needs data (large media files
+    // no longer cost their full size in RAM, nor block this thread reading).
+    GFile* gfile = g_file_new_for_path(canon_str.c_str());
+    GError* read_err = nullptr;
+    GFileInputStream* fstream = g_file_read(gfile, nullptr, &read_err);
+    g_object_unref(gfile);
+    std::error_code size_ec;
+    const auto file_size = fs::file_size(canonical, size_ec);
+    if (!fstream || size_ec) {
+        if (fstream) g_object_unref(fstream);
+        if (read_err) g_error_free(read_err);
         GError* error = g_error_new(
             g_quark_from_string("anyar-file"), 500,
             "Failed to read file: %s", canon_str.c_str());
@@ -412,19 +446,12 @@ static void handle_file_uri_request(WebKitURISchemeRequest* request,
         g_error_free(error);
         return;
     }
-    auto size = ifs.tellg();
-    ifs.seekg(0);
-    std::string body(static_cast<size_t>(size), '\0');
-    ifs.read(body.data(), size);
 
     const char* content_type = mime_for_extension(canonical.extension().string());
 
-    GBytes* bytes = g_bytes_new(body.data(), body.size());
-    GInputStream* stream = g_memory_input_stream_new_from_bytes(bytes);
-    g_bytes_unref(bytes);
-
+    GInputStream* stream = G_INPUT_STREAM(fstream);
     WebKitURISchemeResponse* response =
-        webkit_uri_scheme_response_new(stream, static_cast<gint64>(body.size()));
+        webkit_uri_scheme_response_new(stream, static_cast<gint64>(file_size));
     webkit_uri_scheme_response_set_content_type(response, content_type);
 
     SoupMessageHeaders* headers = soup_message_headers_new(SOUP_MESSAGE_HEADERS_RESPONSE);

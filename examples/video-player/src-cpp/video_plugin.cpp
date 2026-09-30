@@ -2,39 +2,43 @@
 //
 // Uses libavformat for container probing + packet iteration (bitrate),
 // libavcodec + libswresample for audio waveform extraction, and
-// libavcodec + optional libswscale for frame decode → SharedBuffer
-// zero-copy delivery via anyar-shm:// URI scheme.
+// libavcodec + optional libswscale for frame decode.
 //
-// When the decoded pixel format is directly supported by the WebGL
-// renderer (YUV420P, NV12, NV21, RGBA, RGB24, GRAY8), frames are
-// copied into shared memory WITHOUT swscale conversion — saving CPU
-// and using less memory (e.g. YUV420P = 1.5 bytes/pixel vs RGBA = 4).
+// Frames the renderers support natively (YUV420P, NV12, NV21, RGBA, BGRA,
+// RGB24, GRAY8) are copied without conversion; anything else (10-bit, 4:2:2,
+// palettised …) is converted to YUV420P, which is 1.5 bytes/pixel.
+//
+// All FFmpeg calls run on LibAsyik's worker pool through anyar::run_blocking();
+// the service thread (IPC, events, HTTP) only schedules work and moves
+// shared_ptrs around.
 
 #include "video_plugin.h"
 
-#include <anyar/types.h>
 #include <anyar/event_bus.h>
+#include <anyar/http_file.h>
 #include <anyar/pinhole.h>
-#include <anyar/window.h>
+#include <anyar/shared_buffer.h>
+#include <anyar/types.h>
 
-#include <libasyik/service.hpp>
 #include <libasyik/http.hpp>
+#include <libasyik/service.hpp>
 
 #include <nlohmann/json.hpp>
 
 #include <boost/fiber/operations.hpp>
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <cmath>
 #include <cstring>
+#include <deque>
 #include <filesystem>
-#include <fstream>
+#include <cstdlib>
+#include <iomanip>
 #include <iostream>
-
-#ifdef __linux__
-#include <epoxy/gl.h>
-#endif
+#include <unistd.h>
+#include <sstream>
 
 // ── FFmpeg C headers ────────────────────────────────────────────────────────
 extern "C" {
@@ -42,1261 +46,944 @@ extern "C" {
 #include <libavcodec/avcodec.h>
 #include <libswresample/swresample.h>
 #include <libswscale/swscale.h>
-#include <libavutil/opt.h>
 #include <libavutil/channel_layout.h>
 #include <libavutil/imgutils.h>
+#include <libavutil/opt.h>
 }
 
 using json = nlohmann::json;
+using namespace std::chrono_literals;
 
 namespace videoplayer {
 
-// ── Helpers ─────────────────────────────────────────────────────────────────
+PlaybackControl::~PlaybackControl() = default;
 
-static double ts_to_sec(int64_t ts, AVRational tb) {
-    if (ts == AV_NOPTS_VALUE) return 0.0;
-    return static_cast<double>(ts) * av_q2d(tb);
+AudioStream::~AudioStream() {
+    if (!temp_path.empty()) {
+        std::error_code ec;
+        std::filesystem::remove(temp_path, ec);
+    }
 }
 
-/// Map a webgl_format string (used by the existing decode loop) to the
-/// public Pinhole pixel_format enum.  Falls back to rgba on unknown input
-/// so we never throw from the GTK main-thread render callback.
-static anyar::pixel_format pixel_format_from_str(const std::string& s) {
-    if (s == "yuv420")    return anyar::pixel_format::yuv420;
-    if (s == "nv12")      return anyar::pixel_format::nv12;
-    if (s == "nv21")      return anyar::pixel_format::nv21;
-    if (s == "rgb")       return anyar::pixel_format::rgb;
-    if (s == "grayscale") return anyar::pixel_format::grayscale;
-    if (s == "bgra")      return anyar::pixel_format::bgra;
-    return anyar::pixel_format::rgba;
+namespace {
+
+/// VIDEO_PLAYER_DEBUG=1 → timestamped trace of seeks, presentation and
+/// stalls on stderr.  Cheap when off.
+bool debug_enabled() {
+    static const bool on = [] {
+        const char* v = std::getenv("VIDEO_PLAYER_DEBUG");
+        return v && *v && std::string(v) != "0";
+    }();
+    return on;
 }
 
-// ── Open / Close ────────────────────────────────────────────────────────────
+double debug_now() {
+    static const auto t0 = std::chrono::steady_clock::now();
+    return std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
+}
 
-void VideoPlugin::open_file(const std::string& path) {
-    close_file(); // clean previous state
+#define VP_DEBUG(expr)                                                        \
+    do {                                                                      \
+        if (debug_enabled()) {                                                \
+            std::ostringstream vp_os_;                                        \
+            vp_os_ << std::fixed << std::setprecision(3) << "[vp " << debug_now() \
+                   << "] " << expr << "\n";                                   \
+            std::cerr << vp_os_.str() << std::flush;                          \
+        }                                                                     \
+    } while (0)
 
+// ── RAII wrappers for FFmpeg objects ────────────────────────────────────────
+
+struct FormatCloser  { void operator()(AVFormatContext* p) const { avformat_close_input(&p); } };
+struct CodecFreer    { void operator()(AVCodecContext* p)  const { avcodec_free_context(&p); } };
+struct FrameFreer    { void operator()(AVFrame* p)         const { av_frame_free(&p); } };
+struct PacketFreer   { void operator()(AVPacket* p)        const { av_packet_free(&p); } };
+struct SwrFreer      { void operator()(SwrContext* p)      const { swr_free(&p); } };
+struct SwsFreer      { void operator()(SwsContext* p)      const { sws_freeContext(p); } };
+
+using FormatPtr = std::unique_ptr<AVFormatContext, FormatCloser>;
+using CodecPtr  = std::unique_ptr<AVCodecContext, CodecFreer>;
+using FramePtr  = std::unique_ptr<AVFrame, FrameFreer>;
+using PacketPtr = std::unique_ptr<AVPacket, PacketFreer>;
+using SwrPtr    = std::unique_ptr<SwrContext, SwrFreer>;
+using SwsPtr    = std::unique_ptr<SwsContext, SwsFreer>;
+
+std::string av_err(int err) {
+    char buf[AV_ERROR_MAX_STRING_SIZE]{};
+    av_strerror(err, buf, sizeof(buf));
+    return buf;
+}
+
+FormatPtr open_input(const std::string& path) {
     AVFormatContext* fc = nullptr;
     int ret = avformat_open_input(&fc, path.c_str(), nullptr, nullptr);
-    if (ret < 0) {
-        char err[AV_ERROR_MAX_STRING_SIZE]{};
-        av_strerror(ret, err, sizeof(err));
-        throw std::runtime_error("Cannot open media file: " + std::string(err));
-    }
-
+    if (ret < 0) throw std::runtime_error("Cannot open media file: " + av_err(ret));
+    FormatPtr owned(fc);
     ret = avformat_find_stream_info(fc, nullptr);
-    if (ret < 0) {
-        avformat_close_input(&fc);
-        throw std::runtime_error("Cannot find stream info");
-    }
-
-    fmt_ctx_ = fc;
-    file_path_ = path;
-
-    // Probe metadata
-    probe_ = {};
-    probe_.duration = (fc->duration != AV_NOPTS_VALUE)
-        ? static_cast<double>(fc->duration) / AV_TIME_BASE
-        : 0.0;
-    probe_.fileSizeBytes = std::filesystem::file_size(path);
-
-    // Find best video / audio streams
-    video_stream_ = av_find_best_stream(fc, AVMEDIA_TYPE_VIDEO, -1, -1, nullptr, 0);
-    audio_stream_ = av_find_best_stream(fc, AVMEDIA_TYPE_AUDIO, -1, -1, nullptr, 0);
-
-    if (video_stream_ >= 0) {
-        auto* par = fc->streams[video_stream_]->codecpar;
-        probe_.width  = par->width;
-        probe_.height = par->height;
-        const AVCodecDescriptor* desc = avcodec_descriptor_get(par->codec_id);
-        probe_.videoCodec = desc ? desc->name : "unknown";
-        AVRational fr = fc->streams[video_stream_]->avg_frame_rate;
-        if (fr.den > 0) probe_.fps = av_q2d(fr);
-    }
-
-    if (audio_stream_ >= 0) {
-        auto* par = fc->streams[audio_stream_]->codecpar;
-        const AVCodecDescriptor* desc = avcodec_descriptor_get(par->codec_id);
-        probe_.audioCodec  = desc ? desc->name : "unknown";
-        probe_.sampleRate  = par->sample_rate;
-        probe_.channels    = par->channels;
-    }
-
-    // Reset cached analysis
-    bitrate_ready_  = false;
-    waveform_ready_ = false;
+    if (ret < 0) throw std::runtime_error("Cannot find stream info: " + av_err(ret));
+    return owned;
 }
 
-void VideoPlugin::close_file() {
-    stop_streaming();
-    if (fmt_ctx_) {
-        avformat_close_input(&fmt_ctx_);
-        fmt_ctx_ = nullptr;
-    }
-    file_path_.clear();
-    video_stream_ = -1;
-    audio_stream_ = -1;
-    bitrate_ready_  = false;
-    waveform_ready_ = false;
-    bitrate_ = {};
-    waveform_ = {};
+CodecPtr open_decoder(AVStream* st) {
+    const AVCodec* dec = avcodec_find_decoder(st->codecpar->codec_id);
+    if (!dec) throw std::runtime_error("No decoder for codec");
+    CodecPtr ctx(avcodec_alloc_context3(dec));
+    if (!ctx) throw std::runtime_error("Out of memory");
+    avcodec_parameters_to_context(ctx.get(), st->codecpar);
+    ctx->pkt_timebase = st->time_base;
+    ctx->thread_count = 0;   // let FFmpeg pick (frame/slice threads)
+    if (avcodec_open2(ctx.get(), dec, nullptr) < 0) throw std::runtime_error("Cannot open decoder");
+    return ctx;
 }
 
-void VideoPlugin::stop_streaming() {
-    playing_   = false;
-    streaming_ = false;
-    if (frame_pool_) {
-        frame_pool_->close();
-    }
-    release_latest_frame();
+/// Media timeline origin (seconds): browsers report <audio>.currentTime
+/// relative to the container start, so all our timestamps are too.
+double container_start(const AVFormatContext* fc) {
+    return fc->start_time != AV_NOPTS_VALUE ? static_cast<double>(fc->start_time) / AV_TIME_BASE : 0.0;
 }
 
-// Recycle the pinhole "latest frame" slot back to the pool.  Called from
-// stop_streaming() and from set_pinhole() if the prior pinhole is being
-// replaced.  Safe to call multiple times.
-void VideoPlugin::release_latest_frame() {
-    anyar::SharedBuffer* prev = nullptr;
-    {
-        std::lock_guard<std::mutex> lk(latest_mu_);
-        prev        = latest_buf_;
-        latest_buf_ = nullptr;
-    }
-    if (prev && frame_pool_) {
-        frame_pool_->release_write(*prev, "{}");
-        frame_pool_->release_read(prev->name());
+std::optional<anyar::pixel_format> map_pix_fmt(int f) {
+    switch (f) {
+        case AV_PIX_FMT_YUV420P:
+        case AV_PIX_FMT_YUVJ420P: return anyar::pixel_format::yuv420;
+        case AV_PIX_FMT_NV12:     return anyar::pixel_format::nv12;
+        case AV_PIX_FMT_NV21:     return anyar::pixel_format::nv21;
+        case AV_PIX_FMT_RGBA:     return anyar::pixel_format::rgba;
+        case AV_PIX_FMT_BGRA:     return anyar::pixel_format::bgra;
+        case AV_PIX_FMT_RGB24:    return anyar::pixel_format::rgb;
+        case AV_PIX_FMT_GRAY8:    return anyar::pixel_format::grayscale;
+        default:                  return std::nullopt;
     }
 }
 
-// ── set_pinhole ─────────────────────────────────────────────────────────────
-//
-// Wires the on_render callback that draws the most-recently published frame
-// onto the native overlay surface.  Runs on the GTK main thread (NOT a fiber).
-void VideoPlugin::set_pinhole(std::shared_ptr<anyar::Pinhole> pin) {
-    pinhole_ = std::move(pin);
-    if (!pinhole_) return;
+// ── Probe ───────────────────────────────────────────────────────────────────
 
-    pinhole_->on_render([this](anyar::PinholeRenderContext& ctx) {
-        anyar::SharedBuffer* buf = nullptr;
-        int w = 0, h = 0;
-        std::string fmt;
-        {
-            std::lock_guard<std::mutex> lk(latest_mu_);
-            buf = latest_buf_;
-            w   = latest_w_;
-            h   = latest_h_;
-            fmt = latest_fmt_;
-        }
-        if (!buf || w <= 0 || h <= 0) {
-            ctx.clear(0.0f, 0.0f, 0.0f, 1.0f);
-            return;
-        }
+std::shared_ptr<MediaInfo> probe_file(const std::string& path) {
+    auto fc = open_input(path);
+    auto info = std::make_shared<MediaInfo>();
+    info->path = path;
+    auto& p = info->probe;
+    p.duration = fc->duration != AV_NOPTS_VALUE ? static_cast<double>(fc->duration) / AV_TIME_BASE : 0.0;
+    std::error_code ec;
+    p.fileSizeBytes = static_cast<int64_t>(std::filesystem::file_size(path, ec));
 
-        // Fill the surface with opaque black so letterbox/pillarbox bars
-        // are black rather than transparent (which would show the desktop).
-        ctx.clear(0.0f, 0.0f, 0.0f, 1.0f);
-
-        // Compute a letterbox viewport that preserves the video's aspect ratio.
-        auto [vw, vh] = ctx.size_px();
-        const float video_ar  = static_cast<float>(w) / static_cast<float>(h);
-        const float canvas_ar = static_cast<float>(vw) / static_cast<float>(vh);
-        int lx, ly, lw, lh;
-        if (video_ar >= canvas_ar) {
-            // Wider than canvas → pillarbox (black top/bottom)
-            lw = vw;
-            lh = static_cast<int>(vw / video_ar + 0.5f);
-            lx = 0;
-            ly = (vh - lh) / 2;
-        } else {
-            // Taller than canvas → letterbox (black left/right)
-            lh = vh;
-            lw = static_cast<int>(vh * video_ar + 0.5f);
-            lx = (vw - lw) / 2;
-            ly = 0;
-        }
-#ifdef __linux__
-        glViewport(lx, ly, lw, lh);
-#endif
-        ctx.draw_image(reinterpret_cast<const uint8_t*>(buf->data()),
-                       buf->size(), w, h, pixel_format_from_str(fmt));
-#ifdef __linux__
-        glViewport(0, 0, vw, vh);  // restore for any subsequent draws
-#endif
-    });
+    int v = av_find_best_stream(fc.get(), AVMEDIA_TYPE_VIDEO, -1, -1, nullptr, 0);
+    int a = av_find_best_stream(fc.get(), AVMEDIA_TYPE_AUDIO, -1, -1, nullptr, 0);
+    if (v >= 0) {
+        auto* st  = fc->streams[v];
+        auto* par = st->codecpar;
+        p.width  = par->width;
+        p.height = par->height;
+        const AVCodecDescriptor* d = avcodec_descriptor_get(par->codec_id);
+        p.videoCodec = d ? d->name : "unknown";
+        AVRational fr = st->avg_frame_rate.den > 0 ? st->avg_frame_rate : st->r_frame_rate;
+        if (fr.den > 0 && fr.num > 0) p.fps = av_q2d(fr);
+    }
+    if (a >= 0) {
+        auto* par = fc->streams[a]->codecpar;
+        const AVCodecDescriptor* d = avcodec_descriptor_get(par->codec_id);
+        p.audioCodec = d ? d->name : "unknown";
+        p.sampleRate = par->sample_rate;
+        p.channels   = par->channels;
+    }
+    return info;
 }
 
-// ── Bitrate analysis ────────────────────────────────────────────────────────
+// ── Bitrate analysis (worker thread) ────────────────────────────────────────
 //
 // Iterate all packets, bucket their byte sizes by time window.
 
-void VideoPlugin::compute_bitrate(double step) {
-    if (!fmt_ctx_) throw std::runtime_error("No file open");
+BitrateData compute_bitrate(const std::string& path, double duration, double step) {
     if (step <= 0) step = 0.5;
+    auto fc = open_input(path);
+    const int vidx = av_find_best_stream(fc.get(), AVMEDIA_TYPE_VIDEO, -1, -1, nullptr, 0);
+    const int aidx = av_find_best_stream(fc.get(), AVMEDIA_TYPE_AUDIO, -1, -1, nullptr, 0);
+    const double origin = container_start(fc.get());
 
-    // Seek back to beginning
-    av_seek_frame(fmt_ctx_, -1, 0, AVSEEK_FLAG_BACKWARD);
+    const double dur = duration > 0 ? duration : 1.0;
+    const int n = std::max(1, static_cast<int>(std::ceil(dur / step)));
+    std::vector<int64_t> vb(n, 0), ab(n, 0);
 
-    double dur = probe_.duration;
-    if (dur <= 0) dur = 1.0;
-    int n_buckets = static_cast<int>(std::ceil(dur / step));
-    if (n_buckets < 1) n_buckets = 1;
-
-    std::vector<int64_t> v_bytes(n_buckets, 0);
-    std::vector<int64_t> a_bytes(n_buckets, 0);
-
-    AVPacket* pkt = av_packet_alloc();
-    while (av_read_frame(fmt_ctx_, pkt) >= 0) {
-        int idx = pkt->stream_index;
-        double t = 0.0;
-        if (idx >= 0 && idx < static_cast<int>(fmt_ctx_->nb_streams)) {
-            t = ts_to_sec(pkt->pts, fmt_ctx_->streams[idx]->time_base);
+    PacketPtr pkt(av_packet_alloc());
+    while (av_read_frame(fc.get(), pkt.get()) >= 0) {
+        const int idx = pkt->stream_index;
+        if (idx == vidx || idx == aidx) {
+            int64_t ts = pkt->pts != AV_NOPTS_VALUE ? pkt->pts : pkt->dts;
+            double t = ts != AV_NOPTS_VALUE ? ts * av_q2d(fc->streams[idx]->time_base) - origin : 0.0;
+            int bucket = std::clamp(static_cast<int>(t / step), 0, n - 1);
+            (idx == vidx ? vb : ab)[bucket] += pkt->size;
         }
-        int bucket = std::clamp(static_cast<int>(t / step), 0, n_buckets - 1);
-
-        if (idx == video_stream_) {
-            v_bytes[bucket] += pkt->size;
-        } else if (idx == audio_stream_) {
-            a_bytes[bucket] += pkt->size;
-        }
-        av_packet_unref(pkt);
-    }
-    av_packet_free(&pkt);
-
-    // Convert to bits per second
-    bitrate_.timestamps.resize(n_buckets);
-    bitrate_.videoBps.resize(n_buckets);
-    bitrate_.audioBps.resize(n_buckets);
-    for (int i = 0; i < n_buckets; ++i) {
-        bitrate_.timestamps[i] = i * step;
-        bitrate_.videoBps[i]   = (v_bytes[i] * 8.0) / step;
-        bitrate_.audioBps[i]   = (a_bytes[i] * 8.0) / step;
+        av_packet_unref(pkt.get());
     }
 
-    bitrate_ready_ = true;
+    BitrateData out;
+    out.timestamps.resize(n);
+    out.videoBps.resize(n);
+    out.audioBps.resize(n);
+    for (int i = 0; i < n; ++i) {
+        out.timestamps[i] = (i + 0.5) * step;          // bucket centre
+        out.videoBps[i]   = vb[i] * 8.0 / step;
+        out.audioBps[i]   = ab[i] * 8.0 / step;
+    }
+    return out;
 }
 
-// ── Waveform extraction ─────────────────────────────────────────────────────
+// ── Waveform extraction (worker thread) ─────────────────────────────────────
 //
-// Decode audio → resample to mono 8kHz → downsample to N peak pairs.
+// Decode audio → resample to mono 8 kHz float → reduce to N (min,max) pairs.
+// The resampler is configured from the first DECODED frame (the decoder's
+// real output format/rate/layout), not from codecpar, which may differ
+// (e.g. HE-AAC SBR doubles the rate; some decoders output planar formats).
 
-void VideoPlugin::compute_waveform(int num_samples) {
-    if (!fmt_ctx_) throw std::runtime_error("No file open");
-    if (audio_stream_ < 0) {
-        waveform_.peaks.clear();
-        waveform_ready_ = true;
-        return;
-    }
+WaveformData compute_waveform(const std::string& path, int num_samples) {
+    constexpr int kRate = 8000;
     if (num_samples <= 0) num_samples = 2000;
+    WaveformData out;
 
-    // Open audio decoder
-    auto* par = fmt_ctx_->streams[audio_stream_]->codecpar;
-    const AVCodec* dec = avcodec_find_decoder(par->codec_id);
-    if (!dec) throw std::runtime_error("No decoder for audio codec");
+    auto fc = open_input(path);
+    const int aidx = av_find_best_stream(fc.get(), AVMEDIA_TYPE_AUDIO, -1, -1, nullptr, 0);
+    if (aidx < 0) return out;
+    auto dec = open_decoder(fc->streams[aidx]);
 
-    AVCodecContext* dec_ctx = avcodec_alloc_context3(dec);
-    avcodec_parameters_to_context(dec_ctx, par);
-    if (avcodec_open2(dec_ctx, dec, nullptr) < 0) {
-        avcodec_free_context(&dec_ctx);
-        throw std::runtime_error("Cannot open audio decoder");
-    }
+    SwrPtr swr;
+    int swr_fmt = -1, swr_rate = 0;
+    uint64_t swr_layout = 0;
+    std::vector<float> samples;
+    std::vector<float> chunk;
 
-    // Set up resampler → mono, 8000 Hz, FLT
-    SwrContext* swr = swr_alloc_set_opts(nullptr,
-        AV_CH_LAYOUT_MONO,  AV_SAMPLE_FMT_FLT, 8000,
-        par->channel_layout ? par->channel_layout : av_get_default_channel_layout(par->channels),
-        static_cast<AVSampleFormat>(par->format), par->sample_rate,
-        0, nullptr);
-    if (!swr || swr_init(swr) < 0) {
-        avcodec_free_context(&dec_ctx);
-        if (swr) swr_free(&swr);
-        throw std::runtime_error("Cannot initialize resampler");
-    }
-
-    // Collect all resampled audio into a buffer
-    std::vector<float> all_samples;
-    all_samples.reserve(8000 * static_cast<int>(probe_.duration + 1));
-
-    AVPacket* pkt   = av_packet_alloc();
-    AVFrame*  frame  = av_frame_alloc();
-    AVFrame*  resampled = av_frame_alloc();
-    resampled->format      = AV_SAMPLE_FMT_FLT;
-    resampled->channel_layout = AV_CH_LAYOUT_MONO;
-    resampled->sample_rate = 8000;
-
-    // Seek to beginning
-    av_seek_frame(fmt_ctx_, audio_stream_, 0, AVSEEK_FLAG_BACKWARD);
-
-    while (av_read_frame(fmt_ctx_, pkt) >= 0) {
-        if (pkt->stream_index != audio_stream_) {
-            av_packet_unref(pkt);
-            continue;
+    auto resample = [&](const AVFrame* f) {
+        const uint64_t layout = f->channel_layout ? f->channel_layout
+                                                  : av_get_default_channel_layout(f->channels);
+        if (!swr || f->format != swr_fmt || f->sample_rate != swr_rate || layout != swr_layout) {
+            swr.reset(swr_alloc_set_opts(nullptr, AV_CH_LAYOUT_MONO, AV_SAMPLE_FMT_FLT, kRate,
+                                         layout, static_cast<AVSampleFormat>(f->format),
+                                         f->sample_rate, 0, nullptr));
+            if (!swr || swr_init(swr.get()) < 0) throw std::runtime_error("Cannot initialize resampler");
+            swr_fmt = f->format; swr_rate = f->sample_rate; swr_layout = layout;
         }
-        avcodec_send_packet(dec_ctx, pkt);
-        while (avcodec_receive_frame(dec_ctx, frame) == 0) {
-            // Estimate output size
-            int out_count = swr_get_out_samples(swr, frame->nb_samples);
-            if (out_count <= 0) out_count = frame->nb_samples * 2;
+        const int cap = swr_get_out_samples(swr.get(), f ? f->nb_samples : 0) + 32;
+        chunk.resize(static_cast<size_t>(std::max(cap, 32)));
+        uint8_t* outp = reinterpret_cast<uint8_t*>(chunk.data());
+        int got = swr_convert(swr.get(), &outp, static_cast<int>(chunk.size()),
+                              const_cast<const uint8_t**>(f->extended_data), f->nb_samples);
+        if (got > 0) samples.insert(samples.end(), chunk.begin(), chunk.begin() + got);
+    };
 
-            // Re-set frame properties (av_frame_unref clears them)
-            resampled->format         = AV_SAMPLE_FMT_FLT;
-            resampled->channel_layout = AV_CH_LAYOUT_MONO;
-            resampled->sample_rate    = 8000;
-            resampled->nb_samples     = out_count;
-            if (av_frame_get_buffer(resampled, 0) < 0) {
-                av_frame_unref(frame);
-                continue;
-            }
-
-            int got = swr_convert(swr,
-                resampled->data, out_count,
-                (const uint8_t**)frame->data, frame->nb_samples);
-
-            if (got > 0 && resampled->data[0]) {
-                const float* fdata = reinterpret_cast<const float*>(resampled->data[0]);
-                all_samples.insert(all_samples.end(), fdata, fdata + got);
-            }
-            av_frame_unref(resampled);
+    PacketPtr pkt(av_packet_alloc());
+    FramePtr frame(av_frame_alloc());
+    auto drain = [&] {
+        while (avcodec_receive_frame(dec.get(), frame.get()) == 0) {
+            resample(frame.get());
+            av_frame_unref(frame.get());
         }
-        av_packet_unref(pkt);
+    };
+    while (av_read_frame(fc.get(), pkt.get()) >= 0) {
+        if (pkt->stream_index == aidx && avcodec_send_packet(dec.get(), pkt.get()) >= 0) drain();
+        av_packet_unref(pkt.get());
+    }
+    avcodec_send_packet(dec.get(), nullptr);
+    drain();
+    if (swr) {   // flush buffered resampler output
+        chunk.resize(static_cast<size_t>(swr_get_delay(swr.get(), kRate) + 64));
+        uint8_t* outp = reinterpret_cast<uint8_t*>(chunk.data());
+        int got = swr_convert(swr.get(), &outp, static_cast<int>(chunk.size()), nullptr, 0);
+        if (got > 0) samples.insert(samples.end(), chunk.begin(), chunk.begin() + got);
     }
 
-    // Flush decoder
-    avcodec_send_packet(dec_ctx, nullptr);
-    while (avcodec_receive_frame(dec_ctx, frame) == 0) {
-        int out_count = swr_get_out_samples(swr, frame->nb_samples);
-        if (out_count <= 0) out_count = frame->nb_samples * 2;
-        resampled->format         = AV_SAMPLE_FMT_FLT;
-        resampled->channel_layout = AV_CH_LAYOUT_MONO;
-        resampled->sample_rate    = 8000;
-        resampled->nb_samples     = out_count;
-        if (av_frame_get_buffer(resampled, 0) < 0) {
-            av_frame_unref(frame);
-            continue;
-        }
-        int got = swr_convert(swr,
-            resampled->data, out_count,
-            (const uint8_t**)frame->data, frame->nb_samples);
-        if (got > 0 && resampled->data[0]) {
-            const float* fdata = reinterpret_cast<const float*>(resampled->data[0]);
-            all_samples.insert(all_samples.end(), fdata, fdata + got);
-        }
-        av_frame_unref(resampled);
-    }
-
-    // Flush resampler (buffered samples)
-    {
-        int out_count = swr_get_delay(swr, 8000) + 64;
-        if (out_count > 0) {
-            resampled->format         = AV_SAMPLE_FMT_FLT;
-            resampled->channel_layout = AV_CH_LAYOUT_MONO;
-            resampled->sample_rate    = 8000;
-            resampled->nb_samples     = out_count;
-            if (av_frame_get_buffer(resampled, 0) >= 0) {
-                int got = swr_convert(swr, resampled->data, out_count, nullptr, 0);
-                if (got > 0 && resampled->data[0]) {
-                    const float* fdata = reinterpret_cast<const float*>(resampled->data[0]);
-                    all_samples.insert(all_samples.end(), fdata, fdata + got);
-                }
-            }
-            av_frame_unref(resampled);
-        }
-    }
-
-    av_frame_free(&frame);
-    av_frame_free(&resampled);
-    av_packet_free(&pkt);
-    swr_free(&swr);
-    avcodec_free_context(&dec_ctx);
-
-    // Downsample to peak pairs: for each segment produce (min, max)
-    int total = static_cast<int>(all_samples.size());
-    if (total == 0) {
-        waveform_.peaks.clear();
-        waveform_ready_ = true;
-        return;
-    }
-
-    int actual_samples = std::min(num_samples, total / 2);
-    if (actual_samples < 1) actual_samples = 1;
-    int per_seg = total / actual_samples;
-
-    waveform_.peaks.resize(actual_samples * 2);
-    for (int i = 0; i < actual_samples; ++i) {
-        int start = i * per_seg;
-        int end   = std::min(start + per_seg, total);
+    const int total = static_cast<int>(samples.size());
+    if (total == 0) return out;
+    const int n = std::max(1, std::min(num_samples, total / 2));
+    out.peaks.resize(static_cast<size_t>(n) * 2);
+    for (int i = 0; i < n; ++i) {
+        // Proportional segment bounds so the whole signal is covered.
+        const int start = static_cast<int>(static_cast<int64_t>(i) * total / n);
+        const int end   = static_cast<int>(static_cast<int64_t>(i + 1) * total / n);
         float lo = 0, hi = 0;
         for (int j = start; j < end; ++j) {
-            lo = std::min(lo, all_samples[j]);
-            hi = std::max(hi, all_samples[j]);
+            lo = std::min(lo, samples[j]);
+            hi = std::max(hi, samples[j]);
         }
-        waveform_.peaks[i * 2]     = lo;
-        waveform_.peaks[i * 2 + 1] = hi;
+        out.peaks[i * 2]     = lo;
+        out.peaks[i * 2 + 1] = hi;
     }
-
-    waveform_ready_ = true;
+    return out;
 }
 
-// \u2500\u2500 Raw-frame decode loop (runs as a fibre) \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
+// ── Audio-only remux (worker thread) ────────────────────────────────────────
 //
-// Opens a SEPARATE AVFormatContext for this file so seek/decode state is
-// independent from analysis.  When the decoded pixel format is directly
-// supported by the WebGL renderer, frames are copied into shared memory
-// without conversion.  Otherwise falls back to swscale → RGBA.
-// The frontend fetches frames via anyar-shm:// (zero-copy on Linux).
+// The <audio> element only needs the soundtrack; C++ decodes the video.
+// Handing WebKit the full file makes its media pipeline demux (and buffer)
+// the video track too — with high-bitrate video on a high-latency audio
+// device, flushing seeks can then stall the pipeline for good.  Stream-copy
+// the audio into Matroska (accepts any codec; no re-encode), shifted to the
+// same timeline origin the decoder uses (container start time).
 
-void VideoPlugin::run_decode_loop() {
-    // \u2500\u2500 Open a private format context \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
-    AVFormatContext* fmt = nullptr;
-    if (avformat_open_input(&fmt, file_path_.c_str(), nullptr, nullptr) < 0) {
-        if (events_) events_->emit("video:error", {{"message", "Cannot open file for decoding"}});
-        return;
-    }
-    if (avformat_find_stream_info(fmt, nullptr) < 0) {
-        avformat_close_input(&fmt);
-        if (events_) events_->emit("video:error", {{"message", "Cannot find stream info"}});
-        return;
-    }
+void remux_audio_only(const std::string& in_path, const std::string& out_path) {
+    auto in = open_input(in_path);
+    const int aidx = av_find_best_stream(in.get(), AVMEDIA_TYPE_AUDIO, -1, -1, nullptr, 0);
+    if (aidx < 0) throw std::runtime_error("no audio stream");
+    AVStream* ist = in->streams[aidx];
 
-    int vidx = av_find_best_stream(fmt, AVMEDIA_TYPE_VIDEO, -1, -1, nullptr, 0);
-    if (vidx < 0) {
-        avformat_close_input(&fmt);
-        if (events_) events_->emit("video:error", {{"message", "No video stream found"}});
-        return;
-    }
-
-    // \u2500\u2500 Open video decoder \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
-    auto* par = fmt->streams[vidx]->codecpar;
-    const AVCodec* dec = avcodec_find_decoder(par->codec_id);
-    if (!dec) { avformat_close_input(&fmt); return; }
-
-    AVCodecContext* dec_ctx = avcodec_alloc_context3(dec);
-    avcodec_parameters_to_context(dec_ctx, par);
-    if (avcodec_open2(dec_ctx, dec, nullptr) < 0) {
-        avcodec_free_context(&dec_ctx);
-        avformat_close_input(&fmt);
-        return;
-    }
-
-    // \u2500\u2500 Allocate work frames \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
-    AVFrame* frame = av_frame_alloc();
-    AVPacket* pkt   = av_packet_alloc();
-
-    SwsContext* sws = nullptr;
-    AVFrame*    conv_frame = nullptr;    // only used when sws conversion needed
-    uint32_t w = 0, h = 0;
-    size_t frame_bytes = 0;              // per-frame buffer size
-    std::string webgl_format;            // "yuv420", "nv12", "nv21", "rgba", "rgb", "grayscale"
-    bool use_sws = false;                // true if we need swscale conversion
-
-    double fps = probe_.fps > 0 ? probe_.fps : 25.0;
-    uint32_t fnum = 0;
-
-    // ── Format mapping: FFmpeg pixel format → WebGL-supported format ────
-    //    Returns "" if no direct mapping (needs sws fallback to RGBA).
-    auto map_format = [](AVPixelFormat pf) -> std::string {
-        switch (pf) {
-            case AV_PIX_FMT_YUV420P: return "yuv420";
-            case AV_PIX_FMT_NV12:    return "nv12";
-            case AV_PIX_FMT_NV21:    return "nv21";
-            case AV_PIX_FMT_RGBA:    return "rgba";
-            case AV_PIX_FMT_RGB24:   return "rgb";
-            case AV_PIX_FMT_GRAY8:   return "grayscale";
-            default:                  return "";
+    AVFormatContext* oc_raw = nullptr;
+    if (avformat_alloc_output_context2(&oc_raw, nullptr, "matroska", out_path.c_str()) < 0 || !oc_raw)
+        throw std::runtime_error("cannot create audio remux output");
+    struct OutCloser {
+        void operator()(AVFormatContext* c) const {
+            if (c->pb) avio_closep(&c->pb);
+            avformat_free_context(c);
         }
     };
+    std::unique_ptr<AVFormatContext, OutCloser> oc(oc_raw);
 
-    // Calculate buffer size for a given format + dimensions
-    auto calc_frame_bytes = [](const std::string& fmt, uint32_t fw, uint32_t fh) -> size_t {
-        if (fmt == "yuv420" || fmt == "nv12" || fmt == "nv21")
-            return static_cast<size_t>(fw) * fh * 3 / 2;  // 1.5 bytes/pixel
-        if (fmt == "rgb")
-            return static_cast<size_t>(fw) * fh * 3;
-        if (fmt == "grayscale")
-            return static_cast<size_t>(fw) * fh;
-        // rgba (and sws fallback)
-        return static_cast<size_t>(fw) * fh * 4;
-    };
+    AVStream* ost = avformat_new_stream(oc.get(), nullptr);
+    if (!ost || avcodec_parameters_copy(ost->codecpar, ist->codecpar) < 0)
+        throw std::runtime_error("cannot copy audio stream parameters");
+    ost->codecpar->codec_tag = 0;
+    ost->time_base = ist->time_base;
+    if (avio_open(&oc->pb, out_path.c_str(), AVIO_FLAG_WRITE) < 0)
+        throw std::runtime_error("cannot open " + out_path);
+    if (avformat_write_header(oc.get(), nullptr) < 0) throw std::runtime_error("cannot write audio header");
 
-    // Helper: detect format from first decoded frame and set up state
-    auto init_format = [&](const AVFrame* decoded) -> bool {
-        w = static_cast<uint32_t>(decoded->width);
-        h = static_cast<uint32_t>(decoded->height);
-
-        webgl_format = map_format(static_cast<AVPixelFormat>(decoded->format));
-        if (!webgl_format.empty()) {
-            // Direct path — no sws needed
-            use_sws = false;
-            frame_bytes = calc_frame_bytes(webgl_format, w, h);
-            // Clean up any previous sws state
-            if (sws) { sws_freeContext(sws); sws = nullptr; }
-            if (conv_frame) { av_frame_free(&conv_frame); conv_frame = nullptr; }
-            return true;
+    const int64_t origin = av_rescale_q(in->start_time != AV_NOPTS_VALUE ? in->start_time : 0,
+                                        AV_TIME_BASE_Q, ist->time_base);
+    PacketPtr pkt(av_packet_alloc());
+    while (av_read_frame(in.get(), pkt.get()) >= 0) {
+        if (pkt->stream_index == aidx) {
+            if (pkt->pts != AV_NOPTS_VALUE) pkt->pts -= origin;
+            if (pkt->dts != AV_NOPTS_VALUE) pkt->dts -= origin;
+            if ((pkt->dts != AV_NOPTS_VALUE && pkt->dts < 0) || (pkt->pts != AV_NOPTS_VALUE && pkt->pts < 0)) {
+                av_packet_unref(pkt.get());   // encoder priming before the origin
+                continue;
+            }
+            pkt->stream_index = 0;
+            av_packet_rescale_ts(pkt.get(), ist->time_base, ost->time_base);
+            pkt->pos = -1;
+            av_interleaved_write_frame(oc.get(), pkt.get());   // takes the reference
         }
+        av_packet_unref(pkt.get());
+    }
+    av_write_trailer(oc.get());
+}
 
-        // Fallback: convert to RGBA via swscale
-        use_sws = true;
-        webgl_format = "rgba";
-        frame_bytes = static_cast<size_t>(w) * h * 4;
+// ── VideoDecoder — used from one worker job at a time ───────────────────────
 
-        if (sws) sws_freeContext(sws);
-        if (conv_frame) av_frame_free(&conv_frame);
+class VideoDecoder {
+public:
+    explicit VideoDecoder(const std::string& path) : fmt_(open_input(path)) {
+        vidx_ = av_find_best_stream(fmt_.get(), AVMEDIA_TYPE_VIDEO, -1, -1, nullptr, 0);
+        if (vidx_ < 0) throw std::runtime_error("No video stream found");
+        st_    = fmt_->streams[vidx_];
+        ctx_   = open_decoder(st_);
+        frame_.reset(av_frame_alloc());
+        held_.reset(av_frame_alloc());
+        conv_.reset(av_frame_alloc());
+        pkt_.reset(av_packet_alloc());
+        origin_ = container_start(fmt_.get());
+        AVRational fr = st_->avg_frame_rate.den > 0 ? st_->avg_frame_rate : st_->r_frame_rate;
+        fps_ = (fr.den > 0 && fr.num > 0) ? av_q2d(fr) : 25.0;
+    }
 
-        sws = sws_getContext(
-            decoded->width, decoded->height,
-            static_cast<AVPixelFormat>(decoded->format),
-            decoded->width, decoded->height, AV_PIX_FMT_RGBA,
-            SWS_BILINEAR, nullptr, nullptr, nullptr);
-        if (!sws) return false;
+    double fps() const { return fps_; }
 
-        conv_frame = av_frame_alloc();
-        conv_frame->format = AV_PIX_FMT_RGBA;
-        conv_frame->width  = decoded->width;
-        conv_frame->height = decoded->height;
-        if (av_frame_get_buffer(conv_frame, 32) < 0) {
-            sws_freeContext(sws); sws = nullptr;
-            av_frame_free(&conv_frame);
-            return false;
-        }
-        return true;
-    };
-
-    // \u2500\u2500 Helper: Decode the next video frame into `frame` \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
-    auto decode_next = [&]() -> bool {
-        if (avcodec_receive_frame(dec_ctx, frame) == 0)
-            return true;
-
-        int read_errors = 0;
+    /// Decode the next video frame into frame_.  Drains the decoder at EOF
+    /// so the last frames are not lost.  false = end of stream.
+    bool next() {
         while (true) {
-            int ret = av_read_frame(fmt, pkt);
-            if (ret == AVERROR_EOF) return false;
-            if (ret < 0) {
-                if (++read_errors >= 8) return false;
-                continue;
-            }
-            read_errors = 0;
-
-            if (pkt->stream_index != vidx) {
-                av_packet_unref(pkt);
-                continue;
-            }
-
-            ret = avcodec_send_packet(dec_ctx, pkt);
-            av_packet_unref(pkt);
-
-            if (ret == AVERROR(EAGAIN)) {
-                if (avcodec_receive_frame(dec_ctx, frame) == 0)
-                    return true;
-            }
-
-            if (avcodec_receive_frame(dec_ctx, frame) == 0)
+            int r = avcodec_receive_frame(ctx_.get(), frame_.get());
+            if (r == 0) {
+                last_pts_ = pts_of(frame_.get());
                 return true;
-        }
-    };
-
-    // \u2500\u2500 Helper: Copy current `frame` into a SharedBuffer slot \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
-    //    For directly-supported formats, copies raw planes without sws.
-    //    For unsupported formats, runs swscale \u2192 RGBA first.
-    //    Returns PTS on success, or \u20131.0 on fatal error.
-    auto copy_frame_to_shm = [&](anyar::SharedBuffer& dst,
-                                 double fallback_pts) -> double {
-        // Resolution or format change guard
-        if (static_cast<uint32_t>(frame->width)  != w ||
-            static_cast<uint32_t>(frame->height) != h) {
-            if (!init_format(frame)) return -1.0;
-            // Recreate the pool with new buffer size
-            frame_pool_ = std::make_unique<anyar::SharedBufferPool>(
-                "video-frames", frame_bytes, 5);
-            if (events_) events_->emit("video:ready", {
-                {"width", w}, {"height", h}, {"fps", fps},
-                {"format", webgl_format}
-            });
-        }
-
-        double pts = (frame->pts != AV_NOPTS_VALUE)
-            ? frame->pts * av_q2d(fmt->streams[vidx]->time_base)
-            : fallback_pts;
-
-        uint8_t* out = reinterpret_cast<uint8_t*>(dst.data());
-
-        if (!use_sws) {
-            // Direct copy \u2014 format already matches a WebGL renderer
-            if (webgl_format == "yuv420") {
-                // 3 separate planes: Y (w*h), U (w/2*h/2), V (w/2*h/2)
-                size_t y_size  = static_cast<size_t>(w) * h;
-                size_t uv_size = static_cast<size_t>(w / 2) * (h / 2);
-
-                // Y plane
-                if (frame->linesize[0] == static_cast<int>(w)) {
-                    std::memcpy(out, frame->data[0], y_size);
-                } else {
-                    for (uint32_t r = 0; r < h; ++r)
-                        std::memcpy(out + r * w, frame->data[0] + r * frame->linesize[0], w);
-                }
-                out += y_size;
-
-                // U plane
-                uint32_t hw = w / 2, hh = h / 2;
-                if (frame->linesize[1] == static_cast<int>(hw)) {
-                    std::memcpy(out, frame->data[1], uv_size);
-                } else {
-                    for (uint32_t r = 0; r < hh; ++r)
-                        std::memcpy(out + r * hw, frame->data[1] + r * frame->linesize[1], hw);
-                }
-                out += uv_size;
-
-                // V plane
-                if (frame->linesize[2] == static_cast<int>(hw)) {
-                    std::memcpy(out, frame->data[2], uv_size);
-                } else {
-                    for (uint32_t r = 0; r < hh; ++r)
-                        std::memcpy(out + r * hw, frame->data[2] + r * frame->linesize[2], hw);
-                }
-            } else if (webgl_format == "nv12" || webgl_format == "nv21") {
-                // 2 planes: Y (w*h), UV interleaved (w*h/2)
-                size_t y_size  = static_cast<size_t>(w) * h;
-                size_t uv_size = static_cast<size_t>(w) * (h / 2);
-
-                // Y plane
-                if (frame->linesize[0] == static_cast<int>(w)) {
-                    std::memcpy(out, frame->data[0], y_size);
-                } else {
-                    for (uint32_t r = 0; r < h; ++r)
-                        std::memcpy(out + r * w, frame->data[0] + r * frame->linesize[0], w);
-                }
-                out += y_size;
-
-                // UV interleaved plane
-                if (frame->linesize[1] == static_cast<int>(w)) {
-                    std::memcpy(out, frame->data[1], uv_size);
-                } else {
-                    uint32_t hh = h / 2;
-                    for (uint32_t r = 0; r < hh; ++r)
-                        std::memcpy(out + r * w, frame->data[1] + r * frame->linesize[1], w);
-                }
-            } else if (webgl_format == "rgba") {
-                // Single plane, 4 bytes/pixel
-                if (frame->linesize[0] == static_cast<int>(w * 4)) {
-                    std::memcpy(out, frame->data[0], frame_bytes);
-                } else {
-                    for (uint32_t r = 0; r < h; ++r)
-                        std::memcpy(out + r * w * 4,
-                                    frame->data[0] + r * frame->linesize[0], w * 4);
-                }
-            } else if (webgl_format == "rgb") {
-                // Single plane, 3 bytes/pixel
-                if (frame->linesize[0] == static_cast<int>(w * 3)) {
-                    std::memcpy(out, frame->data[0], frame_bytes);
-                } else {
-                    for (uint32_t r = 0; r < h; ++r)
-                        std::memcpy(out + r * w * 3,
-                                    frame->data[0] + r * frame->linesize[0], w * 3);
-                }
-            } else {
-                // grayscale \u2014 single plane, 1 byte/pixel
-                if (frame->linesize[0] == static_cast<int>(w)) {
-                    std::memcpy(out, frame->data[0], frame_bytes);
-                } else {
-                    for (uint32_t r = 0; r < h; ++r)
-                        std::memcpy(out + r * w,
-                                    frame->data[0] + r * frame->linesize[0], w);
-                }
             }
-        } else {
-            // sws fallback \u2192 RGBA
-            sws_scale(sws, frame->data, frame->linesize, 0,
-                      static_cast<int>(h), conv_frame->data, conv_frame->linesize);
-
-            if (conv_frame->linesize[0] == static_cast<int>(w * 4)) {
-                std::memcpy(out, conv_frame->data[0], frame_bytes);
-            } else {
-                for (uint32_t r = 0; r < h; ++r)
-                    std::memcpy(out + r * w * 4,
-                                conv_frame->data[0] + r * conv_frame->linesize[0], w * 4);
+            if (r == AVERROR_EOF || draining_) return false;
+            // r == EAGAIN (or a recoverable decode error): feed more input.
+            r = av_read_frame(fmt_.get(), pkt_.get());
+            if (r < 0) {
+                avcodec_send_packet(ctx_.get(), nullptr);   // enter draining mode
+                draining_ = true;
+                if (avcodec_receive_frame(ctx_.get(), frame_.get()) == 0) {
+                    last_pts_ = pts_of(frame_.get());
+                    return true;
+                }
+                return false;
             }
-        }
-
-        ++fnum;
-        return pts;
-    };
-
-    // Helper: publish a completed frame.
-    //
-    // WebGL mode: transition WRITING→READY and emit `buffer:ready`; the JS
-    // frontend will fetch + render + call `video:pool-release` to recycle.
-    //
-    // Pinhole mode: keep the slot in WRITING state (we own it), swap it
-    // into `latest_buf_` under `latest_mu_`, recycle the previous holder,
-    // and request a redraw.  No JS round-trip; on_render reads the bytes
-    // directly via SharedBuffer::data().
-    auto emit_frame = [&](anyar::SharedBuffer& buf, double pts) {
-        if (mode_ == RenderMode::Pinhole) {
-            anyar::SharedBuffer* prev = nullptr;
-            {
-                std::lock_guard<std::mutex> lk(latest_mu_);
-                prev        = latest_buf_;
-                latest_buf_ = &buf;
-                latest_w_   = static_cast<int>(w);
-                latest_h_   = static_cast<int>(h);
-                latest_fmt_ = webgl_format;
-            }
-            if (prev && frame_pool_) {
-                frame_pool_->release_write(*prev, "{}");
-                frame_pool_->release_read(prev->name());
-            }
-            if (pinhole_) pinhole_->request_redraw();
-            // Lightweight progress event so the timeline still advances.
-            if (events_) {
-                events_->emit("video:frame-pts", {
-                    {"pts", pts},
-                    {"frame", fnum},
-                });
-            }
-            return;
-        }
-
-        // WebGL mode (legacy path)
-        if (!events_) return;
-        frame_pool_->release_write(buf, "{}");
-        events_->emit("buffer:ready", {
-            {"name", buf.name()},
-            {"pool", "video-frames"},
-            {"url", "anyar-shm://" + buf.name()},
-            {"size", buf.size()},
-            {"metadata", {
-                {"width", w},
-                {"height", h},
-                {"pts", pts},
-                {"frame", fnum},
-                {"format", webgl_format}
-            }}
-        });
-    };
-
-    // \u2500\u2500 Decode first frame for pixel-format detection \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
-    {
-        bool got_first = false;
-        while (!got_first) {
-            int ret = av_read_frame(fmt, pkt);
-            if (ret < 0) break;
-            if (pkt->stream_index == vidx) {
-                avcodec_send_packet(dec_ctx, pkt);
-                if (avcodec_receive_frame(dec_ctx, frame) == 0)
-                    got_first = true;
-            }
-            av_packet_unref(pkt);
-        }
-
-        if (!got_first || !init_format(frame)) {
-            av_packet_free(&pkt);
-            av_frame_free(&frame);
-            if (sws) sws_freeContext(sws);
-            if (conv_frame) av_frame_free(&conv_frame);
-            avcodec_free_context(&dec_ctx);
-            avformat_close_input(&fmt);
-            if (events_) events_->emit("video:error", {{"message", "Failed to decode first frame"}});
-            return;
+            if (pkt_->stream_index == vidx_) avcodec_send_packet(ctx_.get(), pkt_.get());
+            av_packet_unref(pkt_.get());
         }
     }
 
-    // \u2500\u2500 Create SharedBufferPool \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
-    // ── Create SharedBufferPool ──────────────────────────────────────────
-    // Pinhole mode permanently holds one slot in `latest_buf_` (WRITING)
-    // until the next emit_frame replaces it, so it needs one extra slot
-    // beyond the working capacity to avoid deadlocking acquire_write().
-    const int pool_slots = (mode_ == RenderMode::Pinhole) ? 6 : 5;
-    frame_pool_ = std::make_unique<anyar::SharedBufferPool>(
-        "video-frames", frame_bytes, pool_slots);
+    /// Seek so that frame_ holds the first frame with pts ≥ t − tolerance
+    /// (or the last frame if the stream ends first).  false = nothing decodable.
+    bool seek_to(double t, double tolerance) {
+        const double target = std::max(0.0, t);
 
-    // \u2500\u2500 Send ready event + poster frame \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
-    if (events_) {
-        events_->emit("video:ready", {
-            {"width", w}, {"height", h}, {"fps", fps},
-            {"format", webgl_format}
-        });
-    }
-
-    {
-        auto& buf = frame_pool_->acquire_write();
-        double pts = copy_frame_to_shm(buf, 0.0);
-        if (pts < 0) goto cleanup;
-        emit_frame(buf, pts);
-    }
-
-    av_seek_frame(fmt, -1, 0, AVSEEK_FLAG_BACKWARD);
-    avcodec_flush_buffers(dec_ctx);
-
-    // \u2500\u2500 Main audio-driven decode / send loop \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
-    //
-    //  Architecture:
-    //    1. Pre-decode video frames into SharedBuffer pool slots.
-    //    2. Frontend audio element is the master clock; it sends
-    //       video:sync { time } via IPC.
-    //    3. The command handler stores that in audio_time_.
-    //    4. This loop emits buffer:ready for the frame whose PTS
-    //       best matches audio_time_.
-    //    For video-only files (no audio stream), a local wall-clock
-    //    is used instead so playback is self-driven.
-    {
-        bool eos = false;
-        const double half_frame = 0.5 / fps;
-        bool was_playing = false;
-
-        // Detect video-only (no audio stream in the file)
-        const bool has_audio = (audio_stream_ >= 0);
-
-        // Wall-clock timing for video-only playback
-        using wall_clock = std::chrono::steady_clock;
-        wall_clock::time_point wall_play_start = wall_clock::now();
-        double wall_time_offset = 0.0;  // accumulated time base (handles pause/seek)
-
-        constexpr int POOL_CAP = 5;
-        std::array<double, POOL_CAP> pool_pts{};
-        std::array<anyar::SharedBuffer*, POOL_CAP> pool_bufs{};
-        int pool_head = 0, pool_tail = 0, pool_count = 0;
-
-        while (streaming_) {
-
-            // \u2500\u2500 Handle pending seek \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
-            if (pending_seek_ >= 0) {
-                double t = pending_seek_;
-                pending_seek_ = -1.0;
-                audio_time_   = -1.0;
-
-                // Reset wall-clock base to seek target
-                if (!has_audio) {
-                    wall_time_offset = t;
-                    wall_play_start = wall_clock::now();
-                }
-
-                // Release any held pool buffers (queued via acquire_write
-                // but never emitted — must transition WRITING→READY→FREE,
-                // not just READING→FREE, otherwise slots leak).
-                for (int i = 0; i < pool_count; ++i) {
-                    int idx = (pool_head + i) % POOL_CAP;
-                    if (pool_bufs[idx]) {
-                        frame_pool_->release_write(*pool_bufs[idx], "{}");
-                        frame_pool_->release_read(pool_bufs[idx]->name());
-                        pool_bufs[idx] = nullptr;
-                    }
-                }
-                pool_head = pool_tail = pool_count = 0;
-                eos = false;
-
-                int64_t ts = static_cast<int64_t>(t * AV_TIME_BASE);
-                av_seek_frame(fmt, -1, ts, AVSEEK_FLAG_BACKWARD);
-                avcodec_flush_buffers(dec_ctx);
-
-                // Fast-forward to target
-                {
-                    AVRational vtb = fmt->streams[vidx]->time_base;
-                    int skipped = 0;
-                    bool ff_ok = true;
-                    while (streaming_ && pending_seek_ < 0) {
-                        if (!decode_next()) { ff_ok = false; break; }
-                        double fpts = (frame->pts != AV_NOPTS_VALUE)
-                            ? frame->pts * av_q2d(vtb) : t;
-                        if (fpts >= t - half_frame) break;
-                        ++skipped;
-                        if ((skipped & 0xF) == 0)
-                            boost::this_fiber::sleep_for(
-                                std::chrono::milliseconds(0));
-                    }
-
-                    if (!ff_ok && pending_seek_ < 0) {
-                        av_seek_frame(fmt, -1, ts, AVSEEK_FLAG_BACKWARD);
-                        avcodec_flush_buffers(dec_ctx);
-                    }
-                }
-
-                // Send preview frame
-                if (pending_seek_ < 0 && frame->data[0]) {
-                    auto& buf = frame_pool_->acquire_write();
-                    double pts = copy_frame_to_shm(buf, t);
-                    if (pts >= 0) {
-                        emit_frame(buf, pts);
-                    }
-                }
-
-                continue;
-            }
-
-            // \u2500\u2500 Paused \u2014 idle wait \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
-            if (!playing_) {
-                // On pause transition: save accumulated wall-clock time
-                if (was_playing && !has_audio) {
-                    auto now = wall_clock::now();
-                    wall_time_offset += std::chrono::duration<double>(now - wall_play_start).count();
-                }
-                was_playing = false;
-                boost::this_fiber::sleep_for(std::chrono::milliseconds(30));
-                continue;
-            }
-
-            // \u2500\u2500 Just resumed playing \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
-            if (!was_playing) {
-                was_playing = true;
-                // Reset wall-clock start for video-only resume
-                if (!has_audio) {
-                    wall_play_start = wall_clock::now();
-                }
-                if (eos) {
-                    eos = false;
-                    double atime = has_audio ? audio_time_ : wall_time_offset;
-                    if (atime >= 0) {
-                        int64_t ts = static_cast<int64_t>(atime * AV_TIME_BASE);
-                        av_seek_frame(fmt, -1, ts, AVSEEK_FLAG_BACKWARD);
-                        avcodec_flush_buffers(dec_ctx);
-                        // Release held buffers (queued via acquire_write
-                        // but never emitted — must transition WRITING→FREE).
-                        for (int i = 0; i < pool_count; ++i) {
-                            int idx2 = (pool_head + i) % POOL_CAP;
-                            if (pool_bufs[idx2]) {
-                                frame_pool_->release_write(*pool_bufs[idx2], "{}");
-                                frame_pool_->release_read(pool_bufs[idx2]->name());
-                                pool_bufs[idx2] = nullptr;
-                            }
-                        }
-                        pool_head = pool_tail = pool_count = 0;
-                    }
-                }
-            }
-
-            // \u2500\u2500 Pre-decode to fill pool \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
-            while (pool_count < POOL_CAP && !eos && streaming_
-                   && pending_seek_ < 0) {
-                if (!decode_next()) { eos = true; break; }
-                auto& buf = frame_pool_->acquire_write();
-                double pts = copy_frame_to_shm(buf, 0.0);
-                if (pts < 0) goto cleanup;
-                pool_bufs[pool_tail] = &buf;
-                pool_pts[pool_tail] = pts;
-                pool_tail = (pool_tail + 1) % POOL_CAP;
-                ++pool_count;
-                boost::this_fiber::sleep_for(std::chrono::milliseconds(1));
-            }
-
-            // \u2500\u2500 Audio-driven frame dispatch \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
-            {
-                double atime;
-                if (has_audio) {
-                    atime = audio_time_;
-                    if (atime < 0) {
-                        boost::this_fiber::sleep_for(std::chrono::milliseconds(5));
-                        continue;
-                    }
-                } else {
-                    // Video-only: compute time from local wall clock
-                    auto now = wall_clock::now();
-                    atime = wall_time_offset +
-                        std::chrono::duration<double>(now - wall_play_start).count();
-                }
-
-                // Drop frames the clock has already passed
-                while (pool_count > 1) {
-                    int next_idx = (pool_head + 1) % POOL_CAP;
-                    if (pool_pts[pool_head] < atime - half_frame &&
-                        pool_pts[next_idx]  <= atime + half_frame) {
-                        // Release dropped frame back to pool
-                        if (pool_bufs[pool_head]) {
-                            frame_pool_->release_write(*pool_bufs[pool_head], "{}");
-                            frame_pool_->release_read(pool_bufs[pool_head]->name());
-                            pool_bufs[pool_head] = nullptr;
-                        }
-                        pool_head = next_idx;
-                        --pool_count;
-                    } else {
-                        break;
-                    }
-                }
-
-                // Send head frame if its PTS is due
-                if (pool_count > 0 &&
-                    pool_pts[pool_head] <= atime + half_frame) {
-                    emit_frame(*pool_bufs[pool_head], pool_pts[pool_head]);
-                    pool_bufs[pool_head] = nullptr;
-                    pool_head = (pool_head + 1) % POOL_CAP;
-                    --pool_count;
-                }
-            }
-
-            // \u2500\u2500 EOS: pool fully drained \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500
-            if (eos && pool_count == 0) {
-                if (has_audio) {
-                    // Audio still playing — re-seek video to catch up
-                    double atime = audio_time_;
-                    if (atime >= 0 && atime < probe_.duration - 1.0) {
-                        int64_t ts2 = static_cast<int64_t>(atime * AV_TIME_BASE);
-                        av_seek_frame(fmt, -1, ts2, AVSEEK_FLAG_BACKWARD);
-                        avcodec_flush_buffers(dec_ctx);
-                        eos = false;
-                        continue;
-                    }
-                }
-                if (events_) events_->emit("video:ended", {});
-                playing_ = false;
-                continue;
-            }
-
-            boost::this_fiber::sleep_for(std::chrono::milliseconds(2));
+        // Land on a keyframe at or before the target.  Some demuxers (MPEG-TS,
+        // streams without an index) may land AFTER it even with
+        // AVSEEK_FLAG_BACKWARD — the decoder then skips to the next IDR — so
+        // back off progressively, and finally restart from the first byte.
+        bool got = false;
+        for (double back : {0.0, 1.0, 3.0, 10.0, 30.0, -1.0}) {
+            if (back < 0) seek_to_file_start();
+            else seek_raw(std::max(0.0, target - back));
+            got = next();
+            if (got && pts_of(frame_.get()) <= target + tolerance) break;
         }
-        // Log exit from main decode loop
-        std::cout << "[VideoPlugin] Exiting main decode loop" << std::endl;
+        if (!got) return false;
+
+        // Decode forward to the target; keep the most recent frame in held_
+        // so hitting EOF still leaves us something to show.
+        av_frame_unref(held_.get());
+        do {
+            av_frame_unref(held_.get());
+            av_frame_move_ref(held_.get(), frame_.get());
+            if (pts_of(held_.get()) >= target - tolerance) break;
+        } while (next());
+        av_frame_unref(frame_.get());
+        av_frame_move_ref(frame_.get(), held_.get());
+        last_pts_ = pts_of(frame_.get());
+        return true;
     }
 
-cleanup:
-    av_packet_free(&pkt);
-    av_frame_free(&frame);
-    if (conv_frame) av_frame_free(&conv_frame);
-    if (sws) sws_freeContext(sws);
-    avcodec_free_context(&dec_ctx);
-    avformat_close_input(&fmt);
-    frame_pool_.reset();
+    /// Copy the current frame into a mailbox frame (converting if needed).
+    std::shared_ptr<anyar::Frame> to_frame(anyar::FrameMailbox& mailbox) {
+        const AVFrame* src = frame_.get();
+        auto fmt = map_pix_fmt(src->format);
+        if (!fmt) {
+            // Unsupported layout → YUV420P via swscale.
+            sws_.reset(sws_getCachedContext(sws_.release(),
+                src->width, src->height, static_cast<AVPixelFormat>(src->format),
+                src->width, src->height, AV_PIX_FMT_YUV420P,
+                SWS_BILINEAR, nullptr, nullptr, nullptr));
+            if (!sws_) throw std::runtime_error("Unsupported pixel format");
+            if (conv_->width != src->width || conv_->height != src->height) {
+                av_frame_unref(conv_.get());
+                conv_->format = AV_PIX_FMT_YUV420P;
+                conv_->width  = src->width;
+                conv_->height = src->height;
+                if (av_frame_get_buffer(conv_.get(), 0) < 0) throw std::runtime_error("Out of memory");
+            }
+            sws_scale(sws_.get(), src->data, src->linesize, 0, src->height,
+                      conv_->data, conv_->linesize);
+            src = conv_.get();
+            fmt = anyar::pixel_format::yuv420;
+        }
+
+        const size_t bytes = anyar::pixel_format_byte_size(*fmt, src->width, src->height);
+        const int need = av_image_get_buffer_size(static_cast<AVPixelFormat>(src->format),
+                                                  src->width, src->height, 1);
+        if (need < 0 || static_cast<size_t>(need) != bytes) {
+            throw std::runtime_error("Unexpected frame layout");
+        }
+        auto out = mailbox.acquire(bytes);
+        av_image_copy_to_buffer(out->data.data(), static_cast<int>(bytes),
+                                src->data, src->linesize,
+                                static_cast<AVPixelFormat>(src->format),
+                                src->width, src->height, 1);
+        out->width  = src->width;
+        out->height = src->height;
+        out->format = *fmt;
+        out->pts    = last_pts_;
+        return out;
+    }
+
+private:
+    void seek_raw(double media_time) {
+        const double abs_t = media_time + origin_;
+        const int64_t ts = av_rescale_q(static_cast<int64_t>(abs_t * AV_TIME_BASE),
+                                        AV_TIME_BASE_Q, st_->time_base);
+        if (av_seek_frame(fmt_.get(), vidx_, ts, AVSEEK_FLAG_BACKWARD) < 0) {
+            av_seek_frame(fmt_.get(), -1, static_cast<int64_t>(abs_t * AV_TIME_BASE),
+                          AVSEEK_FLAG_BACKWARD);
+        }
+        avcodec_flush_buffers(ctx_.get());
+        draining_ = false;
+    }
+
+    void seek_to_file_start() {
+        const bool byte_ok = !(fmt_->iformat->flags & AVFMT_NO_BYTE_SEEK) &&
+                             av_seek_frame(fmt_.get(), -1, 0, AVSEEK_FLAG_BYTE) >= 0;
+        if (!byte_ok) {
+            av_seek_frame(fmt_.get(), -1, fmt_->start_time != AV_NOPTS_VALUE ? fmt_->start_time : 0,
+                          AVSEEK_FLAG_BACKWARD);
+        }
+        avcodec_flush_buffers(ctx_.get());
+        draining_ = false;
+    }
+
+    double pts_of(const AVFrame* f) const {
+        int64_t ts = f->best_effort_timestamp != AV_NOPTS_VALUE ? f->best_effort_timestamp : f->pts;
+        if (ts == AV_NOPTS_VALUE) return last_pts_ + 1.0 / fps_;
+        return ts * av_q2d(st_->time_base) - origin_;
+    }
+
+    FormatPtr fmt_;
+    AVStream* st_ = nullptr;
+    int       vidx_ = -1;
+    CodecPtr  ctx_;
+    FramePtr  frame_, held_, conv_;
+    PacketPtr pkt_;
+    SwsPtr    sws_;
+    double    origin_   = 0.0;
+    double    fps_      = 25.0;
+    double    last_pts_ = 0.0;
+    bool      draining_ = false;
+};
+
+} // namespace
+
+// ── Events ──────────────────────────────────────────────────────────────────
+
+void VideoPlugin::emit(const std::string& event, const json& payload) {
+    if (events_) events_->emit(event, payload);
 }
 
-// ── HTTP streaming route ────────────────────────────────────────────────────
+// ── Pinhole binding ─────────────────────────────────────────────────────────
 //
-// Serve the raw file with Range-request support so <video> can seek.
+// The render callback runs on the GTK main thread.  It only touches the
+// mailbox (captured by shared_ptr, so it cannot dangle) and holds the frame
+// it draws for the whole draw: the decoder can never recycle or free it
+// mid-upload.
 
-void VideoPlugin::register_stream_route() {
-    // Intentional no-op: we use serve_static or a custom route below
-    // during video:open, we return the URL pointing to the file served
-    // via a dedicated route.
+void VideoPlugin::set_pinhole(std::shared_ptr<anyar::Pinhole> pin) {
+    pinhole_ = std::move(pin);
+    if (!pinhole_) return;
+    pinhole_->on_render([mailbox = mailbox_](anyar::PinholeRenderContext& ctx) {
+        ctx.clear(0.0f, 0.0f, 0.0f, 1.0f);   // opaque letterbox bars
+        if (auto frame = mailbox->latest()) ctx.draw_frame(*frame);
+    });
+}
+
+// ── Session lifecycle ───────────────────────────────────────────────────────
+
+void VideoPlugin::start_playback(std::shared_ptr<const MediaInfo> media) {
+    auto pb = std::make_shared<PlaybackControl>();
+    pb->session = ++session_counter_;
+    playback_ = pb;
+    decode_task_.start(service_, [this, media, pb](anyar::StopToken st) {
+        run_decode_loop(st, media, pb);
+    });
+}
+
+void VideoPlugin::stop_playback() {
+    if (!decode_task_.stop(5s)) {
+        std::cerr << "[VideoPlugin] decode loop did not stop within 5s" << std::endl;
+    }
+    playback_.reset();
+    mailbox_->clear();
+    if (pinhole_) pinhole_->request_redraw();   // show black instead of a stale frame
+}
+
+// ── Audio stream for the <audio> element ────────────────────────────────────
+
+std::shared_ptr<AudioStream> VideoPlugin::prepare_audio_stream(std::shared_ptr<const MediaInfo> media) {
+    auto a = std::make_shared<AudioStream>();
+    if (!media->has_audio() || !media->has_video()) {   // already audio-only (or silent)
+        boost::fibers::promise<std::string> p;
+        p.set_value(media->path);
+        a->ready = p.get_future().share();
+        return a;
+    }
+    static std::atomic<uint64_t> counter{0};
+    a->temp_path = (std::filesystem::temp_directory_path() /
+                    ("anyar-video-player-" + std::to_string(::getpid()) + "-" +
+                     std::to_string(++counter) + ".mka")).string();
+    // Remux on the worker pool; /video/stream waits on the future.
+    a->ready = service_->async([in = media->path, out = a->temp_path]() -> std::string {
+        const double t0 = debug_now();
+        try {
+            remux_audio_only(in, out);
+            VP_DEBUG("audio-only remux ready in " << (debug_now() - t0) * 1000 << " ms: " << out);
+            return out;
+        } catch (const std::exception& e) {
+            std::cerr << "[VideoPlugin] audio remux failed (" << e.what()
+                      << "); serving the original file to <audio>" << std::endl;
+            return in;
+        }
+    }).share();
+    return a;
+}
+
+// ── Frame presentation ──────────────────────────────────────────────────────
+
+void VideoPlugin::present_frame(PlaybackControl& pb, const std::shared_ptr<anyar::Frame>& frame,
+                                bool preview) {
+    if (mode_ == RenderMode::Pinhole) {
+        mailbox_->publish(frame);
+        if (pinhole_) pinhole_->request_redraw();
+        if (preview) emit("video:frame-pts", {{"pts", frame->pts}});
+        return;
+    }
+
+    // WebGL: copy into a shared-memory slot and notify JS.  Each session
+    // (and each resolution) gets its own pool name, so a late
+    // video:pool-release for an old buffer can never touch a new one.
+    const size_t bytes = frame->data.size();
+    if (!pb.pool || pb.pool->buffer_size() != bytes) {
+        pb.pool.reset();
+        static uint64_t pool_gen = 0;
+        pb.pool = std::make_unique<anyar::SharedBufferPool>(
+            "video-frames-" + std::to_string(pb.session) + "-" + std::to_string(++pool_gen),
+            bytes, 4);
+    }
+    anyar::SharedBuffer* buf = pb.pool->try_acquire_write();
+    if (!buf) return;   // renderer behind → drop this frame rather than stall
+    std::memcpy(buf->data(), frame->data.data(), bytes);
+    pb.pool->release_write(*buf, "{}");
+    emit("buffer:ready", {
+        {"name", buf->name()},
+        {"pool", pb.pool->base_name()},
+        {"url", "anyar-shm://" + buf->name()},
+        {"size", bytes},
+        {"metadata", {
+            {"width", frame->width},
+            {"height", frame->height},
+            {"pts", frame->pts},
+            {"format", anyar::pixel_format_name(frame->format)},
+        }},
+    });
+}
+
+// ── Decode loop (BackgroundTask fiber) ──────────────────────────────────────
+//
+// Clock: the frontend <audio> element is the master clock and reports it via
+// video:sync.  Video-only files use a local wall clock instead.  Frames are
+// pre-decoded into a small queue and presented when their PTS is due; late
+// frames are dropped.  Seeks decode from the preceding keyframe to the exact
+// target, show that frame, then acknowledge with video:seeked so the
+// frontend can start audio from the same point.
+
+void VideoPlugin::run_decode_loop(anyar::StopToken stop,
+                                  std::shared_ptr<const MediaInfo> media,
+                                  std::shared_ptr<PlaybackControl> pb) {
+    std::unique_ptr<VideoDecoder> dec;
+    std::shared_ptr<anyar::Frame> first;
+    try {
+        dec = anyar::run_blocking(service_, [&] {
+            auto d = std::make_unique<VideoDecoder>(media->path);
+            if (!d->next()) throw std::runtime_error("Failed to decode first frame");
+            first = d->to_frame(*mailbox_);
+            return d;
+        });
+    } catch (const std::exception& e) {
+        emit("video:error", {{"message", e.what()}});
+        return;
+    }
+    if (stop.stop_requested()) return;
+
+    const double fps        = dec->fps();
+    const double half_frame = 0.5 / fps;
+    const bool   has_audio  = media->has_audio();
+
+    emit("video:ready", {{"width", first->width}, {"height", first->height},
+                         {"fps", fps}, {"format", anyar::pixel_format_name(first->format)}});
+    present_frame(*pb, first, /*preview=*/true);
+    first.reset();
+
+    // Decode + convert one frame on the worker pool; errors end the stream.
+    auto decode_one = [&]() -> std::shared_ptr<anyar::Frame> {
+        try {
+            const double d0 = debug_now();
+            auto f = anyar::run_blocking(service_, [&]() -> std::shared_ptr<anyar::Frame> {
+                if (!dec->next()) return nullptr;
+                return dec->to_frame(*mailbox_);
+            });
+            const double dt = debug_now() - d0;
+            if (dt > 0.1) VP_DEBUG("slow decode: " << dt * 1000 << " ms");
+            if (!f) VP_DEBUG("decoder reached end of stream");
+            return f;
+        } catch (const std::exception& e) {
+            emit("video:error", {{"message", std::string("Decode failed: ") + e.what()}});
+            return nullptr;
+        }
+    };
+
+    // Wall clock (video-only files)
+    using clock = std::chrono::steady_clock;
+    double wall_offset  = 0.0;
+    bool   wall_running = false;
+    clock::time_point wall_start;
+    auto wall_now = [&] {
+        return wall_offset + (wall_running
+            ? std::chrono::duration<double>(clock::now() - wall_start).count() : 0.0);
+    };
+
+    constexpr size_t kQueueCap = 5;
+    std::deque<std::shared_ptr<anyar::Frame>> queue;
+    bool eos = false;
+    bool ended_emitted = false;
+
+    // Debug: periodic status + stall detection while playing.
+    double last_present_wall = debug_now(), last_status_wall = 0.0, last_presented_pts = -1.0;
+    auto debug_tick = [&](double now_t) {
+        if (!debug_enabled()) return;
+        const double w = debug_now();
+        const bool stalled = pb->playing && w - last_present_wall > 1.0;
+        if (w - last_status_wall >= (stalled ? 0.5 : 2.0)) {
+            last_status_wall = w;
+            VP_DEBUG((stalled ? "STALL " : "status ") << "clock=" << now_t
+                     << " last_pts=" << last_presented_pts << " queue=" << queue.size()
+                     << " [" << (queue.empty() ? -1.0 : queue.front()->pts) << ".."
+                     << (queue.empty() ? -1.0 : queue.back()->pts) << "] eos=" << eos
+                     << " playing=" << pb->playing);
+        }
+    };
+
+    while (!stop.stop_requested()) {
+        // ── Seek ──────────────────────────────────────────────────────────
+        if (pb->pending_seek >= 0) {
+            const double   t  = pb->pending_seek;
+            const uint64_t id = pb->seek_id;
+            pb->pending_seek = -1.0;
+            pb->audio_time   = -1.0;   // wait for the frontend's post-seek clock
+            queue.clear();
+            eos = false;
+            ended_emitted = false;
+
+            VP_DEBUG("seek id=" << id << " t=" << t << " start");
+            const double seek_t0 = debug_now();
+            std::shared_ptr<anyar::Frame> f;
+            try {
+                f = anyar::run_blocking(service_, [&]() -> std::shared_ptr<anyar::Frame> {
+                    if (!dec->seek_to(t, half_frame)) return nullptr;
+                    return dec->to_frame(*mailbox_);
+                });
+            } catch (const std::exception& e) {
+                emit("video:error", {{"message", std::string("Seek failed: ") + e.what()}});
+            }
+            VP_DEBUG("seek id=" << id << " done in " << (debug_now() - seek_t0) * 1000 << " ms, frame pts="
+                     << (f ? f->pts : -1.0) << (pb->pending_seek >= 0 ? " (superseded)" : ""));
+            if (stop.stop_requested()) break;
+            if (pb->pending_seek >= 0) continue;   // superseded — only ack the newest
+
+            const double shown = f ? f->pts : t;
+            if (f) present_frame(*pb, f, /*preview=*/true);
+            last_present_wall = debug_now();
+            wall_offset  = t;
+            wall_running = false;
+            emit("video:seeked", {{"id", id}, {"time", t}, {"pts", shown}});
+            continue;
+        }
+
+        // ── Paused ────────────────────────────────────────────────────────
+        if (!pb->playing) {
+            if (wall_running) { wall_offset = wall_now(); wall_running = false; }
+            boost::this_fiber::sleep_for(15ms);
+            continue;
+        }
+        if (!has_audio && !wall_running) { wall_start = clock::now(); wall_running = true; }
+
+        // ── Keep the queue topped up (one decode per iteration so control
+        //    changes are seen within one frame time) ──────────────────────
+        bool decoded = false;
+        if (queue.size() < kQueueCap && !eos) {
+            if (auto f = decode_one()) queue.push_back(std::move(f));
+            else eos = true;
+            decoded = true;
+            if (stop.stop_requested() || pb->pending_seek >= 0 || !pb->playing) continue;
+        }
+
+        // ── Present whatever is due ───────────────────────────────────────
+        const double now_t = has_audio ? pb->audio_time : wall_now();
+        if (now_t >= 0) {
+            while (queue.size() > 1 && queue[1]->pts <= now_t + half_frame) {
+                queue.pop_front();   // late: a newer frame is already due
+            }
+            if (!queue.empty() && queue.front()->pts <= now_t + half_frame) {
+                present_frame(*pb, queue.front(), /*preview=*/false);
+                last_presented_pts = queue.front()->pts;
+                last_present_wall  = debug_now();
+                queue.pop_front();
+            }
+        }
+        debug_tick(now_t);
+
+        // ── End of stream ────────────────────────────────────────────────
+        if (eos && queue.empty() && !ended_emitted) {
+            ended_emitted = true;
+            // With audio, the <audio> element's `ended` drives the UI; we
+            // just hold the last frame.  Video-only: we own the clock.
+            if (!has_audio) {
+                pb->playing = false;
+                emit("video:ended", json::object());
+            }
+        }
+
+        if (!decoded || queue.size() >= kQueueCap || eos) {
+            boost::this_fiber::sleep_for(4ms);
+        } else {
+            boost::this_fiber::yield();
+        }
+    }
 }
 
 // ── Plugin initialization ───────────────────────────────────────────────────
 
 void VideoPlugin::initialize(anyar::PluginContext& ctx) {
     service_ = ctx.service;
-    events_ = &ctx.events;
+    events_  = &ctx.events;
     auto& cmds = ctx.commands;
 
-    // ── video:play — Start / resume frame streaming ─────────────────────
-    cmds.add("video:play", [this](const json& /*args*/) -> json {
-        if (!streaming_) {
-            // First play — launch the decode loop fibre
-            streaming_ = true;
-            playing_   = true;
-            pending_seek_ = -1.0;
-            audio_time_   = -1.0;
-            service_->execute([this]() {
-                try {
-                    run_decode_loop();
-                } catch (const anyar::SharedBufferPoolClosed&) {
-                    // Normal shutdown path: stop_streaming() closes the pool to
-                    // unblock a decode loop waiting in acquire_write().
-                } catch (const std::exception& ex) {
-                    std::cerr << "[VideoPlugin] Exception in decode loop: " << ex.what() << std::endl;
-                } catch (...) {
-                    std::cerr << "[VideoPlugin] Unknown exception in decode loop." << std::endl;
-                }
-                streaming_ = false;
-                playing_ = false;
-                frame_pool_.reset();
-            });
-        } else {
-            playing_ = true;
-        }
-        return {{"ok", true}};
-    });
-
-    // ── video:pause — Pause frame streaming ─────────────────────────────
-    cmds.add("video:pause", [this](const json& /*args*/) -> json {
-        playing_ = false;
-        return {{"ok", true}};
-    });
-
-    // ── video:seek — Seek to a timestamp ────────────────────────────────
-    cmds.add("video:seek", [this](const json& args) -> json {
-        pending_seek_ = args.at("time").get<double>();
-        return {{"ok", true}};
-    });
-
-    // ── video:sync — Audio clock update from frontend ───────────────────
-    cmds.add("video:sync", [this](const json& args) -> json {
-        audio_time_ = args.at("time").get<double>();
-        return {{"ok", true}};
-    });
-
-    // ── video:pool-release — Consumer releases a buffer back ────────────
-    cmds.add("video:pool-release", [this](const json& args) -> json {
-        if (frame_pool_) {
-            std::string buf_name = args.at("name").get<std::string>();
-            frame_pool_->release_read(buf_name);
-        }
-        return {{"ok", true}};
-    });
-
-    // ── Register the video file streaming route ─────────────────────────────
-    // Serves the currently opened file with Range-request support so <video>
-    // can seek. We register a custom GET handler on the server.
+    // ── /video/stream — Range-aware file streaming for the <audio> element.
+    //    The streaming serve_file() answers every range in full (WebKit's
+    //    media loader requires that) while writing it in small chunks read
+    //    off the service thread.
     if (ctx.server) {
+        // weak_ptr: the route is owned by the server — no reference cycle.
+        std::weak_ptr<asyik::http_server<asyik::http_stream_type>> weak_server = ctx.server;
         ctx.server->on_http_request(
             "/video/stream", "GET",
-            [this](asyik::http_request_ptr req, asyik::http_route_args args) {
-                std::lock_guard<boost::fibers::mutex> lock(mtx_);
-
-                if (file_path_.empty()) {
+            [this, weak_server](asyik::http_request_ptr req, asyik::http_route_args) {
+                auto audio = audio_;   // snapshot; open/close may swap it meanwhile
+                if (!audio) {
                     req->response.result(404);
                     req->response.body = "No video file open";
                     return;
                 }
-
-                // Read the entire file and serve (for simplicity in this demo)
-                // Range-request support: parse Range header
-                std::ifstream ifs(file_path_, std::ios::binary | std::ios::ate);
-                if (!ifs) {
-                    req->response.result(404);
-                    req->response.body = "Cannot read file";
-                    return;
-                }
-
-                int64_t file_size = ifs.tellg();
-
-                // Determine MIME type
-                std::string mime = "application/octet-stream";
-                auto ext = std::filesystem::path(file_path_).extension().string();
-                if (ext == ".mp4") mime = "video/mp4";
-                else if (ext == ".webm") mime = "video/webm";
-                else if (ext == ".mkv") mime = "video/x-matroska";
-                else if (ext == ".avi") mime = "video/x-msvideo";
-                else if (ext == ".mov") mime = "video/quicktime";
-                else if (ext == ".ogg") mime = "video/ogg";
-
-                // Check for Range header
-                std::string range_hdr;
-                auto it = req->headers.find("Range");
-                if (it != req->headers.end()) {
-                    range_hdr = std::string(it->value());
-                }
-
-                if (!range_hdr.empty() && range_hdr.substr(0, 6) == "bytes=") {
-                    // Parse "bytes=START-END"
-                    std::string range_val = range_hdr.substr(6);
-                    int64_t start = 0, end = file_size - 1;
-                    auto dash = range_val.find('-');
-                    if (dash != std::string::npos) {
-                        std::string s_start = range_val.substr(0, dash);
-                        std::string s_end   = range_val.substr(dash + 1);
-                        if (!s_start.empty()) start = std::stoll(s_start);
-                        if (!s_end.empty())   end   = std::stoll(s_end);
-                    }
-                    if (start < 0) start = 0;
-                    if (end >= file_size) end = file_size - 1;
-                    int64_t length = end - start + 1;
-
-                    ifs.seekg(start, std::ios::beg);
-                    std::string data(length, '\0');
-                    ifs.read(&data[0], length);
-
-                    req->response.result(206);
-                    req->response.headers.set("Content-Type", mime);
-                    req->response.headers.set("Content-Length", std::to_string(length));
-                    req->response.headers.set("Content-Range",
-                        "bytes " + std::to_string(start) + "-" + std::to_string(end) +
-                        "/" + std::to_string(file_size));
-                    req->response.headers.set("Accept-Ranges", "bytes");
-                    req->response.headers.set("Access-Control-Allow-Origin", "*");
-                    req->response.body = std::move(data);
-                } else {
-                    // Serve full file
-                    ifs.seekg(0, std::ios::beg);
-                    std::string data(file_size, '\0');
-                    ifs.read(&data[0], file_size);
-
-                    req->response.result(200);
-                    req->response.headers.set("Content-Type", mime);
-                    req->response.headers.set("Content-Length", std::to_string(file_size));
-                    req->response.headers.set("Accept-Ranges", "bytes");
-                    req->response.headers.set("Access-Control-Allow-Origin", "*");
-                    req->response.body = std::move(data);
-                }
-            }
-        );
+                const std::string path = audio->ready.get();   // waits for the remux (fiber-suspend)
+                auto rng = req->headers.find("Range");
+                VP_DEBUG("http /video/stream " << path << " Range: "
+                         << (rng != req->headers.end() ? std::string(rng->value()) : "(none)"));
+                anyar::serve_file(weak_server.lock(), req, path);
+                VP_DEBUG("http /video/stream done");
+            });
     }
 
-    // ── video:open ──────────────────────────────────────────────────────────
+    // ── video:open ──────────────────────────────────────────────────────
     cmds.add("video:open", [this](const json& args) -> json {
         std::lock_guard<boost::fibers::mutex> lock(mtx_);
 
         std::string path = args.at("path").get<std::string>();
-        if (!std::filesystem::exists(path)) {
+        std::error_code ec;
+        if (!std::filesystem::is_regular_file(path, ec)) {
             throw std::runtime_error("File not found: " + path);
         }
         path = std::filesystem::canonical(path).string();
 
-        open_file(path);
+        // Fully stop the previous session BEFORE touching shared state.
+        stop_playback();
+        media_.reset();
+        audio_.reset();
+        bitrate_for_.reset();
+        waveform_for_.reset();
 
-        // Return info; the frontend will use /video/stream to play the file
+        std::shared_ptr<const MediaInfo> media =
+            anyar::run_blocking(service_, [path] { return probe_file(path); });
+        media_ = media;
+        audio_ = prepare_audio_stream(media);
+        if (media->has_video()) start_playback(media);   // paused; shows first frame
+
+        const auto& p = media->probe;
         return {
             {"url",        "/video/stream"},
-            {"duration",   probe_.duration},
-            {"width",      probe_.width},
-            {"height",     probe_.height},
-            {"videoCodec", probe_.videoCodec},
-            {"audioCodec", probe_.audioCodec},
-            {"fps",        probe_.fps},
-            {"sampleRate", probe_.sampleRate},
-            {"channels",   probe_.channels},
-            {"fileSize",   probe_.fileSizeBytes}
+            {"duration",   p.duration},
+            {"width",      p.width},
+            {"height",     p.height},
+            {"videoCodec", p.videoCodec},
+            {"audioCodec", p.audioCodec},
+            {"fps",        p.fps},
+            {"sampleRate", p.sampleRate},
+            {"channels",   p.channels},
+            {"fileSize",   p.fileSizeBytes},
         };
     });
 
-    // ── video:bitrate ───────────────────────────────────────────────────────
-    cmds.add("video:bitrate", [this](const json& args) -> json {
+    // ── video:close ─────────────────────────────────────────────────────
+    cmds.add("video:close", [this](const json&) -> json {
         std::lock_guard<boost::fibers::mutex> lock(mtx_);
-        if (!fmt_ctx_) throw std::runtime_error("No file open");
-
-        double step = args.value("step", 0.5);
-        if (!bitrate_ready_) {
-            compute_bitrate(step);
-        }
-
-        return {
-            {"timestamps", bitrate_.timestamps},
-            {"videoBps",   bitrate_.videoBps},
-            {"audioBps",   bitrate_.audioBps}
-        };
-    });
-
-    // ── video:waveform ──────────────────────────────────────────────────────
-    cmds.add("video:waveform", [this](const json& args) -> json {
-        std::lock_guard<boost::fibers::mutex> lock(mtx_);
-        if (!fmt_ctx_) throw std::runtime_error("No file open");
-
-        int samples = args.value("samples", 2000);
-        if (!waveform_ready_) {
-            compute_waveform(samples);
-        }
-
-        return {
-            {"peaks", waveform_.peaks}
-        };
-    });
-
-    // ── video:close ─────────────────────────────────────────────────────────
-    cmds.add("video:close", [this](const json& /*args*/) -> json {
-        std::lock_guard<boost::fibers::mutex> lock(mtx_);
-        stop_streaming();
-        close_file();
+        stop_playback();
+        media_.reset();
+        audio_.reset();
+        bitrate_for_.reset();
+        waveform_for_.reset();
         return {{"closed", true}};
     });
 
-    // ── video:get-mode — frontend asks which renderer to use ───────────
-    cmds.add("video:get-mode", [this](const json& /*args*/) -> json {
-        return {
-            {"mode", mode_ == RenderMode::Pinhole ? "pinhole" : "webgl"}
-        };
+    // ── video:bitrate / video:waveform — computed on the worker pool with
+    //    their own demuxer, so they run in parallel and never block IPC.
+    cmds.add("video:bitrate", [this](const json& args) -> json {
+        auto media = media_;
+        if (!media) throw std::runtime_error("No file open");
+        if (bitrate_for_ != media) {
+            const double step = args.value("step", 0.5);
+            auto data = anyar::run_blocking(service_, [media, step] {
+                return compute_bitrate(media->path, media->probe.duration, step);
+            });
+            if (media_ == media) { bitrate_ = std::move(data); bitrate_for_ = media; }
+            else throw std::runtime_error("File changed during analysis");
+        }
+        return {{"timestamps", bitrate_.timestamps},
+                {"videoBps",   bitrate_.videoBps},
+                {"audioBps",   bitrate_.audioBps}};
     });
 
-    std::cout << "[VideoPlugin] Initialized — video:open/close/bitrate/waveform/play/pause/seek/sync"
-              << " + SharedBuffer pool + /video/stream HTTP"
-              << " + render mode=" << (mode_ == RenderMode::Pinhole ? "pinhole" : "webgl")
-              << std::endl;
+    cmds.add("video:waveform", [this](const json& args) -> json {
+        auto media = media_;
+        if (!media) throw std::runtime_error("No file open");
+        if (waveform_for_ != media) {
+            const int samples = args.value("samples", 2000);
+            auto data = anyar::run_blocking(service_, [media, samples] {
+                return compute_waveform(media->path, samples);
+            });
+            if (media_ == media) { waveform_ = std::move(data); waveform_for_ = media; }
+            else throw std::runtime_error("File changed during analysis");
+        }
+        return {{"peaks", waveform_.peaks}};
+    });
+
+    // ── Transport ───────────────────────────────────────────────────────
+    cmds.add("video:play", [this](const json&) -> json {
+        VP_DEBUG("cmd play");
+        if (playback_) playback_->playing = true;
+        return {{"ok", true}};
+    });
+
+    cmds.add("video:pause", [this](const json&) -> json {
+        VP_DEBUG("cmd pause");
+        if (playback_) playback_->playing = false;
+        return {{"ok", true}};
+    });
+
+    cmds.add("video:seek", [this](const json& args) -> json {
+        if (playback_) {
+            playback_->pending_seek = std::max(0.0, args.at("time").get<double>());
+            playback_->seek_id      = args.value("id", uint64_t{0});
+            VP_DEBUG("cmd seek id=" << playback_->seek_id << " t=" << playback_->pending_seek);
+        }
+        return {{"ok", true}};
+    });
+
+    cmds.add("video:sync", [this](const json& args) -> json {
+        const double t = args.at("time").get<double>();
+        if (debug_enabled()) {   // log clock gaps/jumps only, not every sync
+            static double last_t = -1, last_wall = 0;
+            const double w = debug_now();
+            if (last_t < 0 || std::abs(t - last_t) > 0.5 || w - last_wall > 0.5) {
+                VP_DEBUG("sync t=" << t << " (prev " << last_t << ", " << (w - last_wall) * 1000 << " ms ago)");
+            }
+            last_t = t; last_wall = w;
+        }
+        if (playback_) playback_->audio_time = t;
+        return {{"ok", true}};
+    });
+
+    cmds.add("video:pool-release", [this](const json& args) -> json {
+        if (playback_ && playback_->pool) {
+            playback_->pool->release_read(args.at("name").get<std::string>());
+        }
+        return {{"ok", true}};
+    });
+
+    cmds.add("video:get-mode", [this](const json&) -> json {
+        return {{"mode", mode_ == RenderMode::Pinhole ? "pinhole" : "webgl"}};
+    });
+
+    std::cout << "[VideoPlugin] Initialized — render mode="
+              << (mode_ == RenderMode::Pinhole ? "pinhole" : "webgl") << std::endl;
 }
 
+// Runs on the main thread while the service thread is still alive.
 void VideoPlugin::shutdown() {
-
     std::lock_guard<boost::fibers::mutex> lock(mtx_);
-    close_file();
+    stop_playback();   // joins the decode fiber (service thread still alive)
     pinhole_.reset();
     std::cout << "[VideoPlugin] Shutdown" << std::endl;
 }

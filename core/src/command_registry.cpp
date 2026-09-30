@@ -1,5 +1,10 @@
 #include <anyar/command_registry.h>
+#include <boost/fiber/future.hpp>
+
+#include <atomic>
+#include <memory>
 #include <stdexcept>
+#include <utility>
 
 namespace anyar {
 
@@ -35,28 +40,42 @@ IpcResponse CommandRegistry::dispatch(const IpcRequest& request) {
 
     try {
         if (entry.is_async) {
-            // For async commands dispatched synchronously (via HTTP),
-            // we use a fiber-based promise/future to bridge
-            bool done = false;
-            json result_data;
-            std::string result_error;
+            // The handler may call `reply` synchronously, or later from any
+            // fiber or thread (e.g. after run_blocking() or a worker job).
+            // We suspend this fiber until then.  If every copy of `reply` is
+            // destroyed without being called, the handler can never answer:
+            // ReplyState's destructor resolves the wait with an error.
+            struct ReplyState {
+                boost::fibers::promise<std::pair<json, std::string>> promise;
+                std::atomic<bool> replied{false};
+                std::string cmd;
+                void resolve(json data, std::string error) {
+                    if (!replied.exchange(true)) {
+                        promise.set_value({std::move(data), std::move(error)});
+                    }
+                }
+                ~ReplyState() {
+                    resolve(nullptr, "Async command '" + cmd +
+                        "' did not complete: reply callback dropped without being called");
+                }
+            };
+            auto state = std::make_shared<ReplyState>();
+            state->cmd = request.cmd;
+            auto future = state->promise.get_future();
 
-            entry.async_handler(request.args, [&](const json& data, const std::string& error) {
-                result_data = data;
-                result_error = error;
-                done = true;
-            });
-
-            // In fiber context, the async handler should call reply synchronously
-            // (since fibers make async look sync). If it hasn't replied yet,
-            // that's an error.
-            if (!done) {
-                response.error = "Async command '" + request.cmd + "' did not complete synchronously";
-                return response;
+            // Hand the handler the only strong reference (inside the reply
+            // closure) so that dropping `reply` destroys ReplyState.
+            {
+                CommandReply reply = [s = std::move(state)](const json& data,
+                                                             const std::string& error) {
+                    s->resolve(data, error);
+                };
+                entry.async_handler(request.args, std::move(reply));
             }
 
-            response.data = result_data;
-            response.error = result_error;
+            auto [data, error] = future.get();
+            response.data  = std::move(data);
+            response.error = std::move(error);
         } else {
             response.data = entry.sync_handler(request.args);
         }

@@ -25,7 +25,7 @@ sudo apt-get install -y \
 
 ### LibAsyik
 
-LibAnyar depends on [LibAsyik](https://github.com/okyfirmansyah/libasyik) 1.6.1+, which includes Boost 1.81+ and SOCI 4.0.3.
+LibAnyar depends on [LibAsyik](https://github.com/okyfirmansyah/libasyik) 1.7.1+ (needed for clean shutdown with open HTTP connections), which includes Boost 1.81+ and SOCI 4.0.3.
 
 Install LibAsyik from source:
 
@@ -156,7 +156,7 @@ endif()
 
 int main() {
     anyar::AppConfig config;
-    config.dist_path = "./dist";
+    config.dist_path = "./dist";  // relative: checked in the cwd, then next to the binary
 
     anyar::App app(config);
 

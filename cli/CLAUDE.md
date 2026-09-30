@@ -1,1 +1,1 @@
-#import .copilot/instructions.md
+@.copilot/instructions.md

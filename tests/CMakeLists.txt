@@ -61,6 +61,24 @@ anyar_add_test(test_shared_buffer
     test_shared_buffer.cpp
 )
 
+# Core: run_blocking + BackgroundTask
+anyar_add_test(test_task
+    $<TARGET_OBJECTS:catch2_main>
+    test_task.cpp
+)
+
+# Core: FrameMailbox + pixel_format helpers
+anyar_add_test(test_frame_mailbox
+    $<TARGET_OBJECTS:catch2_main>
+    test_frame_mailbox.cpp
+)
+
+# Core: HTTP Range parsing + serve_file
+anyar_add_test(test_http_file
+    $<TARGET_OBJECTS:catch2_main>
+    test_http_file.cpp
+)
+
 # ── WebGL E2E Tests (requires display) ───────────────────────────────────────
 add_subdirectory(webgl)
 
@@ -75,4 +93,6 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         $<TARGET_OBJECTS:catch2_main>
         test_pinhole_linux.cpp
     )
+    # Creates real GTK/WebKit windows → needs a display (CI: xvfb step).
+    set_tests_properties(test_pinhole_linux PROPERTIES LABELS "display;pinhole")
 endif()

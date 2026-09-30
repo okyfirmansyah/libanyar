@@ -11,7 +11,7 @@ NPM package providing typed JS bridge to the C++ backend. Builds dual ESM + CJS 
 - `src/config.ts` — port, `isNativeIpc()`
 - `src/react.ts` — `useInvoke / useEvent / useEventCallback`
 - `src/types.ts`, `global.d.ts`
-- `src/modules/`: `fs.ts dialog.ts shell.ts db.ts`; `window.ts` (`createWindow, emitTo, listenGlobal, onWindowFocused`); `buffer.ts` (`SharedBuffer + fetchBuffer` via `anyar-shm://` or HTTP); `canvas.ts` (WebGL `FrameRenderer` — RGBA/RGB/BGRA/Gray/YUV420/NV12/NV21)
+- `src/modules/`: `fs.ts dialog.ts shell.ts db.ts`; `window.ts` (`createWindow, emitTo, listenGlobal, onWindowFocused`); `buffer.ts` (`SharedBuffer + fetchBuffer` via `anyar-shm://` or HTTP); `canvas.ts` (WebGL `FrameRenderer` — RGBA/RGB/BGRA/Gray/YUV420/NV12/NV21); `pinhole.ts` (optional typed helpers for native overlay: `onPinholeMounted, updatePinholeRect, setPinholeVisible, getPinholeMetrics` → `pinhole:*` commands; DOM tracking itself is injected by C++ `create_pinhole()`); `event.ts` (re-exports `listen/emit/emitTo/listenGlobal/once/onReady` for the `./event` subpath)
 
 ## Conventions
 - Named exports only — no default exports
@@ -19,7 +19,7 @@ NPM package providing typed JS bridge to the C++ backend. Builds dual ESM + CJS 
 - TS strict; `tsc --noEmit` must pass
 - Tests collocated as `*.test.ts`
 
-Subpath imports: `@libanyar/api/{fs,dialog,shell,db,buffer,canvas,react}`.
+Subpath imports (must match `package.json` `"exports"`): `@libanyar/api/{fs,dialog,shell,event,db,react,buffer,canvas,pinhole}`. `window.ts` has no subpath — import from the root.
 
 ## IPC Detection
 - `window.__LIBANYAR_NATIVE__===true` set by C++ via `webview_init()`
@@ -40,7 +40,7 @@ npm run docs                       # typedoc → docs/api/js/
 ```
 
 ## Testing
-Vitest + jsdom; mock `window.__anyar_ipc__` and `fetch`. 123+ tests across config, invoke, events, fs, dialog, shell, db, buffer, window, react.
+Vitest + jsdom; mock `window.__anyar_ipc__` and `fetch`. 130+ tests across config, invoke, events, fs, dialog, shell, db, buffer, window, pinhole, react (`canvas.ts` has no unit tests — covered by `tests/webgl/` E2E).
 
 ## Adding a Module
 1. `src/modules/my_mod.ts` — typed wrappers over `invoke()`

@@ -7,18 +7,25 @@ Unit + integration tests for `anyar_core`. Uses the **Catch2 single-header bundl
 
 ```
 tests/
-├── CMakeLists.txt
-├── test_main.cpp                # Catch2 main
-├── test_command_registry.cpp
+├── CMakeLists.txt               # anyar_add_test() helper + catch2_main OBJECT lib
+├── test_main.cpp                # Catch2 main (CATCH_CONFIG_MAIN)
+├── test_command_registry.cpp    # incl. add_async replying later from a thread/fiber
 ├── test_event_bus.cpp           # 18 cases including per-window sinks
 ├── test_types.cpp
 ├── test_fs_plugin.cpp
 ├── test_shell_plugin.cpp
-├── test_shared_buffer.cpp       # 17+ cases, 800+ assertions
+├── test_shared_buffer.cpp       # 24 cases incl. close(), try_acquire_write, release_unpublished, stale release_read, buffer() lifetime
+├── test_task.cpp                # run_blocking (off-thread, exceptions, fibers keep running) + BackgroundTask stop/join/restart
+├── test_frame_mailbox.cpp       # pixel_format sizes (odd 4:2:0), recycling, consumer pinning, tear-free stress
+├── test_http_file.cpp           # Range parsing + serve_file 200/206/416/404 over real HTTP
 ├── test_integration.cpp         # IpcRouter + DbPlugin + headless App
-└── webgl/                       # E2E WebGL pixel verification under xvfb
-    ├── main.cpp                 # 5s _exit() watchdog safety net
-    ├── dist/index.html
+├── test_pinhole_linux.cpp       # Linux only; [pinhole][headless] + display-gated lifecycle/fallback cases
+├── webgl/                       # E2E WebGL pixel verification under xvfb
+│   ├── main.cpp                 # 5s _exit() watchdog safety net
+│   ├── dist/index.html
+│   └── CMakeLists.txt
+└── window_close/                # Linux only; plain exe (no Catch2): native gtk_window_close → app.run() must return
+    ├── main.cpp                 # watchdog: FAIL if run() not back 6 s after close (_Exit 3) or no close by 12 s (_Exit 4); ctest TIMEOUT 15, LABELS display;shutdown;e2e
     └── CMakeLists.txt
 ```
 
@@ -28,7 +35,7 @@ tests/
 | 1 | Pure unit, no service/GTK | CommandRegistry, EventBus, IPC types, FsPlugin |
 | 2 | Lightweight side effects | ShellPlugin (real fork/exec, temp files) |
 | 3 | Needs LibAsyik service/fiber | IpcRouter, DbPlugin, App headless |
-| 4 | Needs display | Window, Dialog, Clipboard, WebGL E2E (CI uses xvfb) |
+| 4 | Needs display | Window, Pinhole lifecycle, Dialog, Clipboard, WebGL E2E, window_close (CI uses xvfb) |
 
 ## Conventions
 - File: `test_<area>.cpp`; tag every `TEST_CASE` like `[area]`
@@ -51,12 +58,14 @@ TEST_CASE("CommandRegistry handles unknown", "[command-registry]") {
 }
 ```
 
-Wire into `tests/CMakeLists.txt`:
+Wire into `tests/CMakeLists.txt` (helper links `anyar_core`, adds Catch2 include dir, C++17, `add_test`):
 ```cmake
-add_executable(test_my_feature test_my_feature.cpp)
-target_link_libraries(test_my_feature PRIVATE anyar_core Catch2::Catch2)
-add_test(NAME test_my_feature COMMAND test_my_feature)
+anyar_add_test(test_my_feature
+    $<TARGET_OBJECTS:catch2_main>
+    test_my_feature.cpp
+)
 ```
+Linux-only tests: wrap in `if(CMAKE_SYSTEM_NAME STREQUAL "Linux")`. Non-Catch2 E2E exes go in a subdir with their own `add_test` (see `window_close/`).
 
 ## Running
 ```bash
@@ -76,5 +85,8 @@ ctest --output-on-failure
 ## Don'ts
 - Never use `while(g_main_context_pending())` unbounded — cap at 200 iterations (xvfb generates infinite events during teardown)
 - Don't share `asyik::service` instances across `TEST_CASE`s — construct fresh per case
-- Don't assume display is present — guard tier-4 tests with `if (!getenv("DISPLAY")) return;`
+- Don't assume display is present — guard tier-4 tests on `DISPLAY` / `ANYAR_HAS_DISPLAY` and `WARN(...)` + return when absent (see `test_pinhole_linux.cpp`); pinhole tests must also accept `is_native()==false` (GL may fail under xvfb)
+- Any test binary that constructs a `Window` (even unshown) is tier 4: give it the ctest label `display` (`set_tests_properties(... LABELS "display;...")`). CI runs `ctest -LE display` headless and `ctest -L display` under `xvfb-run`; an unlabelled window test fails the headless step. Locally, snap-VS-Code GTK env vars make webview tests SIGTRAP — clear them as `run.sh` does.
 - Don't add sleeps to wait for fibers; use synchronization primitives (`std::promise`, `std::condition_variable`)
+- Every fiber you spawn must have exited before `svc->stop()` — a fiber still sleeping at stop makes process exit spin forever (tests pass, then ctest times out)
+- ASAN: `-DANYAR_ASAN=ON`; suppress the Boost.Fiber false positive with a file containing `interceptor_name:sigaltstack` (`ASAN_OPTIONS=detect_leaks=0:suppressions=<file>`)
