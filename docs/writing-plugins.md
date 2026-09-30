@@ -154,17 +154,39 @@ cmds.add("plugin:sync_command", [](const json& args) -> json {
 
 ### Asynchronous Commands
 
-Use `cmds.add_async()` for long-running operations. The reply callback can be called later:
+All commands run as fibers on **one** service thread. A handler that blocks
+the thread (file I/O, codecs, heavy CPU) freezes every other command, event
+and HTTP request until it returns. Pick the right tool:
+
+**Blocking work → `anyar::run_blocking()`** (`<anyar/task.h>`). This runs the
+callable on LibAsyik's worker pool and suspends only this fiber:
 
 ```cpp
-cmds.add_async("plugin:long_task", [](const json& args, CommandReply reply) {
-    // Runs in its own fiber — can sleep/await without blocking
-    asyik::sleep_for(std::chrono::seconds(2));
-    reply({{"result", "done after 2s"}}, "");  // data, error
+cmds.add("plugin:checksum", [this](const json& args) -> json {
+    std::string path = args.at("path");
+    auto sum = anyar::run_blocking(service_, [path] { return sha256_file(path); });
+    return {{"sha256", sum}};
 });
 ```
 
-**Important:** Async commands run in a Boost fiber. You can use `asyik::sleep_for()`, fiber mutexes, and other LibAsyik async primitives.
+**Replying later → `cmds.add_async()`**. The IPC caller waits until
+`reply(data, error)` is called, which may happen from any fiber or thread,
+at any time. If every copy of `reply` is dropped without being called, the
+caller gets a "did not complete" error. Calls after the first are ignored.
+
+```cpp
+cmds.add_async("plugin:long_task", [this](const json& args, CommandReply reply) {
+    service_->execute([reply] {                      // e.g. finish in another fiber
+        asyik::sleep_for(std::chrono::seconds(2));
+        reply({{"result", "done after 2s"}}, "");   // data, error
+    });
+});
+```
+
+**Long-lived loops → `anyar::BackgroundTask`**. Start it in `initialize()`
+or on a command, poll `token.stop_requested()`, and call `task.stop()` (which
+requests the stop and joins) in `shutdown()` and before restarting it. See
+[graceful-shutdown.md](graceful-shutdown.md).
 
 ## Naming Convention
 

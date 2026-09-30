@@ -173,11 +173,38 @@ renderers behind a CLI flag:
 ./video_player --mode=webgl   # legacy SharedBuffer + WebGL renderer
 ```
 
-In pinhole mode the FFmpeg decode loop calls `pin->request_redraw()`
-after each frame instead of emitting the `buffer:ready` event; the
-`on_render` callback reads the latest `SharedBuffer` directly via
-`buf.data()` and forwards to `ctx.draw_image()`. No JS is involved in
-rendering, only in transport-bar updates.
+In pinhole mode the FFmpeg decode loop publishes each frame to an
+`anyar::FrameMailbox` and calls `pin->request_redraw()`, instead of emitting
+the `buffer:ready` event. JS is only involved in transport-bar updates, not in
+rendering.
+
+### Handing frames to `on_render` safely
+
+`on_render` runs on the GTK main thread, while producers usually run in a
+fiber or on a worker thread. Never give the render callback a raw pointer
+into memory the producer can recycle or free, such as a `SharedBufferPool`
+slot. The upload would race the next write, or read unmapped memory after
+the pool is destroyed. Use the mailbox instead. A consumer's `shared_ptr`
+pins the frame for the whole draw, and the producer never blocks
+([ADR-009](decisions.md)):
+
+```cpp
+auto mailbox = std::make_shared<anyar::FrameMailbox>();
+pin->on_render([mailbox](anyar::PinholeRenderContext& ctx) {
+    ctx.clear(0, 0, 0, 1);                      // letterbox colour
+    if (auto f = mailbox->latest()) ctx.draw_frame(*f);   // aspect-preserving
+});
+
+// producer (any thread)
+auto f = mailbox->acquire(anyar::pixel_format_byte_size(fmt, w, h));
+fill(f->data.data());
+f->width = w; f->height = h; f->format = fmt; f->pts = pts;
+mailbox->publish(std::move(f));
+pin->request_redraw();
+```
+
+4:2:0 formats use ⌈w/2⌉ × ⌈h/2⌉ chroma planes, so odd sizes are valid.
+`draw_image()` rejects buffers smaller than `pixel_format_byte_size()`.
 
 ## Roadmap
 

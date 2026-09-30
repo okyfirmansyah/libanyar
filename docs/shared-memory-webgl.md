@@ -436,11 +436,13 @@ await invoke('video:start');
 
 ## Performance Notes
 
-| Metric | Value | Notes |
+> ⚠️ **Measured vs. design estimates.** The tables below are original design estimates. Measured on WebKitGTK 2.50 ([benchmarks/README.md](../benchmarks/README.md), 2026-09-24): a 1080p RGBA `fetch('anyar-shm://…')` takes **~21 ms** (not ~0.05 ms); the HTTP fallback ~25 ms. Root cause: WebKit streams custom-URI-scheme responses to the WebProcess in fixed 8 KB chunks (one IPC each), and JSC forbids true zero-copy `ArrayBuffer`s (Gigacage). A WebProcess-extension prototype (one memcpy) reaches ~0.4 ms but is not shipped yet. For 1080p60 today, prefer [Pinhole](pinhole-rendering.md) (~0.7 ms CPU/frame measured).
+
+| Metric | Value (estimate) | Notes |
 |---|---|---|
 | Buffer creation | ~0.1ms | One-time `shm_open()` + `mmap()` |
 | Frame write (C++) | ~0.3ms (1080p RGBA) | `memcpy` to mmap'd memory |
-| Frame fetch (JS) | ~0.05ms | `anyar-shm://` URI scheme, zero-copy via `g_bytes_new_static()` |
+| Frame fetch (JS) | ~0.05ms | `anyar-shm://` URI scheme, zero-copy via `g_bytes_new_with_free_func()` |
 | Event notification | ~0.01ms | Native IPC push via `webview_eval()` |
 | WebGL upload + render | ~0.5ms (1080p) | `texImage2D` + draw call |
 | **Total pipeline** | **~1ms per frame** | C++ write → JS fetch → WebGL render |

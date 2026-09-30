@@ -156,7 +156,7 @@ endif()
 
 int main() {
     anyar::AppConfig config;
-    config.dist_path = "./dist";
+    config.dist_path = "./dist";  // relative: checked in the cwd, then next to the binary
 
     anyar::App app(config);
 

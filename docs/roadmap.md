@@ -1,6 +1,6 @@
 # LibAnyar — Implementation Plan
 
-> Last updated: 2026-03-15 (embed frontend done)
+> Last updated: 2026-09-24 (Phase 4g Pinhole + graceful shutdown done; status synced with code)
 
 ## Phase Overview
 
@@ -15,7 +15,7 @@
 | 4d | [Multi-Window & Child Windows](#phase-4d-multi-window--child-windows) | ✅ Complete | 2-3 weeks |
 | 4e | [Platform Abstraction Refactor](#phase-4e-platform-abstraction-refactor) | ✅ Complete | 3-5 days |
 | 4f | [Shared Memory IPC & WebGL Canvas](#phase-4f-shared-memory-ipc--webgl-canvas) | ✅ Complete | 2-3 weeks |
-| 4g | [Pinhole (Native Overlay) Rendering](#phase-4g-pinhole-native-overlay-rendering) | 🔲 Not Started | 3-4 weeks (Linux), +2w Win, +2w macOS |
+| 4g | [Pinhole (Native Overlay) Rendering](#phase-4g-pinhole-native-overlay-rendering) | ✅ Complete (Linux) | 3-4 weeks (Linux), +2w Win, +2w macOS |
 | 5 | [CLI Tool](#phase-5-cli-tool) | 🟡 Partial | 2-3 weeks |
 | 6 | [Polish & Documentation](#phase-6-polish--documentation) | 🟡 Partial | Ongoing |
 | **→** | **[Next Steps (Prioritized)](#next-steps-prioritized)** | **🎯 Active** | — |
@@ -1216,7 +1216,6 @@ If any of these are needed, use `@libanyar/api/canvas` (Phase 4f path) instead.
 
 ### 4g.4 Multi-Pinhole, Lifecycle & Z-Order
 
-- [ ] `WindowManager` extension: per-window `std::map<id, shared_ptr<Pinhole>>`
 - [x] `WindowManager` extension: per-window `std::map<id, shared_ptr<Pinhole>>` — O(1) lookup via `Window::find_pinhole()`
 - [x] DOM removal → `Pinhole::on_dom_detached` callback → C++ pauses render; JS `_detachTracked()` cleans up observers
 - [x] `display: none` ancestor → hidden until reshown (handled by `IntersectionObserver` `isIntersecting: false`)
@@ -1248,7 +1247,7 @@ If any of these are needed, use `@libanyar/api/canvas` (Phase 4f path) instead.
 ### 4g.7 Linux Example & Docs
 
 - [x] `examples/pinhole-hello/` — minimalist standalone demo: animated colour cycle via `ctx.clear()` + checkerboard texture upload via `ctx.draw_image()`, alternating every 2s. Uses `set_continuous(true)` for vsync rendering. HTML placeholder with dashed outline + IPC `pinhole:info` query.
-- [x] `examples/video-player/` — pinhole integrated as the **default** renderer; legacy WebGL path retained behind `--mode=webgl`. Decode loop branches in `emit_frame`: pinhole mode swaps the latest `SharedBuffer*` under a `std::mutex` and calls `pin->request_redraw()`; `on_render` reads `buf->data()` directly and forwards to `ctx.draw_image()` with the matching `pixel_format`. New `video:get-mode` IPC command lets the Svelte frontend swap `<canvas>` for `<div data-anyar-pinhole="video">` at boot. If `is_native()==false`, framework's canvas-2D fallback handles rendering with a warning logged.
+- [x] `examples/video-player/` — pinhole integrated as the **default** renderer; legacy WebGL path retained behind `--mode=webgl`. Decode loop branches in `emit_frame`: pinhole mode swaps the latest `SharedBuffer*` under a `std::mutex` and calls `pin->request_redraw()`; `on_render` reads `buf->data()` directly and forwards to `ctx.draw_image()` with the matching `pixel_format`. *(Superseded 2026-09-24: that raw-pointer handoff raced with slot reuse; now `FrameMailbox` + `draw_frame()`, ADR-009.)* New `video:get-mode` IPC command lets the Svelte frontend swap `<canvas>` for `<div data-anyar-pinhole="video">` at boot. If `is_native()==false`, framework's canvas-2D fallback handles rendering with a warning logged.
 - [x] `docs/pinhole-rendering.md` — full usage guide: API quick start, when-to-use comparison table vs SharedBuffer+FrameRenderer, pixel format matrix, fallback mode internals, CSS interactions, threading invariants, video-player worked example, completion roadmap.
 - [x] Updated [docs/README.md](README.md) References section to surface pinhole-rendering.md alongside shared-memory-webgl.md.
 
@@ -1278,7 +1277,7 @@ If any of these are needed, use `@libanyar/api/canvas` (Phase 4f path) instead.
 
 ### 5.2 `anyar dev`
 - [x] Start frontend dev server (vite) + C++ backend simultaneously
-- [x] Hot reload for frontend (Vite HMR)
+- [ ] Hot reload for frontend (Vite HMR) — ⚠️ Vite starts, but the webview still loads the backend `dist/` (not wired end-to-end, found 2026-09-24)
 - [ ] Watch mode for C++ — rebuild on changes (optional, via CMake)
 
 ### 5.3 `anyar build`
@@ -1319,14 +1318,17 @@ If any of these are needed, use `@libanyar/api/canvas` (Phase 4f path) instead.
 ### 6.3 Testing
 - [x] Unit tests for core components (Catch2) — 8 test files, all 8/8 pass (WebGL teardown segfault fixed)
 - [x] Integration tests (webview + server + IPC) — SharedBuffer integration tests implemented
-- [ ] JS bridge unit tests (Vitest)
+- [x] JS bridge unit tests (Vitest) — 10+ files, in CI
 - [x] Linux CI validation (CircleCI — Ubuntu 22.04, GCC 11)
 
 ### 6.4 Performance
-- [ ] Benchmark: startup time (target < 500ms)
-- [ ] Benchmark: IPC latency (target < 1ms)
-- [ ] Benchmark: memory footprint
-- [ ] Profile and optimize hot paths
+- [x] Benchmark harness — `benchmarks/` (`-DANYAR_BUILD_BENCHMARKS=ON`), baseline in [benchmarks/README.md](../benchmarks/README.md)
+- [x] Benchmark: startup time (target < 500ms) — ✅ ~330 ms warm to first IPC; ⚠️ ~2.3 s cold
+- [x] Benchmark: IPC latency (target < 1ms) — ✅ native p50 ~0.11 ms; HTTP p50 ~0.46 ms; 64 KB native ~2 ms
+- [x] Benchmark: memory footprint — ~620 MB total RSS (app 245 + WebKit 380)
+- [x] Benchmark: SharedBuffer 1080p fetch — ❌ ~21 ms (design claim ~1 ms)
+- [x] Benchmark: Pinhole 1080p draw — ⚠️ 0.68 ms CPU p50 (target < 0.2 ms), vsync 60 fps sustained
+- [ ] Profile and optimize hot paths — `anyar-shm://` fetch path, cold startup, Pinhole texture upload (PBO)
 
 ### Phase 6 Deliverable
 > Well-documented, well-tested, production-ready framework on Linux.
@@ -1420,7 +1422,7 @@ If any of these are needed, use `@libanyar/api/canvas` (Phase 4f path) instead.
 
 ## Next Steps (Prioritized)
 
-> **Context**: Phases 1–4f are complete. Phase 5 (CLI) and Phase 6 (Polish) are partially done. Linux CI is operational (CircleCI). The framework is functionally complete on Linux — what remains is hardening, packaging, and expansion.
+> **Context**: Phases 1–4g are complete on Linux (4g Pinhole landed 2026-04-29; graceful-shutdown fix 2026-05-01). Phase 5 (CLI) and Phase 6 (Polish) are partially done. Linux CI is operational (CircleCI). What remains is benchmarks, DX/ecosystem, and cross-platform expansion.
 
 ### Remaining Items Inventory
 
@@ -1428,10 +1430,10 @@ All unchecked `[ ]` items across the plan, categorized:
 
 | Category | Items | Phases |
 |----------|-------|--------|
-| **Linux hardening** | WebGL test segfault fix, performance benchmarks, JS bridge tests | 6.3, 6.4 |
-| **Incomplete features** | ~~EventBus per-window sinks~~, ~~`listenGlobal`~~, `window:focused` event | 4d.8 |
-| **Dev experience** | C++ watch mode, embed frontend (cmrc), Linux packaging (DEB/AppImage) | 5.2, 5.3 |
-| **Fallback paths** | SharedBuffer WebSocket fallback, SharedBuffer perf benchmarks | 4f.5, 4f.6, 4f.7 |
+| **Linux hardening** | ~~WebGL test segfault fix~~, performance benchmarks, ~~JS bridge tests~~, ~~background-work & frame-handoff primitives (ADR-009)~~ | 6.3, 6.4 |
+| **Incomplete features** | ~~EventBus per-window sinks~~, ~~`listenGlobal`~~, ~~`window:focused` event~~ | 4d.8 |
+| **Dev experience** | C++ watch mode, ~~embed frontend (cmrc)~~, ~~Linux packaging (DEB/AppImage)~~ | 5.2, 5.3 |
+| **Fallback paths** | ~~SharedBuffer HTTP fallback~~, SharedBuffer perf benchmarks | 4f.5, 4f.6, 4f.7 |
 | **More examples** | Todo App, File Explorer, Markdown Editor, Chat App | 6.2 |
 | **Stretch goals** | Type-safe query builder, migration runner, periodic fiber events | 4.2, 4.3, 1.6 |
 | **Cross-platform** | All of Phase 7 (Windows/macOS) + Phase 8 (plugins/packaging) | 7, 8 |
@@ -1448,7 +1450,8 @@ These items complete the Linux story — green CI, distributable binaries, quant
 | **2** | ~~**JS bridge unit tests (Vitest)**~~ | 6.3 | ~~2-3d~~ | ✅ Done — 112 tests across 10 files: config, invoke, events, fs, dialog, shell, db, buffer, window, React hooks. Added to CI pipeline. |
 | **3** | ~~**Linux packaging (DEB + AppImage)**~~ | 5.3 | ~~2-3d~~ | ✅ Done — `anyar build --package deb\|appimage\|all`. DEB with auto-deps via ldd, AppImage via linuxdeploy. |
 | **4** | ~~**Embed frontend into binary (cmrc)**~~ | 5.3 | ~~1-2d~~ | ✅ Done — `anyar build --embed` compiles frontend into binary via cmrc. `App::set_frontend_resolver()` + `<anyar/embed.h>`. |
-| **5** | **Performance benchmarks** | 6.4 | 1-2d | Quantify startup, IPC latency, memory. Publish in README. |
+| **5** | ~~**Performance benchmarks**~~ | 6.4 | ~~1-2d~~ | ✅ Done — `benchmarks/`, baseline in [benchmarks/README.md](../benchmarks/README.md). Found: SharedBuffer fetch ~21 ms/1080p (not ~1 ms); cold start ~2.3 s. |
+| **5b** | ~~**Background work & frame handoff (ADR-009)**~~ | 6.3 | ~~2d~~ | ✅ Done — `run_blocking`, `BackgroundTask`, real `add_async`, `FrameMailbox` + `draw_frame`, `serve_file` (Range), pool state hardening. video-player rebuilt on them; stress-tested under ASAN in both render modes. |
 
 #### Tier 2 — Feature Completeness
 
@@ -1485,7 +1488,7 @@ Only after Linux is fully polished.
 
 ### Decision Point
 
-The recommended next action is **Tier 1, Item 1: Fix the WebGL E2E teardown segfault**. This achieves a fully green CI pipeline and demonstrates framework stability. After Tier 1 is complete, LibAnyar on Linux is production-distributable.
+Tier 1 is complete (benchmarks landed 2026-09-24). Benchmarks exposed a SharedBuffer fetch-path gap (~21 ms/1080p vs ~1 ms claimed) and Pinhole idle-callback lifetime hazards — see [progress.md](progress.md) for the current next-step list. Before committing to Tier 4 (Phase 7), run a LibAsyik MSVC/Clang-macOS build spike — the 4e.8 portability assumption has never been verified. See [progress.md — Open Risks](progress.md#open-risks--known-issues).
 
 ---
 

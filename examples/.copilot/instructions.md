@@ -6,11 +6,12 @@ Reference implementations. Each is a standalone CMake project consumed by the ro
 | Dir | Demonstrates |
 |---|---|
 | `hello-world/` | Minimal — IPC commands, events, fs/dialog/shell |
+| `pinhole-hello/` | Minimal Pinhole: `on_window_ready` → `create_pinhole` + `set_rect` + `set_continuous` render of `clear()`/`draw_image()`. Plain `frontend/index.html` (no Vite, no README) |
 | `key-storage/` | SQLite + Svelte + AES-256-GCM + multi-window modal + custom plugin |
-| `video-player/` | FFmpeg + SharedBufferPool + WebGL canvas (RGBA / YUV420) |
+| `video-player/` | FFmpeg decode on the worker pool (`run_blocking`), decode loop = `BackgroundTask` session per file, audio-clock sync with acknowledged seeks (`video:seeked`), Range streaming via `serve_file` of an audio-only remux (the `<audio>` element never sees the video track), fresh `<audio>` pipeline per timeline seek + stall watchdog (WebKitGTK wedges on flushing seeks with high-latency audio devices), `VIDEO_PLAYER_DEBUG=1` trace, real-UI stress test `test/run_seek_stress.sh`. Default `--mode=pinhole` (`FrameMailbox` → `draw_frame`); `--mode=webgl` = per-session SharedBufferPool + `buffer:ready` + WebGL canvas |
 | `wifi-analyzer/` | libnl Wi-Fi scan + WebGL real-time heatmap |
 
-## Standard Layout
+## Standard Layout (pinhole-hello is the deliberate exception)
 ```
 examples/<name>/
   CMakeLists.txt
@@ -74,3 +75,23 @@ std::memcpy(buf->data(), pixels, buf->size());
 app.emit("buffer:ready", {{"name","frame"},{"url","anyar-shm://frame"}});
 ```
 JS: `createBufferRenderer({canvas:'#viewport', width, height, format:'rgba', pool:'frame'})`.
+Streaming pools: one pool per session with a unique base name, `try_acquire_write()` → fill → `release_write()` → emit `buffer:ready`; JS releases in `finally`.
+
+## Pinhole (native overlay)
+```cpp
+auto mailbox = std::make_shared<anyar::FrameMailbox>();   // <anyar/frame_mailbox.h>
+app.on_window_ready([&](anyar::Window& win){           // main thread, before GTK loop
+    anyar::PinholeOptions o; o.format = anyar::pixel_format::yuv420;
+    pin = win.create_pinhole("video", o);
+    pin->on_render([mailbox](anyar::PinholeRenderContext& ctx){
+        ctx.clear(0, 0, 0, 1);
+        if (auto f = mailbox->latest()) ctx.draw_frame(*f);   // letterboxed; frame pinned while drawn
+    });
+});
+// producer (any thread): auto f = mailbox->acquire(bytes); fill; mailbox->publish(f); pin->request_redraw();
+// HTML: <div data-anyar-pinhole="video"></div> (keep content above it transparent)
+```
+Check `pin->is_native()` — false = canvas-2D fallback (slower). See docs/pinhole-rendering.md.
+
+## Background Work & Shutdown
+Blocking work (codecs, file I/O) → `anyar::run_blocking(service_, fn)`; long-lived loops → `anyar::BackgroundTask` (`<anyar/task.h>`), `task.stop()` in `shutdown()` and before restarting (e.g. on re-open) so sessions never overlap. Live producers use `SharedBufferPool::try_acquire_write()` (drop, don't stall). Serve media with streaming `anyar::serve_file(weak_server.lock(), req, path)` (full ranges, chunked). Never call `service_->stop()` yourself. Test by closing the window while busy. Refs: `VideoPlugin` (`start_playback`/`stop_playback`), `WifiPlugin::shutdown()`, docs/graceful-shutdown.md, ADR-009.
