@@ -2,7 +2,7 @@
 // @libanyar/api/buffer — unit tests
 // ---------------------------------------------------------------------------
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
   createBuffer,
   writeBuffer,
@@ -171,6 +171,43 @@ describe('buffer module', () => {
         await expect(fetchBuffer('missing')).rejects.toThrow(
           'Failed to fetch buffer: 404 Not Found',
         );
+      });
+    });
+
+    describe('native mode without anyar-shm:// (Windows)', () => {
+      beforeEach(() => {
+        mockIsNativeIpc.mockReturnValue(true);
+        mockGetBaseUrl.mockReturnValue('http://127.0.0.1:4321');
+        window.__LIBANYAR_SHM_SCHEME__ = false;
+      });
+
+      afterEach(() => {
+        delete window.__LIBANYAR_SHM_SCHEME__;
+      });
+
+      it('falls back to the HTTP endpoint', async () => {
+        const mockResponse = {
+          ok: true,
+          arrayBuffer: vi.fn().mockResolvedValue(new ArrayBuffer(4)),
+        };
+        vi.stubGlobal('fetch', vi.fn().mockResolvedValue(mockResponse));
+
+        await fetchBuffer('anyar-shm://frame_0');
+        expect(globalThis.fetch).toHaveBeenCalledWith(
+          'http://127.0.0.1:4321/__anyar__/buffer/frame_0',
+        );
+      });
+
+      it('uses anyar-shm:// when the backend opts in', async () => {
+        window.__LIBANYAR_SHM_SCHEME__ = true;
+        const mockResponse = {
+          ok: true,
+          arrayBuffer: vi.fn().mockResolvedValue(new ArrayBuffer(4)),
+        };
+        vi.stubGlobal('fetch', vi.fn().mockResolvedValue(mockResponse));
+
+        await fetchBuffer('frame_0');
+        expect(globalThis.fetch).toHaveBeenCalledWith('anyar-shm://frame_0');
       });
     });
 

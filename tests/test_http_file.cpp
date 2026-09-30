@@ -16,6 +16,7 @@
 #include <thread>
 
 #include <boost/fiber/operations.hpp>
+#include "test_port.h"
 
 using namespace anyar;
 
@@ -88,8 +89,7 @@ struct TempFile {
 };
 
 int pick_port() {
-    static std::mt19937 gen(std::random_device{}());
-    return std::uniform_int_distribution<int>(49152, 60999)(gen);
+    return anyar_test::free_port();
 }
 
 struct Resp { int status; std::string body; std::string content_range; };

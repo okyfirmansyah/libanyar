@@ -1,8 +1,8 @@
 # LibAnyar — Progress Tracker
 
-> **Current Phase**: Post Phase 4g — Tier 1 complete (benchmarks baselined); hardening findings next
-> **Phase Status**: 🟢 Phases 1–4g complete (Linux), Phases 5–6 partial, CI green
-> **Last Updated**: 2026-09-24 (ADR-009)
+> **Current Phase**: Phase 7 started — Windows core port (MSVC + WebView2, ADR-010); Linux hardening findings continue
+> **Phase Status**: 🟢 Phases 1–4g complete (Linux), Phases 5–6 partial, Phase 7 Windows core working (local: 12/12 ctest); Windows CI job added, first run pending
+> **Last Updated**: 2026-09-30 (ADR-010)
 
 > **Agents**: update this file (and the matching checkbox in [roadmap.md](roadmap.md)) at the end of every task that changes status, adds a feature, or discovers a risk. Keep "Next Priorities" and "Open Risks" current; append to the Session Log.
 
@@ -24,7 +24,7 @@
 | 4g | Pinhole (Native Overlay) Rendering | ✅ Complete (Linux) |
 | 5 | CLI Tool | 🟡 Partial (C++ watch mode open) |
 | 6 | Polish & Documentation | 🟡 Partial (benchmarks, extra examples open) |
-| 7 | Windows & macOS | 🔲 Not started |
+| 7 | Windows & macOS | 🟡 Windows core started (ADR-010); macOS not started |
 | 8 | Plugin System & Packaging | 🔲 Not started |
 
 See [roadmap.md](roadmap.md) for full per-task checklists and [roadmap.md — Next Steps](roadmap.md#next-steps-prioritized) for the prioritized list.
@@ -41,18 +41,23 @@ See [roadmap.md](roadmap.md) for full per-task checklists and [roadmap.md — Ne
 | WebGL E2E test | ✅ | SharedBuffer + WebGL render + readPixels, runs under xvfb (5 s watchdog) |
 | JS bridge typecheck | ✅ | Separate CI job, `tsc --noEmit` |
 | JS bridge unit tests (Vitest) | ✅ | 10+ files — config, invoke, events, modules, React hooks |
+| Windows build (local) | ✅ | Win 11, VS 2022 Build Tools (MSVC 19.4x), vcpkg Boost 1.90, LibAsyik 1.8.1; core + hello-world + pinhole-hello + tests |
+| Windows ctest (local) | ✅ | 12/12, 5 consecutive runs — incl. `window_close` (native WM_CLOSE) and `native_ipc` (WebView2 E2E) |
+| Windows CI (`build-windows`) | ⏳ | CircleCI Server 2022 job added 2026-09-30, not yet run; runs `-LE display` |
 
 ---
 
 ## Next Priorities
 
-1. **Productize the SharedBuffer WebProcess extension** — prototype in `benchmarks/shm_webext/` reads 1080p in ~0.4 ms vs ~21 ms via `anyar-shm://` (root cause: WebKit's 8 KB-chunked URI-scheme IPC). Needs packaging (DEB/AppImage), `App` wiring, `@libanyar/api/buffer` API + `FrameRenderer` use.
-2. **Pinhole created before `Window::show()`** — gets a null overlay forever; `create_gl_area()` re-queues itself every idle (never renders, busy main loop). Fix: wire overlay on show, or create the GL area lazily.
-3. **Migrate remaining plugin loops to `BackgroundTask`** — wifi-analyzer still uses a bare `execute()` loop + flag (no join); audit built-in plugins for blocking calls that should use `run_blocking()`.
-4. **`anyar dev` real HMR** (deferred — release builds embed frontend; DX-only) — CLI starts Vite but the webview never loads the Vite URL (roadmap 5.2 "HMR ✅" is not true end-to-end).
-5. **LibAsyik portability spike** — MSVC + macOS Clang build before committing to Phase 7.
-6. **Tier 3 DX/ecosystem** — `anyar dev --watch`, Todo App (React), File Explorer, migration runner.
-7. **Tier 4** — Phase 7 Windows/macOS (incl. Pinhole ports), multi-platform CI, Phase 8 plugins.
+1. **Land the Windows port safely** — the port touched shared code (`app.cpp` platform hooks, `window.cpp` Impl restructure, `shared_buffer.cpp` split, OS-chosen ports, LibAsyik 1.8.1 on Linux CI with a fresh `cpp-deps-v5` cache) that was only compiled on Windows. Confirm Linux CI (incl. xvfb display tests), get the first `build-windows` CircleCI run green, then enable `tests/native_ipc` on Linux.
+2. **Windows follow-ups (Phase 7.1)** — UTF-8 paths in `fs:*`/`resolve_dist_path`/`allow_file_access`; zero-copy buffers in WebView2 (needs a hook into webview's environment creation); `anyar` CLI port; key-storage/video-player examples; Windows packaging (7.4); Pinhole DComp port (ADR-008, breaking).
+3. **Productize the SharedBuffer WebProcess extension** — prototype in `benchmarks/shm_webext/` reads 1080p in ~0.4 ms vs ~21 ms via `anyar-shm://` (root cause: WebKit's 8 KB-chunked URI-scheme IPC). Needs packaging (DEB/AppImage), `App` wiring, `@libanyar/api/buffer` API + `FrameRenderer` use.
+4. **Pinhole created before `Window::show()`** — gets a null overlay forever; `create_gl_area()` re-queues itself every idle (never renders, busy main loop). Fix: wire overlay on show, or create the GL area lazily.
+5. **Migrate remaining plugin loops to `BackgroundTask`** — wifi-analyzer still uses a bare `execute()` loop + flag (no join); audit built-in plugins for blocking calls that should use `run_blocking()`.
+6. **`anyar dev` real HMR** (deferred — release builds embed frontend; DX-only) — CLI starts Vite but the webview never loads the Vite URL (roadmap 5.2 "HMR ✅" is not true end-to-end).
+7. **macOS spike** — LibAsyik Clang/macOS build before Phase 7.2 (Windows/MSVC verified 2026-09-30).
+8. **Tier 3 DX/ecosystem** — `anyar dev --watch`, Todo App (React), File Explorer, migration runner.
+9. **Tier 4** — Phase 7 macOS, Pinhole ports, Phase 8 plugins.
 
 ---
 
@@ -63,7 +68,13 @@ See [roadmap.md](roadmap.md) for full per-task checklists and [roadmap.md — Ne
 | Shutdown fragility | High | Fixed repeatedly (ADR-007, 2026-03-15; plugin-shutdown reorder, 2026-05-01). Plugins must stop their own `execute()` loops and unblock back-pressure waits in `shutdown()` — contract, not enforced. See [graceful-shutdown.md](graceful-shutdown.md). |
 | WebGL test hangs without watchdog | Medium | ⚠️ Mitigated by 5 s `_exit()` watchdog — can mask real teardown hangs in CI. |
 | `post_to_main_thread` deadlock | Medium | ⚠️ Documented only — never call from a fiber during shutdown (ADR-007). |
-| LibAsyik Windows/macOS portability | High (for Phase 7) | Assumed, never verified (roadmap 4e.8). |
+| LibAsyik Windows/macOS portability | Medium (macOS) | Windows ✅ verified 2026-09-30 with LibAsyik 1.8.1 + MSVC (ADR-010). macOS still assumed. |
+| Windows port changes unverified on Linux | High (until CI runs) | `app.cpp`/`window.cpp`/`shared_buffer` refactors, port probing and the LibAsyik 1.8.1 bump were built and tested only on Windows. Linux CI must confirm before relying on them. |
+| Windows: non-ASCII paths | Medium | `std::filesystem::path(std::string)` uses the ANSI code page — `fs:*`, `resolve_dist_path`, `allow_file_access` mangle UTF-8 paths. Plugins must convert explicitly. |
+| Windows: SharedBuffer over HTTP | Medium | No `anyar-shm://` in WebView2 yet → one copy + loopback TCP per fetch; `anyar-file://` unavailable (use `/__anyar__/file/`). |
+| Windows: first page load deferred to `run()` | Low | WebView2 only applies bind/init scripts to later navigations, so a window created before the main loop starts loads nothing until `run()` (child windows created at runtime load in `show()`). |
+| Windows: CLI, 3 examples, Pinhole, packaging | Medium | Not ported: `anyar` CLI (POSIX), key-storage / video-player / wifi-analyzer, Pinhole (stub), MSI/NSIS. |
+| ~~Random server ports hit reserved/in-use ports~~ | ✅ Fixed 2026-09-30 | `App` and tests now take an OS-chosen port (Windows reserves blocks of 49152–65535; a failed bind inside a test fiber hung `run()` ~13% of runs). |
 | Pinhole Windows port is a breaking change | Medium | Requires WebView2 visual hosting → major version bump (ADR-008). |
 | Pinhole native path in CI | Medium | Unverified whether CI (xvfb/mesa) exercises native GL or only the canvas fallback. |
 | Pinhole CSS/scroll limitations | Low (by design) | Flat rect; hides during scroll; z-sibling detection best-effort (ADR-008). |
@@ -200,3 +211,13 @@ See [roadmap.md](roadmap.md) for full per-task checklists and [roadmap.md — Ne
 - `test_pinhole_linux` and `test_window_close` create webviews but ran in the headless unit step (failing since 4g/shutdown-fix landed). Display tests now carry ctest label `display`; CI runs `-LE display` headless and `-L display` under xvfb. Two window-creating pinhole cases mis-tagged `[headless]` are now display-gated
 - `test_window_close` then failed in CI only: `app.run()` never returned after a native close, with "1 fiber(s) still active after 1s drain". CI built LibAsyik **1.6.1**; dev machines had **1.7.1** (scheduler cancellation #32 + HTTP connection tracking #33, which terminate open keep-alive connection fibers on stop). Not reproducible locally even with CPU starvation + 1 ms close. CI and `setup-ubuntu.sh` now pin LibAsyik 1.7.1 (cache key `cpp-deps-v4`); documented minimum raised to 1.7.1. `test_window_close` watchdog now times shutdown only (6 s after close) and logs phase timestamps
 
+
+### Windows Port — Phase 7 Kick-off (2026-09-30)
+- Toolchain: LibAsyik **1.8.1** (first MSVC release) + vcpkg (Boost 1.90, OpenSSL 3, SOCI, nlohmann-json, `webview2` header); new `scripts/setup-windows.ps1` builds/installs LibAsyik (Release + Debug `d` postfix) into `build-deps/libasyik`. Linux CI + `setup-ubuntu.sh` also pinned to 1.8.1 (cache key `cpp-deps-v5`)
+- Core (ADR-010): private `core/src/platform.h` hooks (`platform_{linux,win32}.cpp`, `main_thread_{linux,win32}.cpp`) replace the Linux `#ifdef`s in `app.cpp`; `shared_buffer.cpp` split out (factory/registry/pool) from the per-OS mapping; Win32 `Window::Impl` (HWND subclass, owned/modal windows, centering, close confirmation); `main_thread_win32.cpp` (message-only dispatch window, thread-safe sticky quit); `shared_buffer_win32.cpp` (file mapping); `plugins/{dialog,clipboard,shell}_win32.cpp`
+- Three WebView2 behaviour differences found and handled: `webview_terminate()` only quits the calling thread; webview's nested loops swallow `WM_QUIT`; bind/init scripts miss navigations issued before them (`window.__anyar_ipc__` was undefined — first navigation now deferred until setup completes)
+- JS: `window.__LIBANYAR_SHM_SCHEME__` (false on Windows) → `fetchBuffer()` uses the HTTP fallback; Vitest cases added (not run locally — no Node on the Windows box)
+- Ports: `App::find_available_port()` + tests (`tests/test_port.h`) take an OS-chosen port — random picks landed in Windows' excluded ranges (`netsh int ipv4 show excludedportrange`) or on RPC listeners; bind threw inside the test fiber and `run()` hung
+- Tests: shell tests use `cmd.exe` builtins on Windows; `window_close` ported (WM_CLOSE); new `tests/native_ipc` E2E (generated page: IPC round-trip, event push, buffer fetch, UI-thread hop, cross-thread `window:close-all`). Local: 12/12 ctest × 5 runs; shutdown 71 ms after native close
+- CI: new CircleCI `build-windows` job (Server 2022, pinned vcpkg commit, `-LE display`) — not yet run
+- Not ported: Pinhole (stub), `anyar` CLI, key-storage / video-player / wifi-analyzer, packaging, zero-copy buffers

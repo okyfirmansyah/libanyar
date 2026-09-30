@@ -2,6 +2,7 @@
 #include <anyar/pinhole.h>
 #include "webview/webview.h"
 
+#include <atomic>
 #include <memory>
 #include <sstream>
 #include <stdexcept>
@@ -9,10 +10,15 @@
 #include <map>
 #include <vector>
 
-// Platform-specific GTK includes (Linux only)
+// Platform-specific includes
 #ifdef __linux__
 #include <gtk/gtk.h>
 #include <webkit2/webkit2.h>
+#elif defined(_WIN32)
+#include <anyar/main_thread.h>
+#include "platform.h"
+#include "win32_util.h"
+#include <iostream>
 #endif
 
 namespace anyar {
@@ -37,6 +43,9 @@ struct Window::Impl {
     Window::CloseHandler on_close;
     Window::CloseRequestedHandler on_close_requested;
 
+    // Live pinhole objects owned by this window (keyed by id for O(1) lookup).
+    std::map<std::string, std::shared_ptr<Pinhole>> pinholes;
+
 #ifdef __linux__
     gulong focus_in_handler_id = 0;
     gulong delete_event_handler_id = 0;
@@ -48,12 +57,20 @@ struct Window::Impl {
     // of native GL surfaces. Non-owning: GTK widget tree owns the lifetime.
     GtkOverlay* overlay = nullptr;
 
-    // Live pinhole objects owned by this window (keyed by id for O(1) lookup).
-    std::map<std::string, std::shared_ptr<Pinhole>> pinholes;
-
     // Tracks whether the pinhole JS tracking snippet has been injected
     // via webview_init() on this window (injected once per window).
     bool pinhole_js_injected = false;
+#elif defined(_WIN32)
+    // The engine's top-level HWND is subclassed to observe activation,
+    // close requests, minimize and destruction.  Impl* is stored as a window
+    // property because webview/webview already owns GWLP_USERDATA.
+    HWND hooked_hwnd = nullptr;
+    WNDPROC orig_wndproc = nullptr;
+
+    HWND parent_window = nullptr;   // owner window (non-owning)
+    bool is_modal = false;
+    bool minimized = false;
+    bool center_pending = false;    // center once the size is known (show)
 #endif
 
     Impl(const WindowCreateOptions& opts, int port)
@@ -102,6 +119,14 @@ struct Window::Impl {
             webview_set_size(wv, stored_min_width, stored_min_height,
                              WEBVIEW_HINT_MIN);
         }
+#ifdef _WIN32
+        // webview_set_size() shows the window; size + place it first so it
+        // does not appear at CW_USEDEFAULT and then jump.
+        if (center_pending) {
+            center_pending = false;
+            place_centered(frame_size_for_client(stored_width, stored_height));
+        }
+#endif
         webview_set_size(wv, stored_width, stored_height, stored_hint);
 
 #ifdef __linux__
@@ -180,7 +205,47 @@ struct Window::Impl {
 #endif
 
         connect_close_signals();
+
+#ifdef _WIN32
+        // Setup (bind + init scripts) is complete.  If the UI loop is
+        // already running (child window), load now; otherwise run() will.
+        if (g_run_loop_active.load()) {
+            flush_navigation();
+        }
+#endif
     }
+
+    // ── Initial navigation ──────────────────────────────────────────────
+    //
+    // WebView2 applies AddScriptToExecuteOnDocumentCreated (webview_bind /
+    // webview_init) only to navigations issued AFTER the script was added,
+    // and webview/webview pumps the message loop while adding each script —
+    // so a navigation issued in the constructor commits before the IPC
+    // binding exists (window.__anyar_ipc__ undefined).  On Win32 the first
+    // URL is therefore held until setup is done.  WebKitGTK does not load
+    // until the GTK loop runs, so Linux navigates immediately.
+#ifdef _WIN32
+    static inline std::atomic<bool> g_run_loop_active{false};
+    std::string pending_url;
+#endif
+
+    void start_navigation(const std::string& url) {
+#ifdef _WIN32
+        pending_url = url;
+#else
+        webview_navigate(wv, url.c_str());
+#endif
+    }
+
+#ifdef _WIN32
+    void flush_navigation() {
+        if (wv && !pending_url.empty()) {
+            std::string url = std::move(pending_url);
+            pending_url.clear();
+            webview_navigate(wv, url.c_str());
+        }
+    }
+#endif
 
     ~Impl() {
         for (auto& [id, pin] : pinholes) {
@@ -189,11 +254,20 @@ struct Window::Impl {
         pinholes.clear();
 
         // Re-enable parent if this was a modal child
-        if (is_modal && parent_window) {
-            gtk_widget_set_sensitive(
-                GTK_WIDGET(parent_window), TRUE);
-            parent_window = nullptr;
+        restore_parent();
+#ifdef _WIN32
+        // Unlike GTK, a natively destroyed HWND leaves the engine (and its
+        // WebView2 COM objects) alive with `destroyed == true` — always free
+        // it here.  webview_destroy() pumps a nested loop that swallows
+        // WM_QUIT, hence the re-post.
+        if (wv) {
+            disconnect_close_signals();
+            destroyed = true;
+            webview_destroy(wv);
+            wv = nullptr;
+            platform::repost_quit_if_requested();
         }
+#else
         if (wv && !destroyed) {
             // Normal path: Window is being deleted without the GTK
             // "destroy" signal having fired (e.g. shared_ptr dropped).
@@ -217,6 +291,7 @@ struct Window::Impl {
         }
         // If destroyed == true, the GTK "destroy" signal already fired;
         // the library handled cleanup and we set wv = nullptr there.
+#endif
     }
 
     // Deferred-show state for WindowCreateOptions constructor
@@ -380,6 +455,14 @@ struct Window::Impl {
     GtkWindow* parent_window = nullptr;
     bool is_modal = false;
 
+    void restore_parent() {
+        if (is_modal && parent_window) {
+            gtk_widget_set_sensitive(
+                GTK_WIDGET(parent_window), TRUE);
+            parent_window = nullptr;
+        }
+    }
+
     void set_enabled(bool enabled) {
         auto* win = static_cast<GtkWidget*>(native_handle());
         if (win) {
@@ -454,10 +537,224 @@ struct Window::Impl {
             webview_set_size(wv, w, h, WEBVIEW_HINT_NONE);
         }
     }
+#elif defined(_WIN32)
+    static constexpr const wchar_t* kImplProp = L"anyar.window.impl";
+
+    HWND hwnd() const {
+        return static_cast<HWND>(native_handle());
+    }
+
+    // Run a user callback from inside the window procedure: exceptions must
+    // not unwind through Win32 frames.
+    template <typename F>
+    static auto guarded(const char* what, F&& fn, decltype(fn()) fallback) {
+        try {
+            return fn();
+        } catch (const std::exception& e) {
+            std::cerr << "[LibAnyar] " << what << " threw: " << e.what() << std::endl;
+        } catch (...) {
+            std::cerr << "[LibAnyar] " << what << " threw" << std::endl;
+        }
+        return fallback;
+    }
+
+    static LRESULT CALLBACK subclass_proc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
+        auto* self = static_cast<Impl*>(GetPropW(h, kImplProp));
+        if (!self || !self->orig_wndproc) {
+            return DefWindowProcW(h, msg, wp, lp);
+        }
+        WNDPROC orig = self->orig_wndproc;
+
+        switch (msg) {
+        case WM_ACTIVATE:
+            if (LOWORD(wp) != WA_INACTIVE && self->on_focus) {
+                guarded("focus handler", [&] { self->on_focus(); return 0; }, 0);
+            }
+            break;
+
+        case WM_CLOSE:  // title-bar X, Alt+F4
+            if (!self->closable) return 0;
+            if (self->on_close_requested &&
+                !guarded("close-requested handler",
+                         [&] { return self->on_close_requested(); }, true)) {
+                return 0;
+            }
+            // Re-enable the owner BEFORE this window goes away so Windows
+            // hands activation back to it rather than to another app.
+            self->restore_parent();
+            break;
+
+        case WM_SIZE: {  // pause/resume pinholes on minimize/restore
+            bool now_minimized = (wp == SIZE_MINIMIZED);
+            if (now_minimized != self->minimized) {
+                self->minimized = now_minimized;
+                for (auto& [pid, pin] : self->pinholes) {
+                    pin->set_window_active(!now_minimized);
+                }
+            }
+            break;
+        }
+
+        case WM_DESTROY:
+            self->on_native_destroy();  // unhooks; engine still sees WM_DESTROY
+            break;
+        }
+        return CallWindowProcW(orig, h, msg, wp, lp);
+    }
+
+    // Mirrors the GTK "destroy" handler.
+    void on_native_destroy() {
+        for (auto& [pid, pin] : pinholes) {
+            pin->notify_window_destroyed();
+        }
+        if (owns_run_loop) {
+            platform::request_quit();
+        }
+        disconnect_close_signals();
+        destroyed = true;
+        restore_parent();
+        // Defer on_close to avoid re-entrant destruction.  NOT for the window
+        // that owns the run loop: posted messages are delivered before
+        // WM_QUIT, so on_close would delete this Window while run() is still
+        // on its stack.  App::run() tears the main window down after the
+        // loop returns instead.
+        if (on_close && !owns_run_loop) {
+            post_to_main_thread(std::move(on_close));
+        }
+        on_close = nullptr;
+    }
+
+    void connect_close_signals() {
+        HWND h = hwnd();
+        if (!h || hooked_hwnd) return;
+        SetPropW(h, kImplProp, this);
+        orig_wndproc = reinterpret_cast<WNDPROC>(SetWindowLongPtrW(
+            h, GWLP_WNDPROC, reinterpret_cast<LONG_PTR>(&subclass_proc)));
+        hooked_hwnd = h;
+    }
+
+    void disconnect_close_signals() {
+        if (!hooked_hwnd) return;
+        if (IsWindow(hooked_hwnd)) {
+            // Only restore if nobody subclassed on top of us meanwhile.
+            if (GetWindowLongPtrW(hooked_hwnd, GWLP_WNDPROC) ==
+                reinterpret_cast<LONG_PTR>(&subclass_proc)) {
+                SetWindowLongPtrW(hooked_hwnd, GWLP_WNDPROC,
+                                  reinterpret_cast<LONG_PTR>(orig_wndproc));
+            }
+            RemovePropW(hooked_hwnd, kImplProp);
+        }
+        hooked_hwnd = nullptr;
+        orig_wndproc = nullptr;
+    }
+
+    void set_parent(Impl& parent_impl) {
+        HWND child = hwnd();
+        HWND parent = parent_impl.hwnd();
+        if (child && parent) {
+            // Owned window: always above its owner, minimizes with it.
+            SetWindowLongPtrW(child, GWLP_HWNDPARENT,
+                              reinterpret_cast<LONG_PTR>(parent));
+            parent_window = parent;
+        }
+    }
+
+    void set_modal(bool modal) {
+        if (!hwnd()) return;
+        is_modal = modal;
+        if (modal && parent_window) {
+            EnableWindow(parent_window, FALSE);
+        }
+    }
+
+    void restore_parent() {
+        if (is_modal && parent_window) {
+            if (IsWindow(parent_window)) EnableWindow(parent_window, TRUE);
+            parent_window = nullptr;
+        }
+    }
+
+    void set_enabled(bool enabled) {
+        if (HWND h = hwnd()) EnableWindow(h, enabled ? TRUE : FALSE);
+    }
+
+    void set_always_on_top(bool on_top) {
+        if (HWND h = hwnd()) {
+            SetWindowPos(h, on_top ? HWND_TOPMOST : HWND_NOTOPMOST, 0, 0, 0, 0,
+                         SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+        }
+    }
+
+    void set_position(int x, int y) {
+        if (HWND h = hwnd()) {
+            SetWindowPos(h, nullptr, x, y, 0, 0,
+                         SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+        }
+    }
+
+    // Outer frame size for a client area given in CSS/DIP pixels (matches
+    // how webview_set_size() scales by the window DPI).
+    SIZE frame_size_for_client(int width, int height) const {
+        HWND h = hwnd();
+        UINT dpi = h ? GetDpiForWindow(h) : USER_DEFAULT_SCREEN_DPI;
+        RECT r{0, 0, MulDiv(width, dpi, USER_DEFAULT_SCREEN_DPI),
+               MulDiv(height, dpi, USER_DEFAULT_SCREEN_DPI)};
+        if (h) {
+            AdjustWindowRectExForDpi(&r, static_cast<DWORD>(GetWindowLongPtrW(h, GWL_STYLE)),
+                                     FALSE, static_cast<DWORD>(GetWindowLongPtrW(h, GWL_EXSTYLE)),
+                                     dpi);
+        }
+        return SIZE{r.right - r.left, r.bottom - r.top};
+    }
+
+    // Size the window to @p frame and center it on the owner, or on the
+    // work area of the monitor it is on.
+    void place_centered(SIZE frame) {
+        HWND h = hwnd();
+        if (!h) return;
+        RECT area{};
+        if (parent_window && IsWindow(parent_window)) {
+            GetWindowRect(parent_window, &area);
+        } else {
+            MONITORINFO mi{};
+            mi.cbSize = sizeof(mi);
+            GetMonitorInfoW(MonitorFromWindow(h, MONITOR_DEFAULTTOPRIMARY), &mi);
+            area = mi.rcWork;
+        }
+        int x = area.left + ((area.right - area.left) - frame.cx) / 2;
+        int y = area.top + ((area.bottom - area.top) - frame.cy) / 2;
+        SetWindowPos(h, nullptr, x, y, frame.cx, frame.cy,
+                     SWP_NOZORDER | SWP_NOACTIVATE);
+    }
+
+    void center_on_parent() {
+        HWND h = hwnd();
+        if (!h) return;
+        if (needs_show) {
+            // Size not applied yet (the window is 0×0 until show_window()).
+            center_pending = true;
+            return;
+        }
+        RECT r{};
+        GetWindowRect(h, &r);
+        place_centered(SIZE{r.right - r.left, r.bottom - r.top});
+    }
+
+    void focus() {
+        if (HWND h = hwnd()) {
+            if (IsIconic(h)) ShowWindow(h, SW_RESTORE);
+            SetForegroundWindow(h);
+        }
+    }
+
+    void set_size(int w, int h) {
+        if (wv) webview_set_size(wv, w, h, WEBVIEW_HINT_NONE);
+    }
 #else
-    // Stubs for non-Linux platforms (Phase 7 will fill these)
+    // Stubs for other platforms (macOS: Phase 7)
     void connect_close_signals() {}
     void disconnect_close_signals() {}
+    void restore_parent() {}
     void set_parent(Impl&) {}
     void set_modal(bool) {}
     void set_enabled(bool) {}
@@ -479,7 +776,7 @@ Window::Window(const WindowConfig& config, int server_port)
     // Navigate to the LibAsyik HTTP server root
     std::ostringstream url;
     url << "http://127.0.0.1:" << server_port << "/";
-    webview_navigate(impl_->wv, url.str().c_str());
+    impl_->start_navigation(url.str());
 
     // Inject the port number so the JS bridge can find the IPC endpoint
     std::ostringstream init_js;
@@ -503,7 +800,7 @@ Window::Window(const WindowCreateOptions& opts, int server_port)
         }
         url << opts.url;
     }
-    webview_navigate(impl_->wv, url.str().c_str());
+    impl_->start_navigation(url.str());  // deferred on Win32, see Impl
 
     // Inject port + window label for the JS bridge
     std::ostringstream init_js;
@@ -530,12 +827,29 @@ const std::string& Window::label() const {
 
 void Window::run() {
     impl_->owns_run_loop = true;
+#ifdef _WIN32
+    // All setup, including App::on_window_ready scripts, is done: load now.
+    Impl::g_run_loop_active.store(true);
+    impl_->flush_navigation();
+#endif
     webview_run(impl_->wv);
     impl_->owns_run_loop = false;
+#ifdef _WIN32
+    Impl::g_run_loop_active.store(false);
+    // The loop has exited; a stale quit request must not kill later loops
+    // (webview_destroy() depletion during shutdown, another App instance).
+    platform::clear_quit_request();
+#endif
 }
 
 void Window::terminate() {
+#ifdef _WIN32
+    // webview_terminate() is PostQuitMessage() on the CALLING thread — not
+    // thread-safe on Win32, unlike GTK.  Route it to the UI thread.
+    platform::request_quit();
+#else
     webview_terminate(impl_->wv);
+#endif
 }
 
 void Window::destroy() {
@@ -544,22 +858,18 @@ void Window::destroy() {
             pin->notify_window_destroyed();
         }
         if (impl_->owns_run_loop) {
-            webview_terminate(impl_->wv);
+            terminate();
         }
         impl_->disconnect_close_signals();
         impl_->destroyed = true;
 
-#ifdef __linux__
-        // The GTK "destroy" signal handler (now disconnected above) normally
+        // The native destroy handler (now disconnected above) normally
         // re-enables the parent and defers the on_close callback.  Since we
         // disconnected it, we must do both manually before webview_destroy()
         // so that the parent window remains responsive.
-        if (impl_->is_modal && impl_->parent_window) {
-            gtk_widget_set_sensitive(
-                GTK_WIDGET(impl_->parent_window), TRUE);
-            impl_->parent_window = nullptr;
-        }
+        impl_->restore_parent();
 
+#ifdef __linux__
         // Drain a bounded number of stale g_idle_add callbacks
         // BEFORE webview_destroy() so that deplete_run_loop_event_queue()
         // inside the webview destructor won't process stale callbacks.
@@ -572,7 +882,18 @@ void Window::destroy() {
         webview_destroy(impl_->wv);
         impl_->wv = nullptr;
 
-#ifdef __linux__
+#ifdef _WIN32
+        // webview_destroy() depletes the queue in a nested loop that
+        // swallows WM_QUIT.
+        platform::repost_quit_if_requested();
+
+        // Defer on_close (see Impl::on_native_destroy for why the run-loop
+        // owner is excluded).
+        if (impl_->on_close && !impl_->owns_run_loop) {
+            post_to_main_thread(std::move(impl_->on_close));
+        }
+        impl_->on_close = nullptr;
+#elif defined(__linux__)
         // Defer the on_close callback to avoid re-entrant destruction:
         // on_close → windows_.erase() could drop the last shared_ptr →
         // ~Impl while we are still inside Window::destroy().
@@ -607,6 +928,12 @@ void Window::eval(const std::string& js) {
 }
 
 void Window::navigate(const std::string& url) {
+#ifdef _WIN32
+    if (!impl_->pending_url.empty()) {
+        impl_->pending_url = url;  // initial load not issued yet — replace it
+        return;
+    }
+#endif
     if (impl_->wv) {
         webview_navigate(impl_->wv, url.c_str());
     }
@@ -720,6 +1047,22 @@ void Window::set_close_confirmation(const std::string& message,
 
         return result == GTK_RESPONSE_OK;
     };
+#elif defined(_WIN32)
+    if (message.empty()) {
+        impl_->on_close_requested = nullptr;
+        return;
+    }
+
+    std::wstring msg = win32::widen(message);
+    std::wstring ttl = win32::widen(title);
+    Impl* impl = impl_.get();  // the handler is owned by *impl
+
+    impl_->on_close_requested = [msg, ttl, impl]() -> bool {
+        // Runs inside WM_CLOSE on the UI thread; MessageBoxW pumps a modal
+        // loop, so posted main-thread work keeps flowing meanwhile.
+        return MessageBoxW(impl->hwnd(), msg.c_str(), ttl.c_str(),
+                           MB_OKCANCEL | MB_ICONWARNING | MB_DEFBUTTON2) == IDOK;
+    };
 #endif
 }
 
@@ -782,16 +1125,16 @@ std::shared_ptr<Pinhole> Window::create_pinhole(const std::string& id,
         }
     }
 #else
+    // Stub pinhole (is_native() == false); tracked so IPC lookups resolve.
     pin->platform_init(id, opts, nullptr, {});
+    impl_->pinholes.emplace(id, pin);
 #endif
     return pin;
 }
 
 std::shared_ptr<Pinhole> Window::find_pinhole(const std::string& id) const {
-#ifdef __linux__
     auto it = impl_->pinholes.find(id);
     if (it != impl_->pinholes.end()) return it->second;
-#endif
     return nullptr;
 }
 

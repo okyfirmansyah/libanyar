@@ -8,6 +8,7 @@ add_library(anyar_core STATIC
     src/event_bus.cpp
     src/frame_mailbox.cpp
     src/http_file.cpp
+    src/shared_buffer.cpp
     src/window.cpp
     src/window_manager.cpp
     src/plugins/fs_plugin.cpp
@@ -17,6 +18,7 @@ add_library(anyar_core STATIC
 # ── Platform-specific sources ────────────────────────────────────────────────
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     target_sources(anyar_core PRIVATE
+        src/platform_linux.cpp
         src/main_thread_linux.cpp
         src/shared_buffer_linux.cpp
         src/pinhole_linux.cpp
@@ -25,14 +27,15 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         src/plugins/shell_linux.cpp
     )
 elseif(WIN32)
-    # Phase 7: add Windows implementations
-    # target_sources(anyar_core PRIVATE
-    #     src/main_thread_win32.cpp
-    #     src/plugins/dialog_win32.cpp
-    #     src/plugins/clipboard_win32.cpp
-    #     src/plugins/shell_win32.cpp
-    # )
-    target_sources(anyar_core PRIVATE src/pinhole_stub.cpp)
+    target_sources(anyar_core PRIVATE
+        src/platform_win32.cpp
+        src/main_thread_win32.cpp
+        src/shared_buffer_win32.cpp
+        src/pinhole_stub.cpp              # Pinhole Win32 port: ADR-008 (DComp)
+        src/plugins/dialog_win32.cpp
+        src/plugins/clipboard_win32.cpp
+        src/plugins/shell_win32.cpp
+    )
 elseif(APPLE)
     # Phase 7: add macOS implementations
     # target_sources(anyar_core PRIVATE
@@ -93,10 +96,13 @@ endif()
 # always find SOCI to satisfy imported target references.
 find_package(SOCI QUIET)
 if(SOCI_FOUND)
-    target_include_directories(anyar_core PUBLIC /usr/include/postgresql)
-    target_include_directories(anyar_core PUBLIC /usr/local/include/soci)
-    target_include_directories(anyar_core PUBLIC /usr/local/include/soci/postgresql)
-    target_include_directories(anyar_core PUBLIC /usr/local/include/soci/sqlite3)
+    if(NOT WIN32)
+        # On Windows the libasyik target already exports the vcpkg SOCI dirs.
+        target_include_directories(anyar_core PUBLIC /usr/include/postgresql)
+        target_include_directories(anyar_core PUBLIC /usr/local/include/soci)
+        target_include_directories(anyar_core PUBLIC /usr/local/include/soci/postgresql)
+        target_include_directories(anyar_core PUBLIC /usr/local/include/soci/sqlite3)
+    endif()
     if(ANYAR_ENABLE_SOCI)
         target_link_libraries(anyar_core PUBLIC SOCI::soci_core SOCI::soci_postgresql SOCI::soci_sqlite3)
     endif()
@@ -147,8 +153,21 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     # POSIX shared memory (shm_open, shm_unlink)
     target_link_libraries(anyar_core PUBLIC rt)
 elseif(WIN32)
-    # Phase 7: WebView2 — webview/webview auto-detects via macros.h
-    # find_package(WebView2 REQUIRED)
+    # WebView2 — webview/webview auto-detects the Edge backend and ships its
+    # own loader (WEBVIEW_MSWEBVIEW2_BUILTIN_IMPL), so only the SDK header
+    # WebView2.h is needed: `vcpkg install webview2`, or pass
+    # -DWEBVIEW2_INCLUDE_DIR=<Microsoft.Web.WebView2 NuGet>/build/native/include
+    find_path(WEBVIEW2_INCLUDE_DIR WebView2.h)
+    if(NOT WEBVIEW2_INCLUDE_DIR)
+        message(FATAL_ERROR "WebView2.h not found. Install it with "
+            "`vcpkg install webview2:x64-windows` or set WEBVIEW2_INCLUDE_DIR.")
+    endif()
+    target_include_directories(anyar_core PUBLIC ${WEBVIEW2_INCLUDE_DIR})
+
+    # Win32 system libraries (window mgmt, COM dialogs, ShellExecute, version
+    # probing done by the WebView2 loader).
+    target_link_libraries(anyar_core PUBLIC
+        user32 ole32 shell32 shlwapi advapi32 version)
 elseif(APPLE)
     # Phase 7: WKWebView — webview/webview auto-detects via macros.h
     # target_link_libraries(anyar_core PUBLIC "-framework WebKit")

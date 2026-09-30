@@ -25,7 +25,7 @@ examples/<name>/
 - Frontend default: **Svelte 5 + TS + Tailwind CSS 4** (preferred); React or vanilla acceptable
 - Dark theme via CSS custom properties — keep visual consistency across examples
 - C++ entry uses `#ifdef ANYAR_EMBED_FRONTEND` to switch between cmrc resolver and `dist/` filesystem
-- All examples build green via root `cmake --build build`
+- All examples build green via root `cmake --build build`. On Windows only hello-world + pinhole-hello are built (root `CMakeLists.txt` gates the others: POSIX/libnl/pkg-config FFmpeg); keep new examples portable. MSVC: a local `constexpr` used inside a lambda must be `static constexpr` (C3493)
 
 ## Build
 ```bash

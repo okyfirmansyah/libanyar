@@ -3,6 +3,8 @@
 ## Purpose
 C++ CLI binary that scaffolds, runs, builds, and packages LibAnyar projects.
 
+**Linux-only for now**: uses fork/exec, `popen`, `/proc/self/exe`, `chmod`, dpkg. The root `CMakeLists.txt` skips `cli/` on Windows (ADR-010); a port needs `CreateProcess`/job objects for `dev`, and MSI/NSIS for `package`.
+
 ## Layout
 
 ```

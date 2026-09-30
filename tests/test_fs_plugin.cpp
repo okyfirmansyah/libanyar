@@ -11,6 +11,7 @@
 #include <set>
 #include <filesystem>
 #include <fstream>
+#include <random>
 
 namespace fs = std::filesystem;
 using namespace anyar;
@@ -28,7 +29,8 @@ static IpcResponse invoke(CommandRegistry& cmds, const std::string& cmd, const j
 struct TempDir {
     fs::path path;
     TempDir() {
-        path = fs::temp_directory_path() / ("anyar_test_" + std::to_string(::getpid()));
+        path = fs::temp_directory_path() /
+               ("anyar_test_" + std::to_string(std::random_device{}()));
         fs::create_directories(path);
     }
     ~TempDir() {
@@ -197,6 +199,7 @@ TEST_CASE("FsPlugin: readFile on non-existent file returns error", "[fs_plugin]"
     FsPlugin plugin;
     plugin.initialize(ctx);
 
-    auto r = invoke(cmds, "fs:readFile", {{"path", "/tmp/anyar_nonexistent_file_xyz.txt"}});
+    auto missing = fs::temp_directory_path() / "anyar_nonexistent_file_xyz.txt";
+    auto r = invoke(cmds, "fs:readFile", {{"path", missing.string()}});
     REQUIRE_FALSE(r.error.empty());
 }

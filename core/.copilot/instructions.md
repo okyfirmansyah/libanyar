@@ -4,7 +4,7 @@ Static C++17 lib `anyar_core`: `anyar::App`, window manager, IPC router, command
 
 ## Layout
 - `core/include/anyar/` — public headers (no platform includes): `app.h, app_config.h (AppConfig/WindowConfig/WindowCreateOptions/FileResolver), window.h, window_manager.h, ipc_router.h, command_registry.h, event_bus.h, shared_buffer.h, pinhole.h, pixel_format.h, frame_mailbox.h, task.h, http_file.h, embed.h, plugin.h, types.h, main_thread.h`, `gtk_dispatch.h` (deprecated shim → `main_thread.h`), `plugins/`
-- `core/src/` — impl + platform splits: `frame_mailbox.cpp` (+ pixel_format helpers), `http_file.cpp`, `*_linux.cpp` (incl. `pinhole_linux.cpp`), `pinhole_stub.cpp` (non-Linux), `plugins/{dialog,clipboard,shell}_linux.cpp`, `db_plugin.cpp`, `fs_plugin.cpp`
+- `core/src/` — impl + platform splits: `frame_mailbox.cpp` (+ pixel_format helpers), `http_file.cpp`, `shared_buffer.cpp` (factory/registry/pool; mapping in `shared_buffer_<os>.cpp`), `platform.h` (PRIVATE per-OS hooks, ADR-010) → `platform_<os>.cpp` + `main_thread_<os>.cpp`, `*_linux.cpp` (incl. `pinhole_linux.cpp`), `*_win32.cpp` + `win32_util.h` (UTF-8↔UTF-16), `pinhole_stub.cpp` (non-Linux), `plugins/{dialog,clipboard,shell}_{linux,win32}.cpp`, `db_plugin.cpp`, `fs_plugin.cpp`. `window.cpp` is one file with `#ifdef __linux__` / `_WIN32` Impl sections.
 
 ## App API (beyond command/emit/on/use)
 `http_get/http_post(path, fn)` — pre-`run()` deferred, always beat `serve_static`. `allow_file_access(dir)` → `anyar-file://`. `on_ready(fn)` — after server + plugin init. `on_window_ready(fn(Window&))` — main thread, main window exists, GTK loop not yet running: the place for `create_pinhole()`. `server()`/`port()`/`service()`. `set_on_server_ready` is deprecated. Relative `AppConfig::dist_path` resolves cwd first, then next to the executable (`resolve_dist_path()` in `app_config.h`); `ANYAR_EMBED_FRONTEND` builds ignore it.
@@ -22,7 +22,7 @@ auto pool = asyik::make_sql_pool(asyik::sql_backend_sqlite3, "db", 4);
 `http_server` is a template: use `asyik::http_server_ptr<asyik::http_stream_type>`. Routes accept `<int>`/`<string>` only; regex via `on_http_request_regex`. `find_package(SOCI QUIET)`. `insert_front=true` to beat `serve_static` catch-all.
 
 ## Threading (CRITICAL)
-Main thread = platform UI loop (`gtk_main()` Linux). Service thread = `asyik::service::run()` (fibers, HTTP, WS, DB) — ONE thread for every command/route/event. Worker pool = `as->async()`. Webview calls MUST run on main thread; LibAsyik in fibers. Cross-thread: `run_on_main_thread(fn)` from `<anyar/main_thread.h>`, `service_->execute()`.
+Main thread = platform UI loop (`gtk_main()` Linux, Win32 message loop Windows — dispatch window bound by `platform::attach_main_thread()` at the top of `App::run()`). Service thread = `asyik::service::run()` (fibers, HTTP, WS, DB) — ONE thread for every command/route/event. Worker pool = `as->async()`. Webview calls MUST run on main thread; LibAsyik in fibers. Cross-thread: `run_on_main_thread(fn)` from `<anyar/main_thread.h>`, `service_->execute()`.
 
 ## Background Work (`<anyar/task.h>`, ADR-009)
 - `anyar::run_blocking(service, fn)` — run blocking work (codecs, file I/O, CPU) on the worker pool; suspends only the calling fiber, rethrows exceptions. Never block the service thread directly.
@@ -57,7 +57,7 @@ Main thread = platform UI loop (`gtk_main()` Linux). Service thread = `asyik::se
 ## IPC Protocol
 Native (~0.01ms): `webview_bind("__anyar_ipc__")` + `webview_return`. JS (GTK thread) → `service_->execute()` → fiber → `window_->dispatch()` → `return_result()`. HTTP fallback `POST /__anyar__/invoke` `{cmd,args,id}` → `{id,data,error}`. WS fallback `/__anyar_ws__`. Routes registered before `app.run()` are deferred and inserted before `serve_static`; after `run()` use `insert_front=true`.
 
-## Shared Memory (Linux)
+## Shared Memory (Linux; Windows: see above)
 `SharedBuffer::create(name,size)` → `shm_open` + `mmap`; names are process-global (duplicate → throws). URI `anyar-shm://<name>` via `webkit_web_context_register_uri_scheme()`. HTTP fallback `GET /__anyar__/buffer/<name>`. `anyar-file://<path>` via `app.allow_file_access(dir)` — path traversal validated against canonical roots; streamed from disk (`GFileInputStream`, no Range).
 `SharedBufferPool(base, size, n)` → buffers `base_0..n-1`; slot states FREE→WRITING (`acquire_write()` blocking / `try_acquire_write()` → nullptr if full) →READY (`release_write`, only from WRITING) →FREE (`release_read`, only from READY/READING; stale releases can't free a WRITING slot). `release_unpublished(buf)` WRITING→FREE. `buffer(name)` → `shared_ptr` that outlives the pool. `close()` → acquires throw `SharedBufferPoolClosed`. Recreating a base name requires the old pool destroyed — prefer per-session names.
 
@@ -65,7 +65,15 @@ Native (~0.01ms): `webview_bind("__anyar_ipc__")` + `webview_return`. JS (GTK th
 `anyar::serve_file(weak_server.lock(), req, path, FileServeOptions{content_type, cache_control="no-store", cors_any_origin, chunk_bytes=256KiB})` — streaming: takes over the connection (direct response, `Connection: close`), body written in chunks read on the worker pool; use for `<audio>`/`<video>` and large files. `serve_file(req, path, opts)` — buffered variant (whole range in memory). Both: 200 full / 206 Range / 416 / 404, `Accept-Ranges: bytes`. ALWAYS answer the full requested range — WebKitGTK media never requests the rest of a shortened 206 (playback stalls, later seeks fail with MEDIA_ERR_DECODE). Capture the server as `weak_ptr` in routes (the route is owned by the server). Helpers `parse_range_header()`, `mime_type_for_path()`. `/__anyar__/file/<path>` uses it.
 
 ## Platform Split
-Public headers MUST NOT include GTK/Win32/Cocoa. Platform code: `*_linux.cpp` / `*_win32.cpp` / `*_macos.mm`. CMake selects via `if(CMAKE_SYSTEM_NAME STREQUAL "Linux")`. Don't set `WEBVIEW_GTK=1` — auto-detected.
+Public headers MUST NOT include GTK/Win32/Cocoa. Platform code: `*_linux.cpp` / `*_win32.cpp` / `*_macos.mm`; shared seams go in private `core/src/platform.h` (not `#ifdef`s in `app.cpp`). CMake selects via `if(CMAKE_SYSTEM_NAME STREQUAL "Linux")` / `elseif(WIN32)`. Don't set `WEBVIEW_GTK=1` — auto-detected.
+
+## Windows (ADR-010) — MSVC + vcpkg, LibAsyik 1.8.1+
+- Deps: vcpkg Boost/OpenSSL/SOCI/nlohmann-json/`webview2` (header only — webview's built-in loader). `scripts/setup-windows.ps1` installs them + LibAsyik into `build-deps/libasyik` (`CMAKE_PREFIX_PATH`). LibAsyik exports `NOGDI WIN32_LEAN_AND_MEAN NOMINMAX` — a TU needing GDI (`dialog_win32.cpp`, `<commctrl.h>`) must `#undef NOGDI` before any include.
+- `Window::terminate()` → `platform::request_quit()` (webview's is caller-thread `PostQuitMessage`). Quit is sticky: every `webview_destroy()` we call is followed by `repost_quit_if_requested()` (webview's nested loops swallow `WM_QUIT`); `Window::run()` clears it after the loop.
+- Engine HWND subclassed (prop `anyar.window.impl`; webview owns `GWLP_USERDATA`): `WM_ACTIVATE` focus, `WM_CLOSE` closable/close-requested, `WM_SIZE` minimize → pinholes, `WM_DESTROY` destroy handler. Natively destroyed windows keep `wv` until `~Impl` → `webview_destroy()` (frees WebView2 COM). Run-loop owner never posts `on_close` (would delete it inside `run()`).
+- First navigation deferred until setup is done (`show()` if loop running, else `run()`): WebView2 applies bind/init scripts only to navigations issued after them. Add scripts before `run()`.
+- SharedBuffer = file mapping, no `anyar-shm://`/`anyar-file://` (no-op registration); page gets `window.__LIBANYAR_SHM_SCHEME__ = false` → JS `fetchBuffer()` uses HTTP. Pinhole = stub. CLI + key-storage/video-player/wifi-analyzer: Linux-only.
+- `std::filesystem::path(std::string)` is ANSI on Windows — convert UTF-8 explicitly (`win32::widen`) for non-ASCII paths.
 
 ## Adding a Plugin
 1. `core/include/anyar/plugins/my_plugin.h` (impl `IAnyarPlugin`)

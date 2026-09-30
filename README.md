@@ -125,7 +125,7 @@ const result = await invoke('greet', { name: 'World' });
 
 - C++17 compiler (GCC 11+, Clang 10+, MSVC 2019+)
 - CMake >= 3.16
-- LibAsyik 1.7.1+ (with Boost >= 1.81, SOCI 4.0.3)
+- LibAsyik 1.7.1+ on Linux, 1.8.1+ on Windows (with Boost >= 1.81, SOCI 4.0.3)
 - WebKitGTK 4.0 (Linux) / WebView2 (Windows) / WebKit (macOS)
 - nlohmann/json >= 3.11
 - Node.js >= 18 (for frontend build, optional for pre-built dist)
@@ -148,6 +148,26 @@ make -j$(nproc)
 cd examples/hello-world
 ./hello_world
 ```
+
+#### Windows 10/11 (early support — MSVC + vcpkg)
+
+Needs Visual Studio 2022 (Desktop C++), CMake, Git, [vcpkg](https://vcpkg.io) and the
+Edge WebView2 runtime (preinstalled on Windows 11).
+
+```powershell
+# vcpkg packages + LibAsyik 1.8.1 → build-deps\libasyik
+powershell -ExecutionPolicy Bypass -File scripts\setup-windows.ps1 -VcpkgRoot C:\vcpkg
+
+cmake -B build-win -G "Visual Studio 17 2022" -A x64 `
+  -DCMAKE_TOOLCHAIN_FILE=C:\vcpkg\scripts\buildsystems\vcpkg.cmake `
+  -DCMAKE_PREFIX_PATH=$PWD\build-deps\libasyik -DANYAR_BUILD_TESTS=ON
+cmake --build build-win --config Release
+ctest --test-dir build-win -C Release --output-on-failure
+```
+
+Works on Windows: windows/multi-window, native IPC, events, dialogs, clipboard, shell, fs, db,
+SharedBuffer (served over HTTP). Not yet: Pinhole (stub, `is_native() == false`), zero-copy
+`anyar-shm://`, the `anyar` CLI, and the key-storage / video-player / wifi-analyzer examples.
 
 ## Pinhole Native Rendering
 

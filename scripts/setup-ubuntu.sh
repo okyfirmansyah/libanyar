@@ -129,7 +129,8 @@ else
     LIBASYIK_BUILD_DIR="$TEMP_DIR/libasyik"
     # 1.7.1+: HTTP connection tracking + scheduler cancellation — required for
     # app.run() to return when a keep-alive connection is open at shutdown.
-    git clone --branch 1.7.1 --depth=1 https://github.com/okyfirmansyah/libasyik "$LIBASYIK_BUILD_DIR"
+    # 1.8.1 (pinned, same as CI and setup-windows.ps1): first MSVC-capable release.
+    git clone --branch 1.8.1 --depth=1 https://github.com/okyfirmansyah/libasyik "$LIBASYIK_BUILD_DIR"
     cd "$LIBASYIK_BUILD_DIR"
     git submodule update --init --recursive
 

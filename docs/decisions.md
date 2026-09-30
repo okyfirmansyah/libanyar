@@ -4,6 +4,38 @@
 
 ---
 
+## ADR-010: Windows Port — Win32 Platform Layer on webview/WebView2
+
+**Date**: 2026-09-30
+**Status**: Accepted
+
+**Context**: Phase 7 begins with Windows. LibAsyik 1.8.1 is the first release that builds with MSVC (vcpkg Boost 1.90, OpenSSL 3, SOCI 4.0.3). It exports `_WIN32_WINNT=0x0A00 WIN32_LEAN_AND_MEAN NOMINMAX NOGDI` and `/bigobj /Zc:__cplusplus /utf-8` to every target that links it. The vendored webview/webview 0.12 already has a WebView2 backend with a built-in loader. Four behaviours of that backend differ from GTK in ways the core relied on:
+1. `webview_terminate()` is a bare `PostQuitMessage(0)`, which quits the *calling* thread's loop. `window:close-all` calls it from a service-thread fiber.
+2. webview's nested loops (`deplete_run_loop_event_queue()` inside `webview_destroy()`, script registration) exit on `WM_QUIT` and consume it, so a pending quit can be lost.
+3. Bindings and init scripts use `AddScriptToExecuteOnDocumentCreated`, which only affects navigations issued after the call. webview pumps the message loop while adding each script. A navigation issued in `Window`'s constructor therefore commits before `window.__anyar_ipc__` exists.
+4. WebView2 custom schemes must be registered when the environment is created, which webview/webview does internally, so `anyar-shm://` / `anyar-file://` cannot be served yet.
+
+**Decision**:
+- **Private platform hooks** (`core/src/platform.h`): `init_process`, `executable_path`, `attach_main_thread`, `drain_main_thread`, `has_shm_uri_scheme`, plus Win32 `request_quit` / `repost_quit_if_requested` / `clear_quit_request`. Implemented in `platform_<os>.cpp` and `main_thread_<os>.cpp`, so `app.cpp` has no platform `#ifdef`s. The public headers are unchanged.
+- **Main-thread dispatch**: a message-only window created by `App::run()` on the UI thread. `post_to_main_thread()` posts to it (modal loops dispatch it too, like `g_idle_add`), and posts made before attach are queued.
+- **Quit** is sticky: `request_quit()` sets a flag and posts `WM_QUIT` to the UI thread. Every `webview_destroy()` we call re-posts it, and `Window::run()` clears it once the loop has returned.
+- **Window**: the engine HWND is subclassed (`Impl*` kept in a window property, because webview owns `GWLP_USERDATA`). The mapping to the GTK signals: `WM_ACTIVATE`→focus, `WM_CLOSE`→closable/close-requested, `WM_SIZE`→pinhole pause, `WM_DESTROY`→destroy handler. Owned windows (`GWLP_HWNDPARENT`) replace transient-for, and `EnableWindow(parent, FALSE)` provides modality. A natively destroyed window keeps its engine until `~Impl` calls `webview_destroy()`, which releases the WebView2 COM objects. The run-loop owner never posts `on_close`: posted messages come before `WM_QUIT` and would delete the main `Window` inside `run()`. `App::run()` tears it down instead.
+- **Initial navigation is deferred** on Win32 until setup is done: in `show()` if the UI loop is running (child windows), otherwise at the start of `Window::run()`, which also covers `on_window_ready` scripts.
+- **SharedBuffer** uses a pagefile-backed file mapping. The C++ side injects `window.__LIBANYAR_SHM_SCHEME__ = false`, and `fetchBuffer()` then uses `GET /__anyar__/buffer/<name>`. Other buffer IPC is unchanged.
+- **Plugins**: `IFileOpenDialog`/`IFileSaveDialog`, `TaskDialogIndirect` (Common Controls v6 via a `#pragma` manifest dependency, `MessageBoxW` fallback), `CF_UNICODETEXT` clipboard, `CreateProcessW` + pipes for `shell:execute` (code 127 when the program cannot start), `ShellExecuteW` for `openUrl`/`openPath`.
+- **Ports**: `App` (and the tests) ask the OS for a free ephemeral port instead of picking one at random. Windows reserves blocks of 49152–65535 for Hyper-V/WSL, and system RPC services listen there. A failed `bind()` inside a test fiber skipped `svc->stop()`, and `run()` hung (~13% of runs).
+- **Deferred**: Pinhole stays a stub (DComp port per ADR-008); `anyar` CLI and the key-storage / video-player / wifi-analyzer examples are Linux-only.
+
+**Rationale**: The public API stays platform-neutral, as the Phase 4e principle requires. Each Win32 divergence is handled where it originates: thread affinity in dispatch/quit, script timing in navigation. Callers need no per-platform code. HTTP for buffers costs one copy and loopback TCP, but it works today and the JS fallback already existed.
+
+**Consequence**:
+- `Window::terminate()` is thread-safe on both platforms.
+- On Windows the first page load starts only when `run()` is entered, or at `show()` for windows created while the loop runs. A child window created before the main loop starts loads nothing until it is navigated.
+- `std::filesystem::path(std::string)` uses the ANSI code page on Windows, so non-ASCII paths in `fs:*` are wrong until the plugins convert from UTF-8 explicitly.
+- A zero-copy WebView2 path (`CreateSharedBuffer` / `PostSharedBufferToScript`, or a custom scheme) needs a hook into webview's environment creation.
+
+---
+
 ## ADR-009: Background Work, Async Commands and Cross-Thread Frame Handoff
 
 **Date**: 2026-09-24

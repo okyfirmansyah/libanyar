@@ -21,6 +21,7 @@
 #include <atomic>
 #include <cstring>
 #include <random>
+#include "test_port.h"
 
 using namespace anyar;
 using json = nlohmann::json;
@@ -28,9 +29,7 @@ using json = nlohmann::json;
 // ── Helper: pick random port ────────────────────────────────────────────────
 
 static int pick_test_port() {
-    static std::mt19937 gen(std::random_device{}());
-    std::uniform_int_distribution<int> dist(49152, 60999);
-    return dist(gen);
+    return anyar_test::free_port();  // see test_port.h
 }
 
 // ── Helper: HTTP invoke ─────────────────────────────────────────────────────

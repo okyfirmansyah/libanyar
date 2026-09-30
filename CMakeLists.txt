@@ -14,8 +14,12 @@ option(ANYAR_BUILD_BENCHMARKS "Build performance benchmark harness" OFF)
 option(ANYAR_ASAN           "Build with AddressSanitizer (debug lifetime bugs)" OFF)
 
 if(ANYAR_ASAN)
-    add_compile_options(-fsanitize=address -fno-omit-frame-pointer)
-    add_link_options(-fsanitize=address)
+    if(MSVC)
+        add_compile_options(/fsanitize=address)
+    else()
+        add_compile_options(-fsanitize=address -fno-omit-frame-pointer)
+        add_link_options(-fsanitize=address)
+    endif()
 endif()
 option(ANYAR_EMBED_FRONTEND "Embed frontend assets into binaries (requires built frontend)" OFF)
 
@@ -33,14 +37,23 @@ add_subdirectory(core)
 if(ANYAR_BUILD_EXAMPLES)
     add_subdirectory(examples/hello-world)
     add_subdirectory(examples/pinhole-hello)
-    add_subdirectory(examples/video-player)
-    add_subdirectory(examples/key-storage)
-    add_subdirectory(examples/wifi-analyzer)
+    if(NOT WIN32)
+        # Still POSIX/Linux-only: key-storage (POSIX file APIs), video-player
+        # (pkg-config FFmpeg, POSIX), wifi-analyzer (libnl / nl80211).
+        add_subdirectory(examples/video-player)
+        add_subdirectory(examples/key-storage)
+        add_subdirectory(examples/wifi-analyzer)
+    endif()
 endif()
 
 # ── CLI Tool ─────────────────────────────────────────────────────────────────
 if(ANYAR_BUILD_CLI)
-    add_subdirectory(cli)
+    if(WIN32)
+        # cli/ still uses fork/exec, popen, /proc and dpkg — not ported yet.
+        message(STATUS "anyar CLI is not yet ported to Windows — skipping")
+    else()
+        add_subdirectory(cli)
+    endif()
 endif()
 
 # ── Tests ────────────────────────────────────────────────────────────────────

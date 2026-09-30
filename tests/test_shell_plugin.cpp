@@ -20,6 +20,15 @@ static IpcResponse invoke(CommandRegistry& cmds, const std::string& cmd, const j
     return cmds.dispatch(IpcRequest{"t", cmd, args});
 }
 
+// On Windows, cmd.exe builtins stand in for the POSIX utilities below.
+#ifdef _WIN32
+static json cmd_exe(std::initializer_list<std::string> args) {
+    json a = json::array({"/c"});
+    for (auto& s : args) a.push_back(s);
+    return a;
+}
+#endif
+
 TEST_CASE("ShellPlugin: execute echo returns stdout", "[shell_plugin]") {
     CommandRegistry cmds;
     EventBus events;
@@ -29,7 +38,11 @@ TEST_CASE("ShellPlugin: execute echo returns stdout", "[shell_plugin]") {
     ShellPlugin plugin;
     plugin.initialize(ctx);
 
+#ifdef _WIN32
+    auto r = invoke(cmds, "shell:execute", {{"program", "cmd"}, {"args", cmd_exe({"echo", "hello"})}});
+#else
     auto r = invoke(cmds, "shell:execute", {{"program", "echo"}, {"args", {"hello"}}});
+#endif
     REQUIRE(r.error.empty());
     REQUIRE(r.data["code"] == 0);
     REQUIRE(r.data["stdout"].get<std::string>().find("hello") != std::string::npos);
@@ -44,6 +57,15 @@ TEST_CASE("ShellPlugin: execute with multiple args", "[shell_plugin]") {
     ShellPlugin plugin;
     plugin.initialize(ctx);
 
+#ifdef _WIN32
+    auto r = invoke(cmds, "shell:execute", {
+        {"program", "cmd"},
+        {"args", cmd_exe({"echo", "hello", "world"})}
+    });
+    REQUIRE(r.error.empty());
+    REQUIRE(r.data["code"] == 0);
+    REQUIRE(r.data["stdout"] == "hello world\r\n");
+#else
     auto r = invoke(cmds, "shell:execute", {
         {"program", "printf"},
         {"args", {"%s %s", "hello", "world"}}
@@ -51,6 +73,7 @@ TEST_CASE("ShellPlugin: execute with multiple args", "[shell_plugin]") {
     REQUIRE(r.error.empty());
     REQUIRE(r.data["code"] == 0);
     REQUIRE(r.data["stdout"] == "hello world");
+#endif
 }
 
 TEST_CASE("ShellPlugin: execute bad command returns non-zero exit", "[shell_plugin]") {
@@ -62,10 +85,17 @@ TEST_CASE("ShellPlugin: execute bad command returns non-zero exit", "[shell_plug
     ShellPlugin plugin;
     plugin.initialize(ctx);
 
+#ifdef _WIN32
+    auto r = invoke(cmds, "shell:execute", {
+        {"program", "cmd"},
+        {"args", cmd_exe({"exit", "1"})}
+    });
+#else
     auto r = invoke(cmds, "shell:execute", {
         {"program", "/bin/false"},
         {"args", json::array()}
     });
+#endif
     REQUIRE(r.error.empty());
     REQUIRE(r.data["code"] != 0);
 }
@@ -96,6 +126,18 @@ TEST_CASE("ShellPlugin: execute with cwd option", "[shell_plugin]") {
     ShellPlugin plugin;
     plugin.initialize(ctx);
 
+#ifdef _WIN32
+    std::string dir = std::filesystem::temp_directory_path().string();
+    while (dir.size() > 3 && (dir.back() == '\\' || dir.back() == '/')) dir.pop_back();
+    auto r = invoke(cmds, "shell:execute", {
+        {"program", "cmd"},
+        {"args", cmd_exe({"cd"})},
+        {"cwd", dir}
+    });
+    REQUIRE(r.error.empty());
+    REQUIRE(r.data["code"] == 0);
+    REQUIRE(r.data["stdout"].get<std::string>().find(dir) != std::string::npos);
+#else
     auto r = invoke(cmds, "shell:execute", {
         {"program", "pwd"},
         {"args", json::array()},
@@ -104,6 +146,7 @@ TEST_CASE("ShellPlugin: execute with cwd option", "[shell_plugin]") {
     REQUIRE(r.error.empty());
     REQUIRE(r.data["code"] == 0);
     REQUIRE(r.data["stdout"].get<std::string>().find("/tmp") != std::string::npos);
+#endif
 }
 
 TEST_CASE("ShellPlugin: execute captures stderr", "[shell_plugin]") {
@@ -116,10 +159,17 @@ TEST_CASE("ShellPlugin: execute captures stderr", "[shell_plugin]") {
     plugin.initialize(ctx);
 
     // "ls /nonexistent" should produce something on stderr
+#ifdef _WIN32
+    auto r = invoke(cmds, "shell:execute", {
+        {"program", "cmd"},
+        {"args", cmd_exe({"dir", "C:\\nonexistent_path_xyz"})}
+    });
+#else
     auto r = invoke(cmds, "shell:execute", {
         {"program", "ls"},
         {"args", {"/nonexistent_path_xyz"}}
     });
+#endif
     REQUIRE(r.data["code"] != 0);
     REQUIRE_FALSE(r.data["stderr"].get<std::string>().empty());
 }

@@ -19,7 +19,7 @@
 | 5 | [CLI Tool](#phase-5-cli-tool) | 🟡 Partial | 2-3 weeks |
 | 6 | [Polish & Documentation](#phase-6-polish--documentation) | 🟡 Partial | Ongoing |
 | **→** | **[Next Steps (Prioritized)](#next-steps-prioritized)** | **🎯 Active** | — |
-| 7 | [Windows & macOS Support](#phase-7-windows--macos-support) | 🔲 Not Started | 3-4 weeks |
+| 7 | [Windows & macOS Support](#phase-7-windows--macos-support) | 🟡 Windows core started (ADR-010) | 3-4 weeks |
 | 8 | [Plugin System & Packaging](#phase-8-plugin-system--packaging) | 🔲 Not Started | 2-3 weeks |
 
 ---
@@ -651,7 +651,7 @@ Linux implementation (`window_linux.cpp`, inside `Window::Impl`):
 | 6 | **CLI exe finder** | `cli/src/util.cpp` | `readlink("/proc/self/exe")` is Linux-only | 🟡 Medium |
 | 7 | **CMakeLists.txt** | `core/CMakeLists.txt` | `webkit2gtk-4.0`, `gtk+-3.0`, `WEBVIEW_GTK=1` hard-coded unconditionally | 🔴 Critical |
 | 8 | **Run script** | `run.sh` | Bash-only, `unset GTK_*`, Linux `LD_LIBRARY_PATH` | 🟢 Low (convenience) |
-| 9 | **LibAsyik dependency** | All of `core/` | LibAsyik uses Boost.Asio + Boost.Fiber internally. It builds on Linux; Windows/macOS portability is **unverified**. This is the deepest dependency risk. | 🟠 Risk |
+| 9 | **LibAsyik dependency** | All of `core/` | LibAsyik uses Boost.Asio + Boost.Fiber internally. It builds on Linux; **Windows verified with LibAsyik 1.8.1 + MSVC (2026-09-30, ADR-010)**; macOS still unverified. | 🟡 Risk (macOS) |
 
 ### 4e.1 Main-Thread Dispatch (Public Header → Platform-Split)
 
@@ -1341,20 +1341,25 @@ If any of these are needed, use `@libanyar/api/canvas` (Phase 4f path) instead.
 > **Prerequisite**: Phase 4d's platform-neutral public API ensures Phase 7 only adds new implementation files, not API changes.
 
 ### 7.1 Windows
-- [ ] Add `core/src/window_win32.cpp` — implement `Window::Impl` using `webview/webview` + Win32 APIs
-- [ ] Add `core/src/main_thread_win32.cpp` — implement `run_on_main_thread()` via Win32 message pump
-- [ ] Add `core/src/plugins/dialog_win32.cpp` — `IFileDialog` / `MessageBox`
-- [ ] Add `core/src/plugins/clipboard_win32.cpp` — Win32 clipboard API
-- [ ] Add `core/src/shared_buffer_win32.cpp` — WebView2 `CreateSharedBuffer` + `PostSharedBufferToScript`
+- [x] Win32 `Window::Impl` (in `core/src/window.cpp`, `#ifdef _WIN32`) — HWND subclass for focus/close/minimize/destroy, owned + modal windows, center, always-on-top, close confirmation, deferred first navigation (2026-09-30)
+- [x] Add `core/src/main_thread_win32.cpp` — `run_on_main_thread()` via a message-only dispatch window + thread-safe sticky quit (2026-09-30)
+- [x] Add `core/src/plugins/dialog_win32.cpp` — `IFileDialog` + `TaskDialogIndirect` (MessageBox fallback) (2026-09-30)
+- [x] Add `core/src/plugins/clipboard_win32.cpp` — Win32 clipboard API (2026-09-30)
+- [x] Add `core/src/plugins/shell_win32.cpp` — `CreateProcessW` + pipes, `ShellExecuteW` (2026-09-30)
+- [x] Add `core/src/shared_buffer_win32.cpp` — file mapping; JS fetches over HTTP (2026-09-30)
+- [ ] Zero-copy buffers in WebView2 — `CreateSharedBuffer` + `PostSharedBufferToScript` or an `anyar-shm` custom scheme (needs a hook into webview's environment creation)
 - [ ] **Pinhole (Phase 4g) Windows port** — major-version migration:
   - [ ] Switch WebView2 hosting to `CoreWebView2CompositionController` (visual hosting) — **breaking change**, gated by major version bump
   - [ ] Add `core/src/pinhole_win32.cpp` — DComp tree with WebView visual + custom D3D11 swap-chain visual
   - [ ] HLSL shader port from GL/MSL counterparts
   - [ ] Validate WebView2 SDK ≥ matching version requirement
 - [ ] WebView2 integration (webview/webview handles most of this; visual hosting requires bypass)
-- [ ] CMake + MSVC build support (conditional `pkg_check_modules` only on Linux)
-- [ ] Test on Windows 10/11
+- [x] CMake + MSVC build support — vcpkg deps, `scripts/setup-windows.ps1`, LibAsyik 1.8.1 (2026-09-30)
+- [x] Test on Windows 11 — 12/12 ctest incl. `window_close` + `native_ipc` E2E through WebView2 (2026-09-30); Windows 10 untested
 - [ ] Bundle WebView2 bootstrapper for systems without Edge
+- [ ] UTF-8 paths in `fs:*` / `resolve_dist_path` / `allow_file_access` (`std::filesystem::path(std::string)` is ANSI on Windows)
+- [ ] Port the `anyar` CLI (`dev`: `CreateProcess` + job objects; `build`; `package` → 7.4)
+- [ ] Port examples: key-storage (POSIX file APIs), video-player (FFmpeg via vcpkg); wifi-analyzer needs a WLAN API backend
 
 ### 7.2 macOS
 - [ ] Add `core/src/window_macos.mm` — implement `Window::Impl` using `webview/webview` + Cocoa APIs
@@ -1373,12 +1378,13 @@ If any of these are needed, use `@libanyar/api/canvas` (Phase 4f path) instead.
 - [ ] App bundle (.app) structure
 
 ### 7.3 CMake Platform Selection
-- [ ] `core/CMakeLists.txt` uses `if(LINUX)`, `if(WIN32)`, `if(APPLE)` to select platform source files
-- [ ] GTK/WebKitGTK pkg-config only on Linux; Win32 libs on Windows; Cocoa frameworks on macOS
-- [ ] Remove hard-coded `WEBVIEW_GTK=1` — let webview/webview auto-detect via its `macros.h`
+- [x] `core/CMakeLists.txt` selects platform sources per OS (Linux + Windows done; macOS branch still a stub) (2026-09-30)
+- [x] GTK/WebKitGTK pkg-config only on Linux; Win32 libs + `WebView2.h` on Windows (2026-09-30); Cocoa frameworks on macOS pending
+- [x] Remove hard-coded `WEBVIEW_GTK=1` — let webview/webview auto-detect via its `macros.h`
 
 ### 7.3 CI/CD
-- [ ] GitHub Actions matrix: Linux (GCC), Windows (MSVC), macOS (Clang)
+- [ ] CircleCI `build-windows` job (Server 2022, MSVC, vcpkg; non-display tests) — added 2026-09-30, first run pending
+- [ ] Matrix: Linux (GCC), Windows (MSVC), macOS (Clang)
 - [ ] Build + test on all platforms per commit
 - [ ] Artifact publishing
 
@@ -1488,7 +1494,7 @@ Only after Linux is fully polished.
 
 ### Decision Point
 
-Tier 1 is complete (benchmarks landed 2026-09-24). Benchmarks exposed a SharedBuffer fetch-path gap (~21 ms/1080p vs ~1 ms claimed) and Pinhole idle-callback lifetime hazards — see [progress.md](progress.md) for the current next-step list. Before committing to Tier 4 (Phase 7), run a LibAsyik MSVC/Clang-macOS build spike — the 4e.8 portability assumption has never been verified. See [progress.md — Open Risks](progress.md#open-risks--known-issues).
+Tier 1 is complete (benchmarks landed 2026-09-24). Benchmarks exposed a SharedBuffer fetch-path gap (~21 ms/1080p vs ~1 ms claimed) and Pinhole idle-callback lifetime hazards — see [progress.md](progress.md) for the current next-step list. Phase 7 has started with Windows (LibAsyik 1.8.1 + MSVC verified, ADR-010); a Clang-macOS spike is still needed before 7.2. See [progress.md — Open Risks](progress.md#open-risks--known-issues).
 
 ---
 

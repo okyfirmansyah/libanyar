@@ -13,16 +13,14 @@
 #include <libasyik/service.hpp>
 #include <libasyik/http.hpp>
 
+#include "platform.h"
+
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <random>
-
-#ifdef __linux__
-#include <gtk/gtk.h>
-#endif
 
 namespace anyar {
 
@@ -36,10 +34,8 @@ DistPathResolution resolve_dist_path(const std::string& dist_path) {
     } else {
         std::error_code ec;
         candidates.push_back(fs::absolute(p, ec));
-#ifdef __linux__
-        fs::path exe = fs::read_symlink("/proc/self/exe", ec);
-        if (!ec) candidates.push_back(exe.parent_path() / p);
-#endif
+        fs::path exe = platform::executable_path();
+        if (!exe.empty()) candidates.push_back(exe.parent_path() / p);
     }
     for (auto& c : candidates) {
         std::string abs = c.lexically_normal().string();
@@ -50,49 +46,11 @@ DistPathResolution resolve_dist_path(const std::string& dist_path) {
     return res;
 }
 
-// ── Platform-Specific Initialization ────────────────────────────────────────
-
-#ifdef __linux__
-// Snap Environment Sanitisation (Linux-only)
-//
-// When the process is launched from a snap-confined host (e.g. VS Code snap),
-// several GTK/GLib environment variables point into the snap's private
-// library tree.  WebKitGTK spawns auxiliary processes (WebKitWebProcess,
-// WebKitNetworkProcess) that inherit these variables, causing them to load
-// the snap's incompatible glibc/libpthread and crash immediately with:
-//
-//   symbol lookup error: .../libpthread.so.0: undefined symbol:
-//   __libc_pthread_init, version GLIBC_PRIVATE
-//
-// We remove the offending variables early, before any GTK/WebKit code runs.
-
-static void platform_init() {
-    static const char* snap_gtk_vars[] = {
-        "GTK_EXE_PREFIX",
-        "GTK_PATH",
-        "GTK_IM_MODULE_FILE",
-        "GIO_MODULE_DIR",
-        "LOCPATH",
-        "GSETTINGS_SCHEMA_DIR",
-        nullptr
-    };
-    for (const char** v = snap_gtk_vars; *v; ++v) {
-        const char* val = std::getenv(*v);
-        if (val && std::string(val).find("/snap/") != std::string::npos) {
-            ::unsetenv(*v);
-        }
-    }
-}
-#else
-// No-op on other platforms (Windows/macOS init will go here in Phase 7)
-static void platform_init() {}
-#endif
-
 App::App() : App(AppConfig{}) {}
 
 App::App(AppConfig config) : config_(std::move(config)) {
     // Platform-specific initialization (snap env cleanup on Linux, etc.)
-    platform_init();
+    platform::init_process();
 
     // Default dist path
     if (config_.dist_path.empty()) {
@@ -219,7 +177,23 @@ int App::find_available_port() {
     if (config_.port > 0) {
         return config_.port;
     }
-    // Pick a random port in the ephemeral range
+    // Let the OS pick a free ephemeral port: a random guess can land on a
+    // port that is in use or reserved (Windows excludes whole blocks of
+    // 49152-65535 for Hyper-V/WSL, and system RPC services listen there),
+    // making bind() fail.  LibAsyik does not expose the port it bound, so
+    // probe with a throwaway acceptor and reuse the number.
+    try {
+        namespace ip = boost::asio::ip;
+        boost::asio::io_context io;
+        ip::tcp::acceptor probe(io);
+        ip::tcp::endpoint ep(ip::make_address(config_.host), 0);
+        probe.open(ep.protocol());
+        probe.bind(ep);
+        return probe.local_endpoint().port();
+    } catch (const std::exception& e) {
+        std::cerr << "[LibAnyar] port probe failed (" << e.what()
+                  << "), picking a random port" << std::endl;
+    }
     std::random_device rd;
     std::mt19937 gen(rd());
     std::uniform_int_distribution<> dist(49152, 65535);
@@ -227,9 +201,20 @@ int App::find_available_port() {
 }
 
 void App::start_server() {
-    port_ = find_available_port();
-
-    server_ = asyik::make_http_server(service_, config_.host, static_cast<uint16_t>(port_));
+    // With an auto-picked port, another process can grab it between the
+    // probe and our bind — retry a few times rather than fail startup.
+    for (int attempt = 1;; ++attempt) {
+        port_ = find_available_port();
+        try {
+            server_ = asyik::make_http_server(service_, config_.host,
+                                              static_cast<uint16_t>(port_));
+            break;
+        } catch (const std::exception& e) {
+            if (config_.port > 0 || attempt >= 5) throw;
+            std::cerr << "[LibAnyar] bind to port " << port_ << " failed ("
+                      << e.what() << "), retrying" << std::endl;
+        }
+    }
 
     // ── IPC Router (commands + events) — must be registered before catch-all ──
     ipc_router_ = std::make_unique<IpcRouter>(commands_, events_);
@@ -446,6 +431,9 @@ void App::start_server() {
 // ── Run ─────────────────────────────────────────────────────────────────────
 
 int App::run() {
+    // Bind run_on_main_thread() to this (UI) thread before anything can post.
+    platform::attach_main_thread();
+
     bool plugins_shutdown = false;
     auto shutdown_plugins = [&]() {
         if (plugins_shutdown) {
@@ -542,16 +530,12 @@ int App::run() {
         main_win->run();
 
         // ── Orderly shutdown ────────────────────────────────────────
-#ifdef __linux__
-        // 0) Drain a limited number of pending GTK idle callbacks
-        //    BEFORE stopping the service.  This fulfils promises from
-        //    run_on_main_thread() so blocked fibers can resume.
-        //    Cap iterations to avoid hanging under xvfb where
-        //    WebKitGTK may continuously generate events.
-        for (int i = 0; i < 200 && g_main_context_pending(nullptr); ++i) {
-            g_main_context_iteration(nullptr, FALSE);
-        }
-#endif
+        // 0) Drain a limited number of pending UI events (GTK idle
+        //    callbacks / Win32 posted messages) BEFORE stopping the
+        //    service.  This fulfils promises from run_on_main_thread()
+        //    so blocked fibers can resume.  Capped to avoid hanging under
+        //    xvfb where WebKitGTK may continuously generate events.
+        platform::drain_main_thread(200);
 
         // 1) Stop plugin-owned background work while the service thread is
         //    still alive so fibres can observe shutdown flags and unwind.
@@ -648,8 +632,8 @@ void App::register_window_commands() {
     });
 
     // window:close-all — close all windows (triggers app shutdown)
-    // NOTE: terminate() is thread-safe (internally uses g_idle_add),
-    // so we call it directly instead of blocking the fiber with
+    // NOTE: terminate() is thread-safe (GTK: g_idle_add; Win32: posts the
+    // quit to the UI thread), so we call it directly instead of blocking the fiber with
     // post_to_main_thread — that would race with the shutdown
     // sequence after the main loop exits.
     commands_.add("window:close-all", [this](const json&) -> json {
@@ -1091,6 +1075,11 @@ void App::setup_native_ipc(Window* window) {
     native_event_sinks_[label] = sink_id;
 
     // ── Inject the JS-side event dispatcher (runs before window.onload) ─
+    // Tell the JS bridge whether anyar-shm:// is served natively; when not,
+    // fetchBuffer() falls back to GET /__anyar__/buffer/<name>.
+    window->init(std::string("window.__LIBANYAR_SHM_SCHEME__ = ") +
+                 (platform::has_shm_uri_scheme() ? "true;" : "false;"));
+
     window->init(R"JS(
         window.__LIBANYAR_NATIVE__ = true;
         window.__anyar_event_listeners__ = {};

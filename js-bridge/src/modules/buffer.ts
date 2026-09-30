@@ -120,14 +120,26 @@ export async function notifyBuffer(
 // ── Fetching buffer data ───────────────────────────────────────────────────
 
 /**
+ * True when `anyar-shm://` can be fetched: a native webview whose backend
+ * did not opt out.  An absent flag means an older backend → assume yes.
+ */
+function hasShmScheme(): boolean {
+  return isNativeIpc() && window.__LIBANYAR_SHM_SCHEME__ !== false;
+}
+
+/**
  * Fetch the raw bytes of a shared buffer.
  *
- * In native mode, this uses the `anyar-shm://` URI scheme for zero-copy
- * access to the mmap'd shared memory. In dev mode (browser), it falls back
- * to an HTTP GET request to the backend server.
+ * In a native webview that serves it (Linux/WebKitGTK), this uses the
+ * `anyar-shm://` URI scheme for access to the mmap'd shared memory.
+ * Otherwise — browser dev mode, or a webview without the scheme (Windows,
+ * which sets `window.__LIBANYAR_SHM_SCHEME__ = false`) — it falls back to
+ * an HTTP GET request to the backend server.
  *
  * @param nameOrUrl  Buffer name or full anyar-shm:// URL.
  * @returns          The raw buffer data as an ArrayBuffer.
+ * @example
+ * const bytes = new Uint8Array(await fetchBuffer('video-frame'));
  */
 export async function fetchBuffer(nameOrUrl: string): Promise<ArrayBuffer> {
   // Extract just the buffer name from a full URL if needed
@@ -135,9 +147,7 @@ export async function fetchBuffer(nameOrUrl: string): Promise<ArrayBuffer> {
     ? nameOrUrl.slice('anyar-shm://'.length)
     : nameOrUrl;
 
-  // Native webview: use zero-copy anyar-shm:// URI scheme
-  // Browser dev mode: fall back to HTTP GET endpoint
-  const url = isNativeIpc()
+  const url = hasShmScheme()
     ? `anyar-shm://${name}`
     : `${getBaseUrl()}/__anyar__/buffer/${encodeURIComponent(name)}`;
 

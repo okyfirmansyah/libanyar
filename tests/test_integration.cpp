@@ -21,15 +21,18 @@
 #include <chrono>
 #include <atomic>
 #include <random>
+#include "test_port.h"
+
+#ifdef _WIN32
+#include <windows.h>  // GetModuleFileNameW
+#endif
 
 using namespace anyar;
 using json = nlohmann::json;
 
-// Pick a random ephemeral port to reduce collision risk between test runs
+// OS-chosen free port (see test_port.h for why not a random one)
 static int pick_test_port() {
-    static std::mt19937 gen(std::random_device{}());
-    std::uniform_int_distribution<int> dist(49152, 60999);
-    return dist(gen);
+    return anyar_test::free_port();
 }
 
 // ─── IpcRouter integration tests ────────────────────────────────────────────
@@ -341,7 +344,13 @@ TEST_CASE("resolve_dist_path: cwd first, then next to the executable",
           "[app][dist]")
 {
     namespace fs = std::filesystem;
+#ifdef _WIN32
+    wchar_t exe_buf[MAX_PATH];
+    GetModuleFileNameW(nullptr, exe_buf, MAX_PATH);
+    const fs::path exe_dir = fs::path(exe_buf).parent_path();
+#else
     const fs::path exe_dir = fs::read_symlink("/proc/self/exe").parent_path();
+#endif
     const fs::path old_cwd = fs::current_path();
     const std::string name =
         "dist-resolve-" + std::to_string(std::random_device{}());
