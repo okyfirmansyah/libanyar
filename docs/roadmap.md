@@ -1357,7 +1357,7 @@ If any of these are needed, use `@libanyar/api/canvas` (Phase 4f path) instead.
 - [x] CMake + MSVC build support — vcpkg deps, `scripts/setup-windows.ps1`, LibAsyik 1.8.1 (2026-09-30)
 - [x] Test on Windows 11 — 12/12 ctest incl. `window_close` + `native_ipc` E2E through WebView2 (2026-09-30); Windows 10 untested
 - [ ] Bundle WebView2 bootstrapper for systems without Edge
-- [ ] UTF-8 paths in `fs:*` / `resolve_dist_path` / `allow_file_access` (`std::filesystem::path(std::string)` is ANSI on Windows)
+- [x] UTF-8 paths in `fs:*` / `resolve_dist_path` / `allow_file_access` / `serve_file` — `<anyar/path.h>`; file routes percent-decode + component-wise root check (2026-09-30)
 - [ ] Port the `anyar` CLI (`dev`: `CreateProcess` + job objects; `build`; `package` → 7.4)
 - [ ] Port examples: key-storage (POSIX file APIs), video-player (FFmpeg via vcpkg); wifi-analyzer needs a WLAN API backend
 

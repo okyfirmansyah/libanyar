@@ -50,7 +50,7 @@ See [roadmap.md](roadmap.md) for full per-task checklists and [roadmap.md — Ne
 ## Next Priorities
 
 1. **Land the Windows port safely** — the port touched shared code (`app.cpp` platform hooks, `window.cpp` Impl restructure, `shared_buffer.cpp` split, OS-chosen ports, LibAsyik 1.8.1 on Linux CI with a fresh `cpp-deps-v5` cache) that was only compiled on Windows. Confirm Linux CI (incl. xvfb display tests), get the first `build-windows` CircleCI run green, then enable `tests/native_ipc` on Linux.
-2. **Windows follow-ups (Phase 7.1)** — UTF-8 paths in `fs:*`/`resolve_dist_path`/`allow_file_access`; zero-copy buffers in WebView2 (needs a hook into webview's environment creation); `anyar` CLI port; key-storage/video-player examples; Windows packaging (7.4); Pinhole DComp port (ADR-008, breaking).
+2. **Windows follow-ups (Phase 7.1)** — zero-copy buffers in WebView2 (needs a hook into webview's environment creation); `anyar` CLI port; key-storage/video-player examples; Windows packaging (7.4); Pinhole DComp port (ADR-008, breaking).
 3. **Productize the SharedBuffer WebProcess extension** — prototype in `benchmarks/shm_webext/` reads 1080p in ~0.4 ms vs ~21 ms via `anyar-shm://` (root cause: WebKit's 8 KB-chunked URI-scheme IPC). Needs packaging (DEB/AppImage), `App` wiring, `@libanyar/api/buffer` API + `FrameRenderer` use.
 4. **Pinhole created before `Window::show()`** — gets a null overlay forever; `create_gl_area()` re-queues itself every idle (never renders, busy main loop). Fix: wire overlay on show, or create the GL area lazily.
 5. **Migrate remaining plugin loops to `BackgroundTask`** — wifi-analyzer still uses a bare `execute()` loop + flag (no join); audit built-in plugins for blocking calls that should use `run_blocking()`.
@@ -70,7 +70,8 @@ See [roadmap.md](roadmap.md) for full per-task checklists and [roadmap.md — Ne
 | `post_to_main_thread` deadlock | Medium | ⚠️ Documented only — never call from a fiber during shutdown (ADR-007). |
 | LibAsyik Windows/macOS portability | Medium (macOS) | Windows ✅ verified 2026-09-30 with LibAsyik 1.8.1 + MSVC (ADR-010). macOS still assumed. |
 | Windows port changes unverified on Linux | High (until CI runs) | `app.cpp`/`window.cpp`/`shared_buffer` refactors, port probing and the LibAsyik 1.8.1 bump were built and tested only on Windows. Linux CI must confirm before relying on them. |
-| Windows: non-ASCII paths | Medium | `std::filesystem::path(std::string)` uses the ANSI code page — `fs:*`, `resolve_dist_path`, `allow_file_access` mangle UTF-8 paths. Plugins must convert explicitly. |
+| ~~Windows: non-ASCII paths~~ | ✅ Fixed 2026-09-30 | `<anyar/path.h>` (`path_from_utf8`/`path_to_utf8`/`is_path_within`) used by `fs:*`, `resolve_dist_path`, `allow_file_access`, `serve_file`. Third-party plugins must use it too (`fs::path(std::string)` is ANSI on Windows). |
+| ~~`/__anyar__/file/` + `anyar-file://` never decoded URLs; string-prefix root check~~ | ✅ Fixed 2026-09-30 | Files with spaces/non-ASCII names were unreachable on every platform; root `/data` admitted `/database/…`. Now `percent_decode()` then `..` check, and component-wise `is_path_within()`. |
 | Windows: SharedBuffer over HTTP | Medium | No `anyar-shm://` in WebView2 yet → one copy + loopback TCP per fetch; `anyar-file://` unavailable (use `/__anyar__/file/`). |
 | Windows: first page load deferred to `run()` | Low | WebView2 only applies bind/init scripts to later navigations, so a window created before the main loop starts loads nothing until `run()` (child windows created at runtime load in `show()`). |
 | Windows: CLI, 3 examples, Pinhole, packaging | Medium | Not ported: `anyar` CLI (POSIX), key-storage / video-player / wifi-analyzer, Pinhole (stub), MSI/NSIS. |

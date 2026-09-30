@@ -1,5 +1,6 @@
 #include <anyar/app.h>
 #include <anyar/http_file.h>
+#include <anyar/path.h>
 #include <anyar/main_thread.h>
 #include <anyar/pinhole.h>
 #include <anyar/shared_buffer.h>
@@ -27,7 +28,7 @@ namespace anyar {
 DistPathResolution resolve_dist_path(const std::string& dist_path) {
     namespace fs = std::filesystem;
     DistPathResolution res;
-    fs::path p(dist_path);
+    fs::path p = path_from_utf8(dist_path);
     std::vector<fs::path> candidates;
     if (p.is_absolute()) {
         candidates.push_back(p);
@@ -38,7 +39,7 @@ DistPathResolution resolve_dist_path(const std::string& dist_path) {
         if (!exe.empty()) candidates.push_back(exe.parent_path() / p);
     }
     for (auto& c : candidates) {
-        std::string abs = c.lexically_normal().string();
+        std::string abs = path_to_utf8(c.lexically_normal());
         res.tried.push_back(abs);
         std::error_code ec;
         if (res.path.empty() && fs::is_directory(c, ec)) res.path = abs;
@@ -167,7 +168,7 @@ void App::http_post(const std::string& path, RouteHandler handler) {
 void App::allow_file_access(const std::string& directory) {
     namespace fs = std::filesystem;
     // Resolve to canonical path to prevent traversal via symlinks
-    std::string canonical = fs::canonical(fs::path(directory)).string();
+    std::string canonical = path_to_utf8(fs::canonical(path_from_utf8(directory)));
     allowed_file_roots_.push_back(std::move(canonical));
 }
 
@@ -328,8 +329,9 @@ void App::start_server() {
         server_->on_http_request("/__anyar__/file/<path>", "GET",
             [roots, weak_server = std::weak_ptr<asyik::http_server<asyik::http_stream_type>>(server_)](
                 asyik::http_request_ptr req, asyik::http_route_args args) {
-                std::string rel = args[1];
-                // Reject obvious traversal attempts
+                // Route args arrive still percent-encoded (spaces, non-ASCII
+                // names); decode first, THEN check for traversal.
+                std::string rel = percent_decode(args[1]);
                 if (rel.find("..") != std::string::npos) {
                     req->response.body = "Forbidden";
                     req->response.result(403);
@@ -337,14 +339,15 @@ void App::start_server() {
                 }
                 namespace fs = std::filesystem;
                 for (auto& root : roots) {
-                    fs::path candidate = fs::path(root) / rel;
+                    const fs::path root_path = path_from_utf8(root);
+                    fs::path candidate = root_path / path_from_utf8(rel);
                     std::error_code ec;
                     fs::path canon = fs::canonical(candidate, ec);
                     if (ec || !fs::is_regular_file(canon, ec)) continue;
                     // Verify the canonical path is under the allowed root
-                    if (canon.string().rfind(root, 0) != 0) continue;
+                    if (!is_path_within(root_path, canon)) continue;
                     // Range-aware, streamed in chunks read on the worker pool.
-                    serve_file(weak_server.lock(), req, canon.string());
+                    serve_file(weak_server.lock(), req, path_to_utf8(canon));
                     return;
                 }
                 req->response.body = "File not found or access denied";

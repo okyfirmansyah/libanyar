@@ -1,4 +1,5 @@
 #include <anyar/http_file.h>
+#include <anyar/path.h>
 
 #include <algorithm>
 #include <cctype>
@@ -44,8 +45,9 @@ struct Plan {
 Plan make_plan(const std::string& path, const std::string& range_hdr) {
     Plan p;
     std::error_code ec;
-    if (!std::filesystem::is_regular_file(path, ec)) return p;
-    auto size = std::filesystem::file_size(path, ec);
+    const auto fp = path_from_utf8(path);
+    if (!std::filesystem::is_regular_file(fp, ec)) return p;
+    auto size = std::filesystem::file_size(fp, ec);
     if (ec) return p;
     p.found = true;
     p.file_size = static_cast<int64_t>(size);
@@ -143,7 +145,7 @@ RangeResult parse_range_header(const std::string& header, int64_t file_size,
 }
 
 std::string mime_type_for_path(const std::string& path) {
-    std::string ext = std::filesystem::path(path).extension().string();
+    std::string ext = path_to_utf8(path_from_utf8(path).extension());
     std::transform(ext.begin(), ext.end(), ext.begin(),
                    [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
     static const std::pair<const char*, const char*> table[] = {
@@ -166,6 +168,29 @@ std::string mime_type_for_path(const std::string& path) {
     return "application/octet-stream";
 }
 
+std::string percent_decode(const std::string& encoded) {
+    auto hex = [](char c) -> int {
+        if (c >= '0' && c <= '9') return c - '0';
+        if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+        if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+        return -1;
+    };
+    std::string out;
+    out.reserve(encoded.size());
+    for (size_t i = 0; i < encoded.size(); ++i) {
+        if (encoded[i] == '%' && i + 2 < encoded.size()) {
+            int hi = hex(encoded[i + 1]), lo = hex(encoded[i + 2]);
+            if (hi >= 0 && lo >= 0) {
+                out.push_back(static_cast<char>(hi * 16 + lo));
+                i += 2;
+                continue;
+            }
+        }
+        out.push_back(encoded[i]);
+    }
+    return out;
+}
+
 void serve_file(asyik::http_request_ptr req, const std::string& path,
                 const FileServeOptions& opts) {
     const std::string range_hdr = request_range(req);
@@ -173,7 +198,7 @@ void serve_file(asyik::http_request_ptr req, const std::string& path,
     const Plan plan = offload([&] {
         Plan p = make_plan(path, range_hdr);
         if (p.found && p.length > 0) {
-            std::ifstream ifs(path, std::ios::binary);
+            std::ifstream ifs(path_from_utf8(path), std::ios::binary);
             body.resize(static_cast<size_t>(p.length));
             ifs.seekg(p.start);
             ifs.read(body.data(), p.length);
@@ -207,7 +232,7 @@ void serve_file(const asyik::http_server_ptr<asyik::http_stream_type>& server,
         return;
     }
 
-    auto file = std::make_shared<std::ifstream>(path, std::ios::binary);
+    auto file = std::make_shared<std::ifstream>(path_from_utf8(path), std::ios::binary);
     if (!*file) {
         req->response.result(404);
         req->response.body = "File not found";

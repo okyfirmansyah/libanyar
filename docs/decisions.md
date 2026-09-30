@@ -31,7 +31,7 @@
 **Consequence**:
 - `Window::terminate()` is thread-safe on both platforms.
 - On Windows the first page load starts only when `run()` is entered, or at `show()` for windows created while the loop runs. A child window created before the main loop starts loads nothing until it is navigated.
-- `std::filesystem::path(std::string)` uses the ANSI code page on Windows, so non-ASCII paths in `fs:*` are wrong until the plugins convert from UTF-8 explicitly.
+- `std::filesystem::path(std::string)` uses the ANSI code page on Windows. All core paths are therefore UTF-8 and converted through `<anyar/path.h>` (`path_from_utf8` / `path_to_utf8`), a contract that plugins must follow too (added 2026-09-30).
 - A zero-copy WebView2 path (`CreateSharedBuffer` / `PostSharedBufferToScript`, or a custom scheme) needs a hook into webview's environment creation.
 
 ---

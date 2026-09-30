@@ -1,4 +1,6 @@
 #include <anyar/shared_buffer.h>
+#include <anyar/http_file.h>
+#include <anyar/path.h>
 
 #include <atomic>
 #include <cerrno>
@@ -200,7 +202,9 @@ static void handle_file_uri_request(WebKitURISchemeRequest* request,
     std::string file_path;
 
     if (uri_str.size() > prefix.size()) {
-        file_path = uri_str.substr(prefix.size());
+        // WebKit hands us the URI still percent-encoded (spaces, non-ASCII);
+        // decode before the traversal check below.
+        file_path = percent_decode(uri_str.substr(prefix.size()));
         // Remove trailing slashes
         while (file_path.size() > 1 && file_path.back() == '/') {
             file_path.pop_back();
@@ -242,7 +246,7 @@ static void handle_file_uri_request(WebKitURISchemeRequest* request,
     std::string canon_str = canonical.string();
     bool allowed = false;
     for (const auto& root : g_allowed_file_roots) {
-        if (canon_str.rfind(root, 0) == 0) {
+        if (is_path_within(fs::path(root), canonical)) {
             allowed = true;
             break;
         }

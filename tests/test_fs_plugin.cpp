@@ -7,6 +7,7 @@
 #include <anyar/event_bus.h>
 #include <anyar/app_config.h>
 #include <anyar/plugins/fs_plugin.h>
+#include <anyar/path.h>
 
 #include <set>
 #include <filesystem>
@@ -202,4 +203,51 @@ TEST_CASE("FsPlugin: readFile on non-existent file returns error", "[fs_plugin]"
     auto missing = fs::temp_directory_path() / "anyar_nonexistent_file_xyz.txt";
     auto r = invoke(cmds, "fs:readFile", {{"path", missing.string()}});
     REQUIRE_FALSE(r.error.empty());
+}
+
+// Paths travel as UTF-8 over IPC; on Windows a naive std::string → path
+// conversion uses the ANSI code page and mangles (or throws on) these names.
+TEST_CASE("FsPlugin: non-ASCII (UTF-8) paths round-trip", "[fs_plugin]") {
+    CommandRegistry cmds;
+    EventBus events;
+    AppConfig cfg;
+    auto ctx = make_ctx(cmds, events, cfg);
+    FsPlugin plugin;
+    plugin.initialize(ctx);
+
+    TempDir tmp;
+    const std::string dir  = path_to_utf8(tmp.path) + u8"/ünïcødé_目录";  // ünïcødé_目录
+    const std::string file = dir + u8"/файл.txt";                              // файл.txt
+
+    REQUIRE(invoke(cmds, "fs:mkdir", {{"path", dir}}).error.empty());
+    REQUIRE(invoke(cmds, "fs:writeFile", {{"path", file}, {"content", u8"こんにちは"}}).error.empty());
+
+    // The file really exists under its UTF-8 name (not a code-page mangled one)
+    REQUIRE(fs::exists(path_from_utf8(file)));
+    REQUIRE(invoke(cmds, "fs:exists", {{"path", file}}).data == true);
+
+    auto read = invoke(cmds, "fs:readFile", {{"path", file}});
+    REQUIRE(read.error.empty());
+    CHECK(read.data == u8"こんにちは");
+
+    auto list = invoke(cmds, "fs:readDir", {{"path", dir}});
+    REQUIRE(list.error.empty());
+    REQUIRE(list.data.size() == 1);
+    CHECK(list.data[0]["name"] == u8"файл.txt");
+
+    auto meta = invoke(cmds, "fs:metadata", {{"path", file}});
+    REQUIRE(meta.error.empty());
+    CHECK(meta.data["size"] == 15);  // 5 × 3-byte UTF-8 chars
+
+    REQUIRE(invoke(cmds, "fs:remove", {{"path", dir}, {"recursive", true}}).error.empty());
+    CHECK_FALSE(fs::exists(path_from_utf8(dir)));
+}
+
+TEST_CASE("is_path_within: component-wise containment", "[fs_plugin][path]") {
+    const fs::path root = fs::path("base") / "data";
+    CHECK(is_path_within(root, root));
+    CHECK(is_path_within(root, root / "a" / "b.txt"));
+    CHECK_FALSE(is_path_within(root, fs::path("base") / "database" / "x"));  // not a string prefix
+    CHECK_FALSE(is_path_within(root, fs::path("base")));
+    CHECK(is_path_within(fs::path("base/data/"), root / "x"));  // trailing separator on root
 }

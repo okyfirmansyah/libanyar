@@ -8,6 +8,7 @@
 #include <anyar/event_bus.h>
 #include <anyar/ipc_router.h>
 #include <anyar/app_config.h>
+#include <anyar/path.h>
 #include <anyar/plugins/db_plugin.h>
 
 #include <libasyik/service.hpp>
@@ -386,6 +387,13 @@ TEST_CASE("resolve_dist_path: cwd first, then next to the executable",
         auto r = anyar::resolve_dist_path("./" + name + "-missing");
         REQUIRE(r.path.empty());
         REQUIRE(r.tried.size() == 2);
+    }
+
+    SECTION("non-ASCII directory names round-trip as UTF-8") {
+        const std::string utf8_name = name + u8"-dïst-日本";  // dïst-日本
+        fs::create_directories(cwd / anyar::path_from_utf8(utf8_name));
+        auto r = anyar::resolve_dist_path(utf8_name);
+        REQUIRE(r.path == anyar::path_to_utf8((cwd / anyar::path_from_utf8(utf8_name)).lexically_normal()));
     }
 
     fs::current_path(old_cwd);

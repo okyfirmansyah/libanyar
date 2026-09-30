@@ -53,6 +53,16 @@ RangeResult parse_range_header(const std::string& header, int64_t file_size,
 /// "application/octet-stream" when unknown.
 std::string mime_type_for_path(const std::string& path);
 
+/// Decode `%XX` escapes in a URL path segment (route args are NOT decoded
+/// by LibAsyik).  `+` is left as-is (it is literal in paths); malformed
+/// escapes are kept verbatim.  The result is raw bytes — UTF-8 for
+/// browser-encoded non-ASCII names.  Validate (e.g. reject "..") AFTER
+/// decoding.
+/// @param encoded Path text as received, e.g. "my%20video%E2%9C%93.mp4".
+/// @returns Decoded text, e.g. "my video✓.mp4".
+/// @example `auto rel = anyar::percent_decode(args[1]);`
+std::string percent_decode(const std::string& encoded);
+
 /// Options for serve_file().
 struct FileServeOptions {
     /// Content-Type; empty → mime_type_for_path().
@@ -70,6 +80,7 @@ struct FileServeOptions {
 /// file).  The whole requested range is read into memory (on the worker
 /// pool when called from a fiber) — fine for small files; use the
 /// streaming overload for media and large files.  Missing file → 404.
+/// @p path is UTF-8 (see `<anyar/path.h>`).
 void serve_file(asyik::http_request_ptr req, const std::string& path,
                 const FileServeOptions& opts = {});
 
