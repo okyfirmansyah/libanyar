@@ -86,6 +86,7 @@ ctest --output-on-failure
 - Never use `while(g_main_context_pending())` unbounded — cap at 200 iterations (xvfb generates infinite events during teardown)
 - Don't share `asyik::service` instances across `TEST_CASE`s — construct fresh per case
 - Don't assume display is present — guard tier-4 tests on `DISPLAY` / `ANYAR_HAS_DISPLAY` and `WARN(...)` + return when absent (see `test_pinhole_linux.cpp`); pinhole tests must also accept `is_native()==false` (GL may fail under xvfb)
+- Any test binary that constructs a `Window` (even unshown) is tier 4: give it the ctest label `display` (`set_tests_properties(... LABELS "display;...")`). CI runs `ctest -LE display` headless and `ctest -L display` under `xvfb-run`; an unlabelled window test fails the headless step. Locally, snap-VS-Code GTK env vars make webview tests SIGTRAP — clear them as `run.sh` does.
 - Don't add sleeps to wait for fibers; use synchronization primitives (`std::promise`, `std::condition_variable`)
 - Every fiber you spawn must have exited before `svc->stop()` — a fiber still sleeping at stop makes process exit spin forever (tests pass, then ctest times out)
 - ASAN: `-DANYAR_ASAN=ON`; suppress the Boost.Fiber false positive with a file containing `interceptor_name:sigaltstack` (`ASAN_OPTIONS=detect_leaks=0:suppressions=<file>`)

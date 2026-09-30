@@ -176,16 +176,17 @@ jobs:
           name: "C++: Run unit tests"
           command: |
             cd build
+            # Tests labelled "display" create GTK/WebKit windows → xvfb step.
             ctest --output-on-failure \
-                  --exclude-regex "test_webgl_canvas" \
+                  --label-exclude display \
                   --timeout 60
       - run:
-          name: "C++: Run WebGL E2E test (xvfb)"
+          name: "C++: Run display tests (xvfb) — WebGL E2E, Pinhole, window close"
           command: |
             cd build
             xvfb-run --auto-servernum --server-args="-screen 0 1280x720x24" \
               ctest --output-on-failure \
-                    --tests-regex "test_webgl_canvas" \
+                    --label-regex display \
                     --timeout 60
 
       # ── Store test results ───────────────────────────────────────────

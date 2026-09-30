@@ -12,5 +12,5 @@ add_test(
 
 set_tests_properties(test_window_close PROPERTIES
     TIMEOUT 15
-    LABELS "shutdown;e2e"
+    LABELS "display;shutdown;e2e"
 )

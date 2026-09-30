@@ -24,5 +24,5 @@ add_test(
 # Give it a generous timeout — WebGL init can be slow on software renderers
 set_tests_properties(test_webgl_canvas PROPERTIES
     TIMEOUT 30
-    LABELS "webgl;e2e"
+    LABELS "display;webgl;e2e"
 )

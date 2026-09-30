@@ -211,8 +211,14 @@ TEST_CASE("Pinhole: is_native() false when GL unavailable — no crash",
 ///         -DCMAKE_EXE_LINKER_FLAGS="-fsanitize=address"
 ///   cmake --build build -j && ./build/tests/test_pinhole_linux "[shutdown]"
 TEST_CASE("Pinhole: ADR-007/ADR-008 shutdown ordering — pinholes before window",
-          "[pinhole][shutdown][headless]")
+          "[pinhole][shutdown][display]")
 {
+    // Constructs a real Window (webview) even though it is never shown.
+    if (!has_display()) {
+        WARN("Skipping display-gated pinhole test (no DISPLAY / ANYAR_HAS_DISPLAY)");
+        return;
+    }
+
     anyar::WindowCreateOptions win_opts;
     win_opts.title     = "test_shutdown";
     win_opts.width     = 400;
@@ -269,8 +275,14 @@ TEST_CASE("Pinhole: ADR-007/ADR-008 shutdown ordering — pinholes before window
 /// without needing GL to actually fail.  override_eval_fn_for_test() lets the
 /// test capture JS that would normally go through webview_eval.
 TEST_CASE("Pinhole: force_fallback + set_rect injects canvas JS and allocates SharedBuffer",
-          "[pinhole][fallback][headless]")
+          "[pinhole][fallback][display]")
 {
+    // Constructs a real Window (webview) even though it is never shown.
+    if (!has_display()) {
+        WARN("Skipping display-gated pinhole test (no DISPLAY / ANYAR_HAS_DISPLAY)");
+        return;
+    }
+
     anyar::WindowCreateOptions win_opts;
     win_opts.title  = "test_fb_js";
     win_opts.width  = 320;

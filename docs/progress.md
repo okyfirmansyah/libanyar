@@ -195,3 +195,7 @@ See [roadmap.md](roadmap.md) for full per-task checklists and [roadmap.md — Ne
 - New `anyar::resolve_dist_path()` (`app_config.h`): cwd first, then next to the executable (`/proc/self/exe`); error page and stderr now list every path tried and suggest `--embed`
 - Test: `resolve_dist_path` case in `test_integration` (absolute, exe-dir, cwd-wins, not-found)
 
+### CI Fixes (2026-09-30)
+- Build step `make -j4` → `-j2`: CircleCI `medium` (2 vCPU / 4 GB) OOM-killed cc1plus on `test_integration`
+- `test_pinhole_linux` and `test_window_close` create webviews but ran in the headless unit step (failing since 4g/shutdown-fix landed). Display tests now carry ctest label `display`; CI runs `-LE display` headless and `-L display` under xvfb. Two window-creating pinhole cases mis-tagged `[headless]` are now display-gated
+

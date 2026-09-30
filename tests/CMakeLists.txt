@@ -93,4 +93,6 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         $<TARGET_OBJECTS:catch2_main>
         test_pinhole_linux.cpp
     )
+    # Creates real GTK/WebKit windows → needs a display (CI: xvfb step).
+    set_tests_properties(test_pinhole_linux PROPERTIES LABELS "display;pinhole")
 endif()
