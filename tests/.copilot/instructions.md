@@ -25,7 +25,7 @@ tests/
 │   ├── dist/index.html
 │   └── CMakeLists.txt
 └── window_close/                # Linux only; plain exe (no Catch2): native gtk_window_close → app.run() must return
-    ├── main.cpp                 # 5s _Exit(3) watchdog = FAIL; ctest TIMEOUT 15, LABELS shutdown;e2e
+    ├── main.cpp                 # watchdog: FAIL if run() not back 6 s after close (_Exit 3) or no close by 12 s (_Exit 4); ctest TIMEOUT 15, LABELS display;shutdown;e2e
     └── CMakeLists.txt
 ```
 

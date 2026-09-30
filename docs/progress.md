@@ -198,4 +198,5 @@ See [roadmap.md](roadmap.md) for full per-task checklists and [roadmap.md — Ne
 ### CI Fixes (2026-09-30)
 - Build step `make -j4` → `-j2`: CircleCI `medium` (2 vCPU / 4 GB) OOM-killed cc1plus on `test_integration`
 - `test_pinhole_linux` and `test_window_close` create webviews but ran in the headless unit step (failing since 4g/shutdown-fix landed). Display tests now carry ctest label `display`; CI runs `-LE display` headless and `-L display` under xvfb. Two window-creating pinhole cases mis-tagged `[headless]` are now display-gated
+- `test_window_close` then failed in CI only: `app.run()` never returned after a native close, with "1 fiber(s) still active after 1s drain". CI built LibAsyik **1.6.1**; dev machines had **1.7.1** (scheduler cancellation #32 + HTTP connection tracking #33, which terminate open keep-alive connection fibers on stop). Not reproducible locally even with CPU starvation + 1 ms close. CI and `setup-ubuntu.sh` now pin LibAsyik 1.7.1 (cache key `cpp-deps-v4`); documented minimum raised to 1.7.1. `test_window_close` watchdog now times shutdown only (6 s after close) and logs phase timestamps
 

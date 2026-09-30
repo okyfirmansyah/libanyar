@@ -6,7 +6,7 @@ Tauri-class C++17 desktop framework. Native OS webview (WebKitGTK / WebView2 / W
 Frontend (Vite SPA, `dist/`) → `@libanyar/api` → OS WebView → C++ Core (`anyar::App`, IPC router, command registry, event bus, window mgr, SharedBuffer, Pinhole native overlay) → LibAsyik.
 
 ## Stack
-C++17 (GCC 11+/Clang 10+/MSVC 2019+), CMake ≥ 3.16. Deps: LibAsyik 1.6.1+, Boost 1.81+, OpenSSL, nlohmann/json 3.11+, nativefiledialog-extended. Frontend: TS + Vite + React/Vue/Svelte 5 + Tailwind 4. Tests: Catch2 + Vitest. CI: CircleCI Ubuntu 22.04.
+C++17 (GCC 11+/Clang 10+/MSVC 2019+), CMake ≥ 3.16. Deps: LibAsyik 1.7.1+ (1.6.x hangs shutdown with open keep-alive connections), Boost 1.81+, OpenSSL, nlohmann/json 3.11+, nativefiledialog-extended. Frontend: TS + Vite + React/Vue/Svelte 5 + Tailwind 4. Tests: Catch2 + Vitest. CI: CircleCI Ubuntu 22.04.
 
 ## Conventions
 - C++ `snake_case` funcs/vars, `PascalCase` classes, namespace `anyar::`

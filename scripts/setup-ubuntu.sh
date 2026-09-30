@@ -127,7 +127,9 @@ else
     # Always clone a fresh copy from GitHub into the temp directory
     # (never rely on a local checkout which may be on a dev branch)
     LIBASYIK_BUILD_DIR="$TEMP_DIR/libasyik"
-    git clone --depth=1 https://github.com/okyfirmansyah/libasyik "$LIBASYIK_BUILD_DIR"
+    # 1.7.1+: HTTP connection tracking + scheduler cancellation — required for
+    # app.run() to return when a keep-alive connection is open at shutdown.
+    git clone --branch 1.7.1 --depth=1 https://github.com/okyfirmansyah/libasyik "$LIBASYIK_BUILD_DIR"
     cd "$LIBASYIK_BUILD_DIR"
     git submodule update --init --recursive
 
