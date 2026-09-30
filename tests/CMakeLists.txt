@@ -97,6 +97,8 @@ endif()
 # ── Native window close regression (requires display) ───────────────────────
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux" OR WIN32)
     add_subdirectory(window_close)
+    # window:close-all arriving while the main window is still being created
+    add_subdirectory(early_close)
 endif()
 
 # ── Native IPC end-to-end through a real webview (requires display) ─────────

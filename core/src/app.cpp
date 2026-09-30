@@ -528,6 +528,13 @@ int App::run() {
             on_window_ready_(*main_win);
         }
 
+        // window:close-all may have arrived while the window was being
+        // created (it found no main window then).  terminate() before run()
+        // makes the loop exit on its first iteration.
+        if (close_all_requested_.load()) {
+            main_win->terminate();
+        }
+
         // Block on the main window's event loop.
         // This also processes events for all child windows.
         main_win->run();
@@ -640,6 +647,9 @@ void App::register_window_commands() {
     // post_to_main_thread — that would race with the shutdown
     // sequence after the main loop exits.
     commands_.add("window:close-all", [this](const json&) -> json {
+        // Flag first: if the main window is still being created, App::run()
+        // sees the flag once it exists and terminates before entering the loop.
+        close_all_requested_.store(true);
         Window* main_win = window_mgr_.main_window();
         if (main_win) {
             main_win->terminate();

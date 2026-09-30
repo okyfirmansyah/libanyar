@@ -229,6 +229,17 @@ struct Window::Impl {
     std::string pending_url;
 #endif
 
+    // webview/webview pumps nested message loops inside webview_create()
+    // and every webview_bind()/webview_init() (waiting for WebView2
+    // callbacks); those loops consume WM_QUIT.  A window:close-all arriving
+    // meanwhile (e.g. over HTTP while the first window is still being set
+    // up) would be lost — restore it.  No-op off Windows.
+    void after_nested_pump() {
+#ifdef _WIN32
+        platform::repost_quit_if_requested();
+#endif
+    }
+
     void start_navigation(const std::string& url) {
 #ifdef _WIN32
         pending_url = url;
@@ -782,6 +793,7 @@ Window::Window(const WindowConfig& config, int server_port)
     std::ostringstream init_js;
     init_js << "window.__LIBANYAR_PORT__ = " << server_port << ";";
     webview_init(impl_->wv, init_js.str().c_str());
+    impl_->after_nested_pump();
 }
 
 Window::Window(const WindowCreateOptions& opts, int server_port)
@@ -808,6 +820,7 @@ Window::Window(const WindowCreateOptions& opts, int server_port)
             << "window.__LIBANYAR_WINDOW_LABEL__ = '"
             << opts.label << "';";
     webview_init(impl_->wv, init_js.str().c_str());
+    impl_->after_nested_pump();
 
     // Center if requested
     if (opts.center) {
@@ -831,6 +844,9 @@ void Window::run() {
     // All setup, including App::on_window_ready scripts, is done: load now.
     Impl::g_run_loop_active.store(true);
     impl_->flush_navigation();
+    // A quit requested during setup (swallowed by a nested pump) must end
+    // the loop right away.
+    platform::repost_quit_if_requested();
 #endif
     webview_run(impl_->wv);
     impl_->owns_run_loop = false;
@@ -1080,6 +1096,7 @@ void Window::bind(const std::string& name, BindCallback callback) {
             (*fn)(std::string(seq), std::string(req));
         },
         raw_ptr);
+    impl_->after_nested_pump();
 }
 
 void Window::return_result(const std::string& seq, int status,
@@ -1092,6 +1109,7 @@ void Window::return_result(const std::string& seq, int status,
 void Window::init(const std::string& js) {
     if (impl_->wv) {
         webview_init(impl_->wv, js.c_str());
+        impl_->after_nested_pump();
     }
 }
 
