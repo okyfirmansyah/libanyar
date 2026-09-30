@@ -4,6 +4,32 @@
 
 ---
 
+## ADR-011: Zero-Copy SharedBuffers on WebView2
+
+**Date**: 2026-10-01
+**Status**: Accepted
+
+**Context**: ADR-010 shipped Windows SharedBuffers as file mappings read over HTTP, which costs ~60 ms per 8 MiB (1080p RGBA) frame. `anyar-shm://` is not an option on WebView2, because custom schemes must be registered when webview/webview creates the environment. A `WebResourceRequested` handler would still copy every byte across processes, as WebKitGTK's URI-scheme path does on Linux.
+
+**Decision**:
+- **Memory:** on Windows, a SharedBuffer's memory *is* a WebView2 shared buffer (`ICoreWebView2Environment12::CreateSharedBuffer`), so `data()` points into memory the page can map. The environment comes from the first window's controller (`webview_get_native_handle(…BROWSER_CONTROLLER)` → `ICoreWebView2_2::get_Environment`), so webview needs no hook. Buffers created before any window exists, runtimes older than 1.0.1661, and a UI thread that doesn't answer within 2 s all fall back to a file mapping and HTTP.
+- **Delivery:** the page pulls a buffer lazily with `buffer:attach {name, have}`. C++ posts it into the caller's page, read-only, via `ICoreWebView2_17::PostSharedBufferToScript`, tagged `{name, id}` — unless `have` already equals the buffer's generation `id()`. The page caches the `ArrayBuffer` from `sharedbufferreceived` per name and generation, and releases the previous one when a name is recreated. Pulling instead of pushing covers reloads, late-joining windows and recreated names without C++ tracking page state.
+- **JS API:** `fetchBuffer(nameOrUrl, { copy?, id? })`:
+  - `copy` defaults to `true`: a snapshot (one in-renderer `slice`), keeping the old semantics.
+  - `copy: false` returns the live memory, for consumers that read immediately and then release the pool slot (`createBufferRenderer`, video-player).
+  - `id` from a `buffer:ready` payload skips the attach round trip, so steady-state frames cost no IPC at all.
+- **COM threading:** STA rules apply. Buffers are created, posted and released on the UI thread; callers on fibers or other threads hop there with `post_to_main_thread` and a bounded boost-fiber future.
+- `Window::browser_controller()` (opaque) and `SharedBuffer::id()`, `is_webview_shared()`, `native_handle()` are added. Every core buffer payload now carries `id`.
+
+**Rationale**: This is the only path where the producer's memory is what the page reads, with no per-frame copy on either side. Measured on WebView2 per 8 MiB: HTTP ~60 ms; attach round trip ~2 ms; `slice` ~4–6 ms; live view ~0.01 ms. In video-player, ~90 frames took 4 `buffer:attach` calls (one per pool slot) and 0 HTTP fetches.
+
+**Consequence**:
+- A live view changes when the producer writes again. The pool protocol (READY → consumer → `release_read`) is what makes `copy:false` safe, so standalone buffers should stay on the default snapshot.
+- A buffer is attachable only by windows that share the allocating environment. Other windows get `attached:false` and use HTTP.
+- Linux is unchanged (`anyar-shm://`). The WebKitGTK zero-copy work (the webext prototype) is separate.
+
+---
+
 ## ADR-010: Windows Port — Win32 Platform Layer on webview/WebView2
 
 **Date**: 2026-09-30

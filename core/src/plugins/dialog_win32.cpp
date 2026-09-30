@@ -45,29 +45,7 @@ private:
     HRESULT hr_;
 };
 
-/// Minimal COM smart pointer (avoids pulling in ATL/WRL).
-template <typename T>
-class ComPtr {
-public:
-    ComPtr() = default;
-    ~ComPtr() { reset(); }
-    ComPtr(const ComPtr&) = delete;
-    ComPtr& operator=(const ComPtr&) = delete;
-    T* operator->() const { return p_; }
-    T* get() const { return p_; }
-    T** put() {
-        reset();
-        return &p_;
-    }
-    explicit operator bool() const { return p_ != nullptr; }
-    void reset() {
-        if (p_) p_->Release();
-        p_ = nullptr;
-    }
-
-private:
-    T* p_ = nullptr;
-};
+using win32::ComPtr;
 
 HWND dialog_owner() {
     // The active LibAnyar window (UI thread), so dialogs are modal to it.

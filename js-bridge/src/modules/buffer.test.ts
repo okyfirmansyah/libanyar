@@ -174,6 +174,98 @@ describe('buffer module', () => {
       });
     });
 
+    describe('WebView2 shared buffers (buffer:attach)', () => {
+      // One fake chrome.webview for the whole block: the module registers
+      // its 'sharedbufferreceived' listener once.
+      let onShared: ((e: any) => void) | null = null;
+      const releaseBuffer = vi.fn();
+      const bytes = (...v: number[]) => new Uint8Array(v).buffer;
+
+      /** Make buffer:attach reply, and deliver the buffer like WebView2 does. */
+      function attachReplies(name: string, id: number, buf: ArrayBuffer, attached = true) {
+        mockInvoke.mockImplementation(async (cmd: string, args: any) => {
+          if (cmd !== 'buffer:attach') return undefined;
+          if (!attached) return { attached: false, id, posted: false };
+          if (args.have === id) return { attached: true, id, posted: false };
+          setTimeout(() => onShared?.({ additionalData: { name, id }, getBuffer: () => buf }), 0);
+          return { attached: true, id, posted: true };
+        });
+      }
+
+      beforeEach(() => {
+        mockIsNativeIpc.mockReturnValue(true);
+        mockGetBaseUrl.mockReturnValue('http://127.0.0.1:4321');
+        mockInvoke.mockReset();
+        window.__LIBANYAR_SHARED_BUFFERS__ = true;
+        (window as any).chrome = {
+          webview: {
+            addEventListener: (_t: string, fn: (e: any) => void) => { onShared = fn; },
+            releaseBuffer,
+          },
+        };
+        vi.stubGlobal('fetch', vi.fn());
+      });
+
+      afterEach(() => {
+        delete window.__LIBANYAR_SHARED_BUFFERS__;
+        delete window.__LIBANYAR_SHM_SCHEME__;
+      });
+
+      it('returns a snapshot copy by default', async () => {
+        const live = bytes(1, 2, 3);
+        attachReplies('sb-copy', 5, live);
+        const got = await fetchBuffer('anyar-shm://sb-copy');
+        expect(mockInvoke).toHaveBeenCalledWith('buffer:attach', { name: 'sb-copy', have: 0 });
+        expect(got).not.toBe(live);
+        expect([...new Uint8Array(got)]).toEqual([1, 2, 3]);
+        expect(globalThis.fetch).not.toHaveBeenCalled();
+      });
+
+      it('returns the live shared memory with copy:false', async () => {
+        const live = bytes(9);
+        attachReplies('sb-live', 6, live);
+        expect(await fetchBuffer('sb-live', { copy: false })).toBe(live);
+      });
+
+      it('skips buffer:attach when the cached generation id matches', async () => {
+        const live = bytes(4);
+        attachReplies('sb-cached', 7, live);
+        await fetchBuffer('sb-cached', { copy: false });
+        mockInvoke.mockClear();
+        expect(await fetchBuffer('sb-cached', { copy: false, id: 7 })).toBe(live);
+        expect(mockInvoke).not.toHaveBeenCalled();
+      });
+
+      it('re-attaches a recreated buffer and releases the old one', async () => {
+        const first = bytes(1);
+        const second = bytes(2);
+        attachReplies('sb-gen', 8, first);
+        await fetchBuffer('sb-gen', { copy: false });
+        attachReplies('sb-gen', 9, second);
+        expect(await fetchBuffer('sb-gen', { copy: false, id: 9 })).toBe(second);
+        expect(mockInvoke).toHaveBeenLastCalledWith('buffer:attach', { name: 'sb-gen', have: 8 });
+        expect(releaseBuffer).toHaveBeenCalledWith(first);
+      });
+
+      it('falls back to HTTP for buffers that cannot be attached', async () => {
+        window.__LIBANYAR_SHM_SCHEME__ = false;  // as injected on Windows
+        attachReplies('sb-http', 11, bytes(0), false);
+        const httpBody = new ArrayBuffer(2);
+        vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+          ok: true,
+          arrayBuffer: vi.fn().mockResolvedValue(httpBody),
+        }));
+        expect(await fetchBuffer('sb-http', { id: 11 })).toBe(httpBody);
+        expect(globalThis.fetch).toHaveBeenCalledWith(
+          'http://127.0.0.1:4321/__anyar__/buffer/sb-http',
+        );
+        // Known non-attachable generation → no second buffer:attach
+        mockInvoke.mockClear();
+        await fetchBuffer('sb-http', { id: 11 });
+        expect(mockInvoke).not.toHaveBeenCalled();
+      });
+    });
+
     describe('native mode without anyar-shm:// (Windows)', () => {
       beforeEach(() => {
         mockIsNativeIpc.mockReturnValue(true);

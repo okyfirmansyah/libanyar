@@ -39,6 +39,36 @@ inline std::string narrow(const std::wstring& s) {
     return narrow(s.data(), s.size());
 }
 
+/// Minimal COM smart pointer (avoids pulling in ATL/WRL).
+template <typename T>
+class ComPtr {
+public:
+    ComPtr() = default;
+    ~ComPtr() { reset(); }
+    ComPtr(const ComPtr&) = delete;
+    ComPtr& operator=(const ComPtr&) = delete;
+    T* operator->() const { return p_; }
+    T* get() const { return p_; }
+    T** put() {
+        reset();
+        return &p_;
+    }
+    explicit operator bool() const { return p_ != nullptr; }
+    void reset() {
+        if (p_) p_->Release();
+        p_ = nullptr;
+    }
+    /// Give up ownership (caller now owns the reference).
+    T* detach() {
+        T* p = p_;
+        p_ = nullptr;
+        return p;
+    }
+
+private:
+    T* p_ = nullptr;
+};
+
 /// Human-readable text for a GetLastError() / HRESULT code.
 inline std::string error_message(DWORD code) {
     wchar_t* buf = nullptr;

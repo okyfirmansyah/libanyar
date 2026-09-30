@@ -3,6 +3,7 @@
 
 #include <anyar/shared_buffer.h>
 
+#include <atomic>
 #include <chrono>
 #include <mutex>
 #include <stdexcept>
@@ -29,6 +30,8 @@ std::shared_ptr<SharedBuffer> SharedBuffer::create(const std::string& name,
 
     // Use the private constructor via a helper since make_shared needs public ctor
     auto buf = std::shared_ptr<SharedBuffer>(new SharedBuffer(name, size));
+    static std::atomic<uint64_t> next_id{0};
+    buf->id_ = ++next_id;
 
     // Register in the global registry
     SharedBufferRegistry::instance().add(buf);

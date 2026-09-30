@@ -796,7 +796,8 @@ void App::register_buffer_commands() {
         return json{
             {"name", buf->name()},
             {"size", buf->size()},
-            {"url", "anyar-shm://" + buf->name()}
+            {"url", "anyar-shm://" + buf->name()},
+            {"id", buf->id()}
         };
     });
 
@@ -846,6 +847,39 @@ void App::register_buffer_commands() {
         return json{{"ok", true}, {"bytes_written", out.size()}};
     });
 
+    // buffer:attach — map a buffer's memory straight into the calling page
+    //   name (string)  — buffer name
+    //   have (number?) — generation id the page already holds (0 = none)
+    // Returns: { attached, id, posted }.  attached=false → use HTTP.
+    //   posted=true → a `sharedbufferreceived` event (WebView2) carrying
+    //   { name, id } is on its way; posted=false → the page's copy is current.
+    commands_.add("buffer:attach", [this](const json& args) -> json {
+        std::string name  = args.at("name").get<std::string>();
+        uint64_t have     = args.value("have", uint64_t{0});
+        std::string label = args.value("_caller_label", std::string("main"));
+
+        auto buf = SharedBufferRegistry::instance().get(name);
+        if (!buf) {
+            throw std::runtime_error("Buffer not found: " + name);
+        }
+        if (!buf->is_webview_shared()) {
+            return json{{"attached", false}, {"id", buf->id()}, {"posted", false}};
+        }
+        if (have == buf->id()) {
+            return json{{"attached", true}, {"id", buf->id()}, {"posted", false}};
+        }
+#ifdef _WIN32
+        const std::string tag = json{{"name", name}, {"id", buf->id()}}.dump();
+        bool ok = run_on_main_thread([this, &label, &buf, &tag]() -> bool {
+            Window* win = window_mgr_.get(label);
+            return win && platform::post_shared_buffer(win->browser_controller(), *buf, tag);
+        });
+        return json{{"attached", ok}, {"id", buf->id()}, {"posted", ok}};
+#else
+        return json{{"attached", false}, {"id", buf->id()}, {"posted", false}};
+#endif
+    });
+
     // buffer:destroy — Destroy a shared buffer
     //   name (string) — buffer name
     commands_.add("buffer:destroy", [this](const json& args) -> json {
@@ -864,7 +898,8 @@ void App::register_buffer_commands() {
                 list.push_back(json{
                     {"name", buf->name()},
                     {"size", buf->size()},
-                    {"url", "anyar-shm://" + buf->name()}
+                    {"url", "anyar-shm://" + buf->name()},
+                    {"id", buf->id()}
                 });
             }
         }
@@ -886,6 +921,7 @@ void App::register_buffer_commands() {
         json payload = {
             {"name", name},
             {"url", "anyar-shm://" + name},
+            {"id", buf->id()},
             {"size", buf->size()},
             {"metadata", metadata}
         };
@@ -918,7 +954,8 @@ void App::register_buffer_commands() {
                 buffers.push_back(json{
                     {"name", buf->name()},
                     {"size", buf->size()},
-                    {"url", "anyar-shm://" + buf->name()}
+                    {"url", "anyar-shm://" + buf->name()},
+                    {"id", buf->id()}
                 });
             }
         }
@@ -959,7 +996,8 @@ void App::register_buffer_commands() {
         return json{
             {"name", buf.name()},
             {"size", buf.size()},
-            {"url", "anyar-shm://" + buf.name()}
+            {"url", "anyar-shm://" + buf.name()},
+            {"id", buf.id()}
         };
     });
 
@@ -989,6 +1027,7 @@ void App::register_buffer_commands() {
             {"name", buf_name},
             {"pool", pool_name},
             {"url", "anyar-shm://" + buf_name},
+            {"id", buf->id()},
             {"size", buf->size()},
             {"metadata", metadata}
         };
@@ -1091,7 +1130,9 @@ void App::setup_native_ipc(Window* window) {
     // Tell the JS bridge whether anyar-shm:// is served natively; when not,
     // fetchBuffer() falls back to GET /__anyar__/buffer/<name>.
     window->init(std::string("window.__LIBANYAR_SHM_SCHEME__ = ") +
-                 (platform::has_shm_uri_scheme() ? "true;" : "false;"));
+                 (platform::has_shm_uri_scheme() ? "true;" : "false;") +
+                 "window.__LIBANYAR_SHARED_BUFFERS__ = " +
+                 (platform::has_webview_shared_buffers() ? "true;" : "false;"));
 
     window->init(R"JS(
         window.__LIBANYAR_NATIVE__ = true;

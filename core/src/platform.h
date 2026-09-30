@@ -7,6 +7,9 @@
 // free of #ifdef blocks for these concerns.
 
 #include <filesystem>
+#include <string>
+
+namespace anyar { class SharedBuffer; }
 
 namespace anyar::platform {
 
@@ -29,6 +32,11 @@ void drain_main_thread(int max_iterations);
 /// bridge fetches buffers over HTTP (`/__anyar__/buffer/<name>`) instead.
 bool has_shm_uri_scheme();
 
+/// Whether the webview can map SharedBuffer memory directly via
+/// `buffer:attach` (Windows / WebView2 shared buffers).  Injected into pages
+/// as `window.__LIBANYAR_SHARED_BUFFERS__`.
+bool has_webview_shared_buffers();
+
 #ifdef _WIN32
 /// Ask the UI thread's message loop to exit.  Thread-safe (webview's own
 /// terminate() is a bare PostQuitMessage, which only targets the CALLING
@@ -42,6 +50,20 @@ void repost_quit_if_requested();
 
 /// Forget a pending quit request (after the main loop has returned).
 void clear_quit_request();
+
+/// True on the thread bound by attach_main_thread().
+bool is_main_thread();
+
+/// Record a window's WebView2 controller (ICoreWebView2Controller*) so
+/// SharedBuffers can be allocated as WebView2 shared buffers.  The first
+/// environment that supports them wins.  UI thread only.
+void note_webview_controller(void* controller);
+
+/// Post @p buf's WebView2 shared buffer to the page hosted by
+/// @p controller (read-only), tagged with @p additional_json.  Returns false
+/// if @p buf is not WebView2-backed or the runtime refuses.  UI thread only.
+bool post_shared_buffer(void* controller, SharedBuffer& buf,
+                        const std::string& additional_json);
 #endif
 
 } // namespace anyar::platform

@@ -11,7 +11,7 @@ NPM package providing typed JS bridge to the C++ backend. Builds dual ESM + CJS 
 - `src/config.ts` — port, `isNativeIpc()`
 - `src/react.ts` — `useInvoke / useEvent / useEventCallback`
 - `src/types.ts`, `global.d.ts`
-- `src/modules/`: `fs.ts dialog.ts shell.ts db.ts`; `window.ts` (`createWindow, emitTo, listenGlobal, onWindowFocused`); `buffer.ts` (`SharedBuffer + fetchBuffer` via `anyar-shm://` or HTTP); `canvas.ts` (WebGL `FrameRenderer` — RGBA/RGB/BGRA/Gray/YUV420/NV12/NV21); `pinhole.ts` (optional typed helpers for native overlay: `onPinholeMounted, updatePinholeRect, setPinholeVisible, getPinholeMetrics` → `pinhole:*` commands; DOM tracking itself is injected by C++ `create_pinhole()`); `event.ts` (re-exports `listen/emit/emitTo/listenGlobal/once/onReady` for the `./event` subpath)
+- `src/modules/`: `fs.ts dialog.ts shell.ts db.ts`; `window.ts` (`createWindow, emitTo, listenGlobal, onWindowFocused`); `buffer.ts` (`SharedBuffer + fetchBuffer(nameOrUrl, {copy?, id?})`: WebView2 shared memory via `buffer:attach` + `sharedbufferreceived` on Windows (`copy:false` = live zero-copy view; pass `id` from `buffer:ready` to skip revalidation), `anyar-shm://` on Linux, HTTP otherwise); `canvas.ts` (WebGL `FrameRenderer` — RGBA/RGB/BGRA/Gray/YUV420/NV12/NV21); `pinhole.ts` (optional typed helpers for native overlay: `onPinholeMounted, updatePinholeRect, setPinholeVisible, getPinholeMetrics` → `pinhole:*` commands; DOM tracking itself is injected by C++ `create_pinhole()`); `event.ts` (re-exports `listen/emit/emitTo/listenGlobal/once/onReady` for the `./event` subpath)
 
 ## Conventions
 - Named exports only — no default exports

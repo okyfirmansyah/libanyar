@@ -50,11 +50,6 @@ LRESULT CALLBACK dispatch_wndproc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     return DefWindowProcW(hwnd, msg, wp, lp);
 }
 
-bool is_main_thread() {
-    std::lock_guard<std::mutex> lock(g_mutex);
-    return g_hwnd && g_thread_id == GetCurrentThreadId();
-}
-
 } // anonymous namespace
 
 void post_to_main_thread(std::function<void()> fn) {
@@ -72,6 +67,11 @@ void post_to_main_thread(std::function<void()> fn) {
 }
 
 namespace platform {
+
+bool is_main_thread() {
+    std::lock_guard<std::mutex> lock(g_mutex);
+    return g_hwnd && g_thread_id == GetCurrentThreadId();
+}
 
 void attach_main_thread() {
     std::lock_guard<std::mutex> lock(g_mutex);

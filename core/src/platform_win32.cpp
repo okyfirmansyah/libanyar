@@ -22,8 +22,13 @@ std::filesystem::path executable_path() {
 }
 
 // WebView2 custom schemes must be registered when the CoreWebView2
-// environment is created, which webview/webview does internally; until that
-// is wired up, SharedBuffers are served over HTTP.
+// environment is created, which webview/webview does internally, so there is
+// no anyar-shm://.  SharedBuffers reach the page via buffer:attach (WebView2
+// shared buffers, zero-copy) or, failing that, HTTP.
 bool has_shm_uri_scheme() { return false; }
+
+// WebView2 shared buffers (runtime 1.0.1661+); per-buffer availability is
+// decided at allocation time, and buffer:attach reports it.
+bool has_webview_shared_buffers() { return true; }
 
 } // namespace anyar::platform

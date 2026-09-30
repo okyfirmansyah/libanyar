@@ -85,6 +85,7 @@ struct Window::Impl {
             throw std::runtime_error("Failed to create webview instance");
         }
         webview_set_title(wv, opts.title.c_str());
+        note_controller();
         // NOTE: Do NOT call webview_set_size() or connect_close_signals() here.
         // For child windows, we defer showing until all setup (parent, modal,
         // IPC binding) is complete.  Call show_window() after setup.
@@ -104,6 +105,7 @@ struct Window::Impl {
             throw std::runtime_error("Failed to create webview instance");
         }
         webview_set_title(wv, config.title.c_str());
+        note_controller();
         webview_set_size(wv, config.width, config.height,
                          config.resizable ? WEBVIEW_HINT_NONE : WEBVIEW_HINT_FIXED);
         connect_close_signals();
@@ -234,6 +236,19 @@ struct Window::Impl {
     // callbacks); those loops consume WM_QUIT.  A window:close-all arriving
     // meanwhile (e.g. over HTTP while the first window is still being set
     // up) would be lost — restore it.  No-op off Windows.
+    void* browser_controller() const {
+        if (!wv || destroyed) return nullptr;
+        return webview_get_native_handle(wv, WEBVIEW_NATIVE_HANDLE_KIND_BROWSER_CONTROLLER);
+    }
+
+    // Win32: let SharedBuffers allocate WebView2 shared memory from this
+    // window's environment (first window wins).  No-op elsewhere.
+    void note_controller() {
+#ifdef _WIN32
+        platform::note_webview_controller(browser_controller());
+#endif
+    }
+
     void after_nested_pump() {
 #ifdef _WIN32
         platform::repost_quit_if_requested();
@@ -978,6 +993,10 @@ void Window::set_size(int width, int height) {
 }
 
 // ── Native Handle ───────────────────────────────────────────────────────────
+
+void* Window::browser_controller() const {
+    return impl_->browser_controller();
+}
 
 void* Window::native_handle() const {
     return impl_->native_handle();

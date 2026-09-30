@@ -686,6 +686,7 @@ void VideoPlugin::present_frame(PlaybackControl& pb, const std::shared_ptr<anyar
         {"name", buf->name()},
         {"pool", pb.pool->base_name()},
         {"url", "anyar-shm://" + buf->name()},
+        {"id", buf->id()},
         {"size", bytes},
         {"metadata", {
             {"width", frame->width},

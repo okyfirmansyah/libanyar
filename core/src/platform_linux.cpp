@@ -45,4 +45,6 @@ std::filesystem::path executable_path() {
 
 bool has_shm_uri_scheme() { return true; }
 
+bool has_webview_shared_buffers() { return false; }
+
 } // namespace anyar::platform

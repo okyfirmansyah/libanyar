@@ -50,7 +50,7 @@ See [roadmap.md](roadmap.md) for full per-task checklists and [roadmap.md — Ne
 ## Next Priorities
 
 1. **Land the Windows port safely** — the port touched shared code (`app.cpp` platform hooks, `window.cpp` Impl restructure, `shared_buffer.cpp` split, OS-chosen ports, LibAsyik 1.8.1 on Linux CI with a fresh `cpp-deps-v5` cache) that was only compiled on Windows. Confirm Linux CI (incl. xvfb display tests), get the first `build-windows` CircleCI run green, then enable `tests/native_ipc` on Linux.
-2. **Windows follow-ups (Phase 7.1)** — zero-copy buffers in WebView2 (needs a hook into webview's environment creation); `anyar` CLI port; Windows packaging (7.4); Pinhole DComp port (ADR-008, breaking).
+2. **Windows follow-ups (Phase 7.1)** — `anyar` CLI port; Windows packaging (7.4); Pinhole DComp port (ADR-008, breaking).
 3. **Productize the SharedBuffer WebProcess extension** — prototype in `benchmarks/shm_webext/` reads 1080p in ~0.4 ms vs ~21 ms via `anyar-shm://` (root cause: WebKit's 8 KB-chunked URI-scheme IPC). Needs packaging (DEB/AppImage), `App` wiring, `@libanyar/api/buffer` API + `FrameRenderer` use.
 4. **Pinhole created before `Window::show()`** — gets a null overlay forever; `create_gl_area()` re-queues itself every idle (never renders, busy main loop). Fix: wire overlay on show, or create the GL area lazily.
 5. **Migrate remaining plugin loops to `BackgroundTask`** — wifi-analyzer still uses a bare `execute()` loop + flag (no join); audit built-in plugins for blocking calls that should use `run_blocking()`.
@@ -72,7 +72,7 @@ See [roadmap.md](roadmap.md) for full per-task checklists and [roadmap.md — Ne
 | Windows port changes unverified on Linux | High (until CI runs) | `app.cpp`/`window.cpp`/`shared_buffer` refactors, port probing and the LibAsyik 1.8.1 bump were built and tested only on Windows. Linux CI must confirm before relying on them. |
 | ~~Windows: non-ASCII paths~~ | ✅ Fixed 2026-09-30 | `<anyar/path.h>` (`path_from_utf8`/`path_to_utf8`/`is_path_within`) used by `fs:*`, `resolve_dist_path`, `allow_file_access`, `serve_file`. Third-party plugins must use it too (`fs::path(std::string)` is ANSI on Windows). |
 | ~~`/__anyar__/file/` + `anyar-file://` never decoded URLs; string-prefix root check~~ | ✅ Fixed 2026-09-30 | Files with spaces/non-ASCII names were unreachable on every platform; root `/data` admitted `/database/…`. Now `percent_decode()` then `..` check, and component-wise `is_path_within()`. |
-| Windows: SharedBuffer over HTTP | Medium | No `anyar-shm://` in WebView2 yet → one copy + loopback TCP per fetch; `anyar-file://` unavailable (use `/__anyar__/file/`). |
+| ~~Windows: SharedBuffer over HTTP~~ | ✅ Fixed 2026-10-01 | Zero-copy WebView2 shared buffers (ADR-011): 8 MiB read ~60 ms (HTTP) → ~0 (live view; ~2 ms only when revalidating). Buffers created before any window still use HTTP. `anyar-file://` unavailable (use `/__anyar__/file/`). |
 | Windows: first page load deferred to `run()` | Low | WebView2 only applies bind/init scripts to later navigations, so a window created before the main loop starts loads nothing until `run()` (child windows created at runtime load in `show()`). |
 | Windows: CLI, wifi-analyzer, Pinhole, packaging | Medium | Not ported: `anyar` CLI (POSIX), wifi-analyzer (libnl), Pinhole (stub — video-player defaults to webgl on Windows), MSI/NSIS. |
 | ~~`window:close-all` before the main window exists was a no-op~~ | ✅ Fixed 2026-10-01 | IPC is live while WebView2 creates the window (~2 s); the command found no main window and the app never quit. Now sticky (`close_all_requested_`); regression `tests/early_close`. |
@@ -233,3 +233,9 @@ See [roadmap.md](roadmap.md) for full per-task checklists and [roadmap.md — Ne
 - video-player: vcpkg FFmpeg 8.0.1 (optional on Windows — skipped if absent), FFmpeg ≥5.1 `AVChannelLayout` path (4.4 path kept for Ubuntu), UTF-8 paths, webgl default off Linux, `TerminateProcess` in `test:quit`. Smoke via injected driver on a generated MPEG-4/AAC file named `vidéo_日本.mp4`: metadata + chart, AAC-in-Matroska `<audio>` plays in WebView2, ~90 frames over `/__anyar__/buffer/`, 0 `anyar-shm://` fetches, frames after seek — 3/3 runs
 - JS: Vitest 139/139 and `tsc` build run for the first time on Windows (portable Node 22)
 - Local: 13/13 ctest (Release)
+
+### Zero-Copy SharedBuffers on WebView2 (2026-10-01)
+- ADR-011: Windows SharedBuffers are WebView2 shared buffers (environment reached through the controller handle — no webview hook); pages pull them with `buffer:attach {name, have}` → `PostSharedBufferToScript` (read-only) → cached per name + generation `id`. Fallback: file mapping + HTTP (no window yet / old runtime / UI busy)
+- JS: `fetchBuffer(nameOrUrl, {copy?, id?})` — snapshot by default, live zero-copy view with `copy:false`; `id` from `buffer:ready` skips the round trip. `createBufferRenderer` and video-player use the live path. 5 new Vitest cases (144/144)
+- `native_ipc` E2E extended: buffer created from a fiber after the window exists, attached, then mutated by C++ → visible in the SAME ArrayBuffer; same-generation re-attach not re-posted. Per 8 MiB: HTTP ~60 ms, attach IPC ~2 ms, slice ~4–6 ms, live ~0.01 ms
+- video-player smoke (3/3): ~90 frames, 4 `buffer:attach` (one per pool slot), 0 HTTP fetches

@@ -1347,7 +1347,7 @@ If any of these are needed, use `@libanyar/api/canvas` (Phase 4f path) instead.
 - [x] Add `core/src/plugins/clipboard_win32.cpp` — Win32 clipboard API (2026-09-30)
 - [x] Add `core/src/plugins/shell_win32.cpp` — `CreateProcessW` + pipes, `ShellExecuteW` (2026-09-30)
 - [x] Add `core/src/shared_buffer_win32.cpp` — file mapping; JS fetches over HTTP (2026-09-30)
-- [ ] Zero-copy buffers in WebView2 — `CreateSharedBuffer` + `PostSharedBufferToScript` or an `anyar-shm` custom scheme (needs a hook into webview's environment creation)
+- [x] Zero-copy buffers in WebView2 — `CreateSharedBuffer` + `PostSharedBufferToScript` via `buffer:attach`, environment reached through the controller handle (no hook needed) — ADR-011 (2026-10-01)
 - [ ] **Pinhole (Phase 4g) Windows port** — major-version migration:
   - [ ] Switch WebView2 hosting to `CoreWebView2CompositionController` (visual hosting) — **breaking change**, gated by major version bump
   - [ ] Add `core/src/pinhole_win32.cpp` — DComp tree with WebView visual + custom D3D11 swap-chain visual
