@@ -26,6 +26,7 @@ tests/
 │   ├── dist/index.html
 │   └── CMakeLists.txt
 ├── native_ipc/                  # Windows only for now (platform-neutral code); generated page drives __anyar_ipc__ round-trip, event push, buffer fetch, UI-thread hop, window:close-all; LABELS display;ipc;e2e
+├── early_close/                 # Linux + Windows; window:close-all posted (from an on_ready fiber) while the main window is still being created → app.run() must return (20 s watchdog)
 └── window_close/                # Linux + Windows; plain exe (no Catch2): native close (gtk_window_close / WM_CLOSE) → app.run() must return
     ├── main.cpp                 # watchdog: FAIL if run() not back 6 s after close (_Exit 3) or no close by 12 s (_Exit 4); ctest TIMEOUT 15, LABELS display;shutdown;e2e
     └── CMakeLists.txt
@@ -37,7 +38,7 @@ tests/
 | 1 | Pure unit, no service/GTK | CommandRegistry, EventBus, IPC types, FsPlugin |
 | 2 | Lightweight side effects | ShellPlugin (real fork/exec or CreateProcess, temp files) |
 | 3 | Needs LibAsyik service/fiber | IpcRouter, DbPlugin, App headless |
-| 4 | Needs display | Window, Pinhole lifecycle, Dialog, Clipboard, WebGL E2E, window_close, native_ipc (CI: xvfb on Linux; Windows CI runs `-LE display`) |
+| 4 | Needs display | Window, Pinhole lifecycle, Dialog, Clipboard, WebGL E2E, window_close, early_close, native_ipc (CI: xvfb on Linux; Windows CI runs `-LE display`) |
 
 ## Conventions
 - File: `test_<area>.cpp`; tag every `TEST_CASE` like `[area]`

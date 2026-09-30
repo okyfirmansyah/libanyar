@@ -1,13 +1,15 @@
 cmake_minimum_required(VERSION 3.16)
 project(video_player LANGUAGES CXX)
 
-# ── Find FFmpeg via pkg-config ───────────────────────────────────────────────
-find_package(PkgConfig REQUIRED)
-pkg_check_modules(AVFORMAT REQUIRED libavformat)
-pkg_check_modules(AVCODEC  REQUIRED libavcodec)
-pkg_check_modules(SWRESAMPLE REQUIRED libswresample)
-pkg_check_modules(SWSCALE  REQUIRED libswscale)
-pkg_check_modules(AVUTIL   REQUIRED libavutil)
+if(WIN32)
+    # vcpkg: `vcpkg install ffmpeg:x64-windows` (its wrapper provides FFMPEG_*).
+    # Optional on Windows so the rest of the tree builds without it.
+    find_package(FFMPEG QUIET)
+    if(NOT FFMPEG_FOUND)
+        message(STATUS "video-player: FFmpeg not found (vcpkg install ffmpeg) — skipping")
+        return()
+    endif()
+endif()
 
 add_executable(video_player
     src-cpp/main.cpp
@@ -16,21 +18,36 @@ add_executable(video_player
 
 target_include_directories(video_player PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src-cpp
-    ${AVFORMAT_INCLUDE_DIRS}
-    ${AVCODEC_INCLUDE_DIRS}
-    ${SWRESAMPLE_INCLUDE_DIRS}
-    ${SWSCALE_INCLUDE_DIRS}
-    ${AVUTIL_INCLUDE_DIRS}
 )
+target_link_libraries(video_player PRIVATE anyar_core)
 
-target_link_libraries(video_player PRIVATE
-    anyar_core
-    ${AVFORMAT_LIBRARIES}
-    ${AVCODEC_LIBRARIES}
-    ${SWRESAMPLE_LIBRARIES}
-    ${SWSCALE_LIBRARIES}
-    ${AVUTIL_LIBRARIES}
-)
+# ── FFmpeg ───────────────────────────────────────────────────────────────────
+if(WIN32)
+    target_include_directories(video_player PRIVATE ${FFMPEG_INCLUDE_DIRS})
+    target_link_directories(video_player PRIVATE ${FFMPEG_LIBRARY_DIRS})
+    target_link_libraries(video_player PRIVATE ${FFMPEG_LIBRARIES})
+else()
+    find_package(PkgConfig REQUIRED)
+    pkg_check_modules(AVFORMAT REQUIRED libavformat)
+    pkg_check_modules(AVCODEC  REQUIRED libavcodec)
+    pkg_check_modules(SWRESAMPLE REQUIRED libswresample)
+    pkg_check_modules(SWSCALE  REQUIRED libswscale)
+    pkg_check_modules(AVUTIL   REQUIRED libavutil)
+    target_include_directories(video_player PRIVATE
+        ${AVFORMAT_INCLUDE_DIRS}
+        ${AVCODEC_INCLUDE_DIRS}
+        ${SWRESAMPLE_INCLUDE_DIRS}
+        ${SWSCALE_INCLUDE_DIRS}
+        ${AVUTIL_INCLUDE_DIRS}
+    )
+    target_link_libraries(video_player PRIVATE
+        ${AVFORMAT_LIBRARIES}
+        ${AVCODEC_LIBRARIES}
+        ${SWRESAMPLE_LIBRARIES}
+        ${SWSCALE_LIBRARIES}
+        ${AVUTIL_LIBRARIES}
+    )
+endif()
 
 # Copy the frontend dist to the build output directory
 set(FRONTEND_DIST_DIR ${CMAKE_CURRENT_SOURCE_DIR}/frontend/dist)

@@ -110,6 +110,21 @@ Expected output (Ubuntu 22.04):
 56.70.100
 ```
 
+### Windows 10/11
+
+After the root `scripts\setup-windows.ps1`, add FFmpeg from vcpkg (a from-source
+build — about an hour the first time):
+
+```powershell
+C:\vcpkg\vcpkg.exe install ffmpeg:x64-windows
+```
+
+Without it the root CMake build skips this example. On Windows the player
+defaults to `--mode=webgl` (Pinhole is not ported yet — `--mode=pinhole` falls
+back to webgl), and frames reach the WebGL canvas over
+`GET /__anyar__/buffer/<name>` instead of `anyar-shm://`. The code builds
+against FFmpeg 4.4 (Ubuntu 22.04) through 8.x (vcpkg).
+
 ## Build
 
 ### 1. Build the frontend

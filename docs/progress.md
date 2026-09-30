@@ -2,7 +2,7 @@
 
 > **Current Phase**: Phase 7 started — Windows core port (MSVC + WebView2, ADR-010); Linux hardening findings continue
 > **Phase Status**: 🟢 Phases 1–4g complete (Linux), Phases 5–6 partial, Phase 7 Windows core working (local: 12/12 ctest); Windows CI job added, first run pending
-> **Last Updated**: 2026-09-30 (ADR-010)
+> **Last Updated**: 2026-10-01 (ADR-010)
 
 > **Agents**: update this file (and the matching checkbox in [roadmap.md](roadmap.md)) at the end of every task that changes status, adds a feature, or discovers a risk. Keep "Next Priorities" and "Open Risks" current; append to the Session Log.
 
@@ -50,7 +50,7 @@ See [roadmap.md](roadmap.md) for full per-task checklists and [roadmap.md — Ne
 ## Next Priorities
 
 1. **Land the Windows port safely** — the port touched shared code (`app.cpp` platform hooks, `window.cpp` Impl restructure, `shared_buffer.cpp` split, OS-chosen ports, LibAsyik 1.8.1 on Linux CI with a fresh `cpp-deps-v5` cache) that was only compiled on Windows. Confirm Linux CI (incl. xvfb display tests), get the first `build-windows` CircleCI run green, then enable `tests/native_ipc` on Linux.
-2. **Windows follow-ups (Phase 7.1)** — zero-copy buffers in WebView2 (needs a hook into webview's environment creation); `anyar` CLI port; key-storage/video-player examples; Windows packaging (7.4); Pinhole DComp port (ADR-008, breaking).
+2. **Windows follow-ups (Phase 7.1)** — zero-copy buffers in WebView2 (needs a hook into webview's environment creation); `anyar` CLI port; Windows packaging (7.4); Pinhole DComp port (ADR-008, breaking).
 3. **Productize the SharedBuffer WebProcess extension** — prototype in `benchmarks/shm_webext/` reads 1080p in ~0.4 ms vs ~21 ms via `anyar-shm://` (root cause: WebKit's 8 KB-chunked URI-scheme IPC). Needs packaging (DEB/AppImage), `App` wiring, `@libanyar/api/buffer` API + `FrameRenderer` use.
 4. **Pinhole created before `Window::show()`** — gets a null overlay forever; `create_gl_area()` re-queues itself every idle (never renders, busy main loop). Fix: wire overlay on show, or create the GL area lazily.
 5. **Migrate remaining plugin loops to `BackgroundTask`** — wifi-analyzer still uses a bare `execute()` loop + flag (no join); audit built-in plugins for blocking calls that should use `run_blocking()`.
@@ -74,7 +74,9 @@ See [roadmap.md](roadmap.md) for full per-task checklists and [roadmap.md — Ne
 | ~~`/__anyar__/file/` + `anyar-file://` never decoded URLs; string-prefix root check~~ | ✅ Fixed 2026-09-30 | Files with spaces/non-ASCII names were unreachable on every platform; root `/data` admitted `/database/…`. Now `percent_decode()` then `..` check, and component-wise `is_path_within()`. |
 | Windows: SharedBuffer over HTTP | Medium | No `anyar-shm://` in WebView2 yet → one copy + loopback TCP per fetch; `anyar-file://` unavailable (use `/__anyar__/file/`). |
 | Windows: first page load deferred to `run()` | Low | WebView2 only applies bind/init scripts to later navigations, so a window created before the main loop starts loads nothing until `run()` (child windows created at runtime load in `show()`). |
-| Windows: CLI, 3 examples, Pinhole, packaging | Medium | Not ported: `anyar` CLI (POSIX), key-storage / video-player / wifi-analyzer, Pinhole (stub), MSI/NSIS. |
+| Windows: CLI, wifi-analyzer, Pinhole, packaging | Medium | Not ported: `anyar` CLI (POSIX), wifi-analyzer (libnl), Pinhole (stub — video-player defaults to webgl on Windows), MSI/NSIS. |
+| ~~`window:close-all` before the main window exists was a no-op~~ | ✅ Fixed 2026-10-01 | IPC is live while WebView2 creates the window (~2 s); the command found no main window and the app never quit. Now sticky (`close_all_requested_`); regression `tests/early_close`. |
+| Windows `std::_Exit()` can hang | Low | Runs DLL detach, which can deadlock with WebView2/FFmpeg threads; use `TerminateProcess` for hard exits (video-player `test:quit`). |
 | ~~Random server ports hit reserved/in-use ports~~ | ✅ Fixed 2026-09-30 | `App` and tests now take an OS-chosen port (Windows reserves blocks of 49152–65535; a failed bind inside a test fiber hung `run()` ~13% of runs). |
 | Pinhole Windows port is a breaking change | Medium | Requires WebView2 visual hosting → major version bump (ADR-008). |
 | Pinhole native path in CI | Medium | Unverified whether CI (xvfb/mesa) exercises native GL or only the canvas fallback. |
@@ -222,3 +224,12 @@ See [roadmap.md](roadmap.md) for full per-task checklists and [roadmap.md — Ne
 - Tests: shell tests use `cmd.exe` builtins on Windows; `window_close` ported (WM_CLOSE); new `tests/native_ipc` E2E (generated page: IPC round-trip, event push, buffer fetch, UI-thread hop, cross-thread `window:close-all`). Local: 12/12 ctest × 5 runs; shutdown 71 ms after native close
 - CI: new CircleCI `build-windows` job (Server 2022, pinned vcpkg commit, `-LE display`) — not yet run
 - Not ported: Pinhole (stub), `anyar` CLI, key-storage / video-player / wifi-analyzer, packaging, zero-copy buffers
+
+### Windows: UTF-8 Paths, close-all Race, Examples (2026-09-30 → 10-01)
+- Branch `feat/windows-port`: (1) Windows port, (2) UTF-8 paths, (3) close-all race, (4) examples
+- UTF-8 paths: new `<anyar/path.h>` (`path_from_utf8`, `path_to_utf8`, `is_path_within`) used by `fs:*`, `resolve_dist_path`, `allow_file_access`, `serve_file`; `percent_decode()` in `<anyar/http_file.h>`. `/__anyar__/file/` and `anyar-file://` never decoded URLs (spaces/non-ASCII unreachable on every platform) and checked roots by string prefix (`/data` admitted `/database/…`) — both fixed. Tests: non-ASCII fs round trip, `serve_file`, `percent_decode`, `is_path_within`, non-ASCII `resolve_dist_path`
+- `window:close-all` arriving during main-window creation (WebView2 ≈ 2 s) was silently dropped (found by driving key-storage over HTTP right after launch; located with stderr traces) → sticky flag in `App`; Win32 also re-posts a pending quit after every webview call that pumps a nested loop. New `tests/early_close` (Linux + Windows) fails without the fix, passes in ~4 s
+- key-storage: `find_package(SQLite3)`, UTF-8 paths, random temp DB name (no `getpid`), `col_text()` replaces GCC `a ?: b`. Smoke (HTTP IPC while the WebView2 UI runs, vault `ключи_日本.anyarks`): new/save/close/wrong-password/open/entries round trip, temp DB wiped, clean exit
+- video-player: vcpkg FFmpeg 8.0.1 (optional on Windows — skipped if absent), FFmpeg ≥5.1 `AVChannelLayout` path (4.4 path kept for Ubuntu), UTF-8 paths, webgl default off Linux, `TerminateProcess` in `test:quit`. Smoke via injected driver on a generated MPEG-4/AAC file named `vidéo_日本.mp4`: metadata + chart, AAC-in-Matroska `<audio>` plays in WebView2, ~90 frames over `/__anyar__/buffer/`, 0 `anyar-shm://` fetches, frames after seek — 3/3 runs
+- JS: Vitest 139/139 and `tsc` build run for the first time on Windows (portable Node 22)
+- Local: 13/13 ctest (Release)

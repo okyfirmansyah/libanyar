@@ -2,11 +2,12 @@
 //
 // Demonstrates two parallel rendering paths for raw decoded video frames:
 //
-//   --mode=pinhole   (default) Native GtkGLArea layered BELOW a transparent
-//                              WebKitWebView. HTML controls (timeline, panels)
-//                              composite freely on top of the GL surface.
-//   --mode=webgl               Legacy SharedBufferPool + buffer:ready event
-//                              + JS WebGL renderer.
+//   --mode=pinhole   (Linux default) Native GtkGLArea layered BELOW a
+//                              transparent WebKitWebView. HTML controls
+//                              (timeline, panels) composite freely on top.
+//   --mode=webgl     (default elsewhere) SharedBufferPool + buffer:ready
+//                              event + JS WebGL renderer (on Windows the
+//                              frames are fetched over HTTP).
 //
 // If `Pinhole::is_native()` returns false (headless, sandbox, missing GL),
 // the framework's built-in canvas-2D fallback transparently takes over.
@@ -26,6 +27,8 @@
 #include <anyar/main_thread.h>
 #include <gtk/gtk.h>
 #include <webkit2/webkit2.h>
+#elif defined(_WIN32)
+#include <windows.h>  // TerminateProcess (test:quit)
 #endif
 #include <memory>
 #include <string>
@@ -40,18 +43,33 @@ namespace {
 
 videoplayer::RenderMode parse_mode(int argc, char** argv) {
     using videoplayer::RenderMode;
+#ifdef __linux__
+    constexpr RenderMode kDefault = RenderMode::Pinhole;
+#else
+    // Pinhole is Linux-only for now (a stub elsewhere, with no canvas
+    // fallback), so frames would never reach the screen.
+    constexpr RenderMode kDefault = RenderMode::WebGL;
+#endif
     for (int i = 1; i < argc; ++i) {
         const char* a = argv[i];
         if (std::strncmp(a, "--mode=", 7) == 0) {
             std::string v(a + 7);
             if (v == "webgl")   return RenderMode::WebGL;
+#ifdef __linux__
             if (v == "pinhole") return RenderMode::Pinhole;
+#else
+            if (v == "pinhole") {
+                std::cerr << "[video-player] --mode=pinhole is not available on this "
+                             "platform yet; using webgl.\n";
+                return RenderMode::WebGL;
+            }
+#endif
             std::cerr << "[video-player] Unknown --mode=" << v
-                      << " (expected pinhole|webgl); using pinhole.\n";
-            return RenderMode::Pinhole;
+                      << " (expected pinhole|webgl); using the default.\n";
+            return kDefault;
         }
     }
-    return RenderMode::Pinhole;
+    return kDefault;
 }
 
 #ifdef __linux__
@@ -130,6 +148,11 @@ int main(int argc, char** argv) {
         });
         app.command("test:quit", [](const json& a) -> json {
             std::cout << "[test] quit code=" << a.value("code", 0) << std::endl;
+#ifdef _WIN32
+            // _Exit() still runs DLL_PROCESS_DETACH, which can deadlock with
+            // WebView2/FFmpeg worker threads — terminate outright.
+            TerminateProcess(GetCurrentProcess(), static_cast<UINT>(a.value("code", 0)));
+#endif
             std::_Exit(a.value("code", 0));
         });
 #ifdef __linux__

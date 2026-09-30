@@ -1359,7 +1359,9 @@ If any of these are needed, use `@libanyar/api/canvas` (Phase 4f path) instead.
 - [ ] Bundle WebView2 bootstrapper for systems without Edge
 - [x] UTF-8 paths in `fs:*` / `resolve_dist_path` / `allow_file_access` / `serve_file` — `<anyar/path.h>`; file routes percent-decode + component-wise root check (2026-09-30)
 - [ ] Port the `anyar` CLI (`dev`: `CreateProcess` + job objects; `build`; `package` → 7.4)
-- [ ] Port examples: key-storage (POSIX file APIs), video-player (FFmpeg via vcpkg); wifi-analyzer needs a WLAN API backend
+- [x] Port examples: key-storage (FindSQLite3, UTF-8 paths, no GCC `?:`) and video-player (vcpkg FFmpeg, FFmpeg 5.1+ channel-layout API, webgl default) — smoke-tested in WebView2 (2026-09-30)
+- [ ] Port wifi-analyzer (needs a WLAN API backend instead of libnl)
+- [ ] Pinhole-less video on Windows: canvas fallback in `pinhole_stub.cpp`, or the DComp port
 
 ### 7.2 macOS
 - [ ] Add `core/src/window_macos.mm` — implement `Window::Impl` using `webview/webview` + Cocoa APIs

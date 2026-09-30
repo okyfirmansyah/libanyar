@@ -37,11 +37,10 @@ add_subdirectory(core)
 if(ANYAR_BUILD_EXAMPLES)
     add_subdirectory(examples/hello-world)
     add_subdirectory(examples/pinhole-hello)
+    add_subdirectory(examples/video-player)   # skips itself on Windows without FFmpeg
+    add_subdirectory(examples/key-storage)
     if(NOT WIN32)
-        # Still POSIX/Linux-only: key-storage (POSIX file APIs), video-player
-        # (pkg-config FFmpeg, POSIX), wifi-analyzer (libnl / nl80211).
-        add_subdirectory(examples/video-player)
-        add_subdirectory(examples/key-storage)
+        # Linux-only: wifi-analyzer (libnl / nl80211).
         add_subdirectory(examples/wifi-analyzer)
     endif()
 endif()

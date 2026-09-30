@@ -16,6 +16,7 @@
 
 #include <anyar/event_bus.h>
 #include <anyar/http_file.h>
+#include <anyar/path.h>
 #include <anyar/pinhole.h>
 #include <anyar/shared_buffer.h>
 #include <anyar/types.h>
@@ -37,7 +38,7 @@
 #include <cstdlib>
 #include <iomanip>
 #include <iostream>
-#include <unistd.h>
+#include <random>
 #include <sstream>
 
 // ── FFmpeg C headers ────────────────────────────────────────────────────────
@@ -51,6 +52,24 @@ extern "C" {
 #include <libavutil/opt.h>
 }
 
+// FFmpeg 5.1 (libavutil 57.28) replaced channels/channel_layout with
+// AVChannelLayout; FFmpeg 7 removed the old fields.  Support both: Ubuntu
+// 22.04 ships 4.4, vcpkg ships 7/8.
+#define VP_HAS_CH_LAYOUT (LIBAVUTIL_VERSION_INT >= AV_VERSION_INT(57, 28, 100))
+
+#if VP_HAS_CH_LAYOUT
+namespace {
+/// RAII AVChannelLayout (custom orders own heap memory).
+struct ChannelLayout {
+    AVChannelLayout l{};
+    ChannelLayout() = default;
+    ChannelLayout(const ChannelLayout&) = delete;
+    ChannelLayout& operator=(const ChannelLayout&) = delete;
+    ~ChannelLayout() { av_channel_layout_uninit(&l); }
+};
+} // namespace
+#endif
+
 using json = nlohmann::json;
 using namespace std::chrono_literals;
 
@@ -61,7 +80,7 @@ PlaybackControl::~PlaybackControl() = default;
 AudioStream::~AudioStream() {
     if (!temp_path.empty()) {
         std::error_code ec;
-        std::filesystem::remove(temp_path, ec);
+        std::filesystem::remove(anyar::path_from_utf8(temp_path), ec);
     }
 }
 
@@ -165,7 +184,7 @@ std::shared_ptr<MediaInfo> probe_file(const std::string& path) {
     auto& p = info->probe;
     p.duration = fc->duration != AV_NOPTS_VALUE ? static_cast<double>(fc->duration) / AV_TIME_BASE : 0.0;
     std::error_code ec;
-    p.fileSizeBytes = static_cast<int64_t>(std::filesystem::file_size(path, ec));
+    p.fileSizeBytes = static_cast<int64_t>(std::filesystem::file_size(anyar::path_from_utf8(path), ec));
 
     int v = av_find_best_stream(fc.get(), AVMEDIA_TYPE_VIDEO, -1, -1, nullptr, 0);
     int a = av_find_best_stream(fc.get(), AVMEDIA_TYPE_AUDIO, -1, -1, nullptr, 0);
@@ -184,7 +203,11 @@ std::shared_ptr<MediaInfo> probe_file(const std::string& path) {
         const AVCodecDescriptor* d = avcodec_descriptor_get(par->codec_id);
         p.audioCodec = d ? d->name : "unknown";
         p.sampleRate = par->sample_rate;
+#if VP_HAS_CH_LAYOUT
+        p.channels   = par->ch_layout.nb_channels;
+#else
         p.channels   = par->channels;
+#endif
     }
     return info;
 }
@@ -247,11 +270,39 @@ WaveformData compute_waveform(const std::string& path, int num_samples) {
 
     SwrPtr swr;
     int swr_fmt = -1, swr_rate = 0;
+#if VP_HAS_CH_LAYOUT
+    ChannelLayout swr_layout;
+#else
     uint64_t swr_layout = 0;
+#endif
     std::vector<float> samples;
     std::vector<float> chunk;
 
     auto resample = [&](const AVFrame* f) {
+#if VP_HAS_CH_LAYOUT
+        ChannelLayout layout;
+        if (f->ch_layout.order != AV_CHANNEL_ORDER_UNSPEC) {
+            av_channel_layout_copy(&layout.l, &f->ch_layout);
+        } else {
+            av_channel_layout_default(&layout.l, f->ch_layout.nb_channels);
+        }
+        if (!swr || f->format != swr_fmt || f->sample_rate != swr_rate ||
+            av_channel_layout_compare(&layout.l, &swr_layout.l) != 0) {
+            ChannelLayout mono;
+            av_channel_layout_default(&mono.l, 1);
+            SwrContext* s = nullptr;
+            if (swr_alloc_set_opts2(&s, &mono.l, AV_SAMPLE_FMT_FLT, kRate,
+                                    &layout.l, static_cast<AVSampleFormat>(f->format),
+                                    f->sample_rate, 0, nullptr) < 0) {
+                s = nullptr;
+            }
+            swr.reset(s);
+            if (!swr || swr_init(swr.get()) < 0) throw std::runtime_error("Cannot initialize resampler");
+            swr_fmt = f->format; swr_rate = f->sample_rate;
+            av_channel_layout_uninit(&swr_layout.l);
+            av_channel_layout_copy(&swr_layout.l, &layout.l);
+        }
+#else
         const uint64_t layout = f->channel_layout ? f->channel_layout
                                                   : av_get_default_channel_layout(f->channels);
         if (!swr || f->format != swr_fmt || f->sample_rate != swr_rate || layout != swr_layout) {
@@ -261,6 +312,7 @@ WaveformData compute_waveform(const std::string& path, int num_samples) {
             if (!swr || swr_init(swr.get()) < 0) throw std::runtime_error("Cannot initialize resampler");
             swr_fmt = f->format; swr_rate = f->sample_rate; swr_layout = layout;
         }
+#endif
         const int cap = swr_get_out_samples(swr.get(), f ? f->nb_samples : 0) + 32;
         chunk.resize(static_cast<size_t>(std::max(cap, 32)));
         uint8_t* outp = reinterpret_cast<uint8_t*>(chunk.data());
@@ -582,10 +634,12 @@ std::shared_ptr<AudioStream> VideoPlugin::prepare_audio_stream(std::shared_ptr<c
         a->ready = p.get_future().share();
         return a;
     }
+    // Per-process random tag (not getpid(): POSIX-only) + per-open counter.
+    static const std::string process_tag = std::to_string(std::random_device{}());
     static std::atomic<uint64_t> counter{0};
-    a->temp_path = (std::filesystem::temp_directory_path() /
-                    ("anyar-video-player-" + std::to_string(::getpid()) + "-" +
-                     std::to_string(++counter) + ".mka")).string();
+    a->temp_path = anyar::path_to_utf8(
+        std::filesystem::temp_directory_path() /
+        ("anyar-video-player-" + process_tag + "-" + std::to_string(++counter) + ".mka"));
     // Remux on the worker pool; /video/stream waits on the future.
     a->ready = service_->async([in = media->path, out = a->temp_path]() -> std::string {
         const double t0 = debug_now();
@@ -853,10 +907,12 @@ void VideoPlugin::initialize(anyar::PluginContext& ctx) {
 
         std::string path = args.at("path").get<std::string>();
         std::error_code ec;
-        if (!std::filesystem::is_regular_file(path, ec)) {
+        if (!std::filesystem::is_regular_file(anyar::path_from_utf8(path), ec)) {
             throw std::runtime_error("File not found: " + path);
         }
-        path = std::filesystem::canonical(path).string();
+        // Keep UTF-8 throughout: FFmpeg, serve_file and the JSON replies all
+        // take UTF-8 paths (path::string() would be ANSI on Windows).
+        path = anyar::path_to_utf8(std::filesystem::canonical(anyar::path_from_utf8(path)));
 
         // Fully stop the previous session BEFORE touching shared state.
         stop_playback();

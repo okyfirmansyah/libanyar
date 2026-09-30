@@ -14,14 +14,28 @@
 #include <fstream>
 #include <filesystem>
 #include <iostream>
+#include <cstdio>
 #include <cstring>
 #include <stdexcept>
 #include <algorithm>
+#include <random>
+
+#include <anyar/path.h>
 
 using json = nlohmann::json;
 namespace fs = std::filesystem;
 
 namespace keystore {
+
+/// Fresh, unique path (UTF-8) for the decrypted working copy in the temp dir.
+/// Random rather than per-PID, so two open vaults never share a file.
+static std::string make_tmp_db_path() {
+    std::random_device rd;
+    char tag[17];
+    std::snprintf(tag, sizeof(tag), "%08x%08x", rd(), rd());
+    return anyar::path_to_utf8(fs::temp_directory_path() /
+                               (std::string("anyarks_") + tag + ".db"));
+}
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // Crypto helpers
@@ -143,7 +157,7 @@ std::vector<uint8_t> KeystorePlugin::decrypt_aes_gcm(
 
 void KeystorePlugin::write_encrypted_file(const std::string& path) {
     // Read the temporary SQLite file into memory
-    std::ifstream in(tmp_db_path_, std::ios::binary);
+    std::ifstream in(anyar::path_from_utf8(tmp_db_path_), std::ios::binary);
     if (!in) throw std::runtime_error("Cannot read temp database");
     std::vector<uint8_t> plaintext((std::istreambuf_iterator<char>(in)),
                                     std::istreambuf_iterator<char>());
@@ -151,7 +165,7 @@ void KeystorePlugin::write_encrypted_file(const std::string& path) {
 
     auto [ciphertext, tag, iv] = encrypt_aes_gcm(derived_key_, plaintext);
 
-    std::ofstream out(path, std::ios::binary | std::ios::trunc);
+    std::ofstream out(anyar::path_from_utf8(path), std::ios::binary | std::ios::trunc);
     if (!out) throw std::runtime_error("Cannot write to " + path);
 
     // Header
@@ -176,7 +190,7 @@ void KeystorePlugin::write_encrypted_file(const std::string& path) {
 
 void KeystorePlugin::read_encrypted_file(const std::string& path,
                                          const std::string& password) {
-    std::ifstream in(path, std::ios::binary);
+    std::ifstream in(anyar::path_from_utf8(path), std::ios::binary);
     if (!in) throw std::runtime_error("Cannot open file: " + path);
 
     // Read magic
@@ -227,8 +241,8 @@ void KeystorePlugin::read_encrypted_file(const std::string& path,
 
     // Write decrypted SQLite to temp file
     cleanup_tmp();
-    tmp_db_path_ = fs::temp_directory_path() / ("anyarks_" + std::to_string(getpid()) + ".db");
-    std::ofstream out(tmp_db_path_, std::ios::binary | std::ios::trunc);
+    tmp_db_path_ = make_tmp_db_path();
+    std::ofstream out(anyar::path_from_utf8(tmp_db_path_), std::ios::binary | std::ios::trunc);
     if (!out) throw std::runtime_error("Cannot create temp database");
     out.write(reinterpret_cast<const char*>(plaintext.data()), plaintext.size());
     out.close();
@@ -260,11 +274,11 @@ void KeystorePlugin::close_db() {
 }
 
 void KeystorePlugin::cleanup_tmp() {
-    if (!tmp_db_path_.empty() && fs::exists(tmp_db_path_)) {
+    if (!tmp_db_path_.empty() && fs::exists(anyar::path_from_utf8(tmp_db_path_))) {
         // Overwrite with zeros before deleting for security
-        auto sz = fs::file_size(tmp_db_path_);
+        auto sz = fs::file_size(anyar::path_from_utf8(tmp_db_path_));
         if (sz > 0) {
-            std::ofstream zer(tmp_db_path_, std::ios::binary | std::ios::trunc);
+            std::ofstream zer(anyar::path_from_utf8(tmp_db_path_), std::ios::binary | std::ios::trunc);
             std::vector<char> zeros(std::min<size_t>(sz, 65536), '\0');
             size_t remaining = sz;
             while (remaining > 0) {
@@ -273,10 +287,10 @@ void KeystorePlugin::cleanup_tmp() {
                 remaining -= chunk;
             }
         }
-        fs::remove(tmp_db_path_);
+        fs::remove(anyar::path_from_utf8(tmp_db_path_));
         // Also remove WAL and SHM files
-        fs::remove(tmp_db_path_ + "-wal");
-        fs::remove(tmp_db_path_ + "-shm");
+        fs::remove(anyar::path_from_utf8(tmp_db_path_ + "-wal"));
+        fs::remove(anyar::path_from_utf8(tmp_db_path_ + "-shm"));
         tmp_db_path_.clear();
     }
 }
@@ -361,6 +375,13 @@ static std::vector<uint8_t> base64_decode(const std::string& b64) {
 // Helper: SQLite query helpers
 // ═══════════════════════════════════════════════════════════════════════════════
 
+/// Column @p col as UTF-8 text, or @p fallback for NULL (portable stand-in
+/// for GCC's `a ?: b`).
+static const char* col_text(sqlite3_stmt* stmt, int col, const char* fallback) {
+    const unsigned char* t = sqlite3_column_text(stmt, col);
+    return t ? reinterpret_cast<const char*>(t) : fallback;
+}
+
 static json groups_to_json(sqlite3* db) {
     json groups = json::array();
     sqlite3_stmt* stmt = nullptr;
@@ -387,16 +408,16 @@ static json entry_row_to_json(sqlite3_stmt* stmt) {
     e["id"]        = sqlite3_column_int(stmt, 0);
     if (sqlite3_column_type(stmt, 1) == SQLITE_NULL) e["groupId"] = nullptr;
     else e["groupId"] = sqlite3_column_int(stmt, 1);
-    e["title"]     = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 2) ?: reinterpret_cast<const unsigned char*>(""));
-    e["username"]  = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 3) ?: reinterpret_cast<const unsigned char*>(""));
-    e["password"]  = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 4) ?: reinterpret_cast<const unsigned char*>(""));
-    e["url"]       = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 5) ?: reinterpret_cast<const unsigned char*>(""));
-    e["notes"]     = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 6) ?: reinterpret_cast<const unsigned char*>(""));
+    e["title"]     = col_text(stmt, 2, "");
+    e["username"]  = col_text(stmt, 3, "");
+    e["password"]  = col_text(stmt, 4, "");
+    e["url"]       = col_text(stmt, 5, "");
+    e["notes"]     = col_text(stmt, 6, "");
     if (sqlite3_column_type(stmt, 7) == SQLITE_NULL) e["expiresAt"] = nullptr;
     else e["expiresAt"] = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 7));
     e["hasIcon"]   = (sqlite3_column_type(stmt, 8) != SQLITE_NULL && sqlite3_column_bytes(stmt, 8) > 0);
-    e["createdAt"] = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 9) ?: reinterpret_cast<const unsigned char*>(""));
-    e["updatedAt"] = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 10) ?: reinterpret_cast<const unsigned char*>(""));
+    e["createdAt"] = col_text(stmt, 9, "");
+    e["updatedAt"] = col_text(stmt, 10, "");
     return e;
 }
 
@@ -469,7 +490,7 @@ void KeystorePlugin::initialize(anyar::PluginContext& ctx) {
         file_path_ = path;
 
         // Create temp SQLite file
-        tmp_db_path_ = fs::temp_directory_path() / ("anyarks_" + std::to_string(getpid()) + ".db");
+        tmp_db_path_ = make_tmp_db_path();
         open_db();
         init_schema();
 
@@ -916,7 +937,7 @@ void KeystorePlugin::initialize(anyar::PluginContext& ctx) {
             auto blob = static_cast<const uint8_t*>(sqlite3_column_blob(stmt, 0));
             int blob_len = sqlite3_column_bytes(stmt, 0);
             result["dataBase64"] = base64_encode(blob, blob_len);
-            result["mimeType"]   = reinterpret_cast<const char*>(sqlite3_column_text(stmt, 1) ?: reinterpret_cast<const unsigned char*>("image/png"));
+            result["mimeType"]   = col_text(stmt, 1, "image/png");
         }
         sqlite3_finalize(stmt);
 

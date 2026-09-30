@@ -166,8 +166,9 @@ ctest --test-dir build-win -C Release --output-on-failure
 ```
 
 Works on Windows: windows/multi-window, native IPC, events, dialogs, clipboard, shell, fs, db,
-SharedBuffer (served over HTTP). Not yet: Pinhole (stub, `is_native() == false`), zero-copy
-`anyar-shm://`, the `anyar` CLI, and the key-storage / video-player / wifi-analyzer examples.
+SharedBuffer (served over HTTP), UTF-8 paths; examples hello-world, key-storage, pinhole-hello,
+and video-player (webgl mode; needs `vcpkg install ffmpeg:x64-windows`). Not yet: Pinhole (stub,
+`is_native() == false`), zero-copy `anyar-shm://`, the `anyar` CLI, and the wifi-analyzer example.
 
 ## Pinhole Native Rendering
 
