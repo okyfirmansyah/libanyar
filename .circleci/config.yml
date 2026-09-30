@@ -169,7 +169,9 @@ jobs:
           name: "C++: Build"
           command: |
             cd build
-            make -j4
+            # medium = 2 vCPU / 4 GB: -j4 OOM-kills cc1plus on the heavy
+            # LibAsyik/SOCI test TUs (test_integration). Match vCPU count.
+            make -j2
       - run:
           name: "C++: Run unit tests"
           command: |
