@@ -21,8 +21,11 @@
 #include <anyar/shared_buffer.h>
 #include <anyar/window.h>
 
+#include <gtk/gtk.h>
+
 #include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <cstdlib>
 #include <cstring>
 #include <memory>
@@ -307,8 +310,8 @@ TEST_CASE("Pinhole: force_fallback + set_rect injects canvas JS and allocates Sh
             s.find("createElement('canvas')") != std::string::npos) {
             found_canvas = true;
         }
-        if (s.find("cv.width=64") != std::string::npos &&
-            s.find("cv.height=48") != std::string::npos) {
+        if (s.find("w=64,h=48") != std::string::npos &&
+            s.find("cv.width=w;cv.height=h;") != std::string::npos) {
             found_dims = true;
         }
     }
@@ -370,6 +373,100 @@ TEST_CASE("Pinhole: fallback CPU pixel conversion correctness",
         REQUIRE(g >= 126); REQUIRE(g <= 130);
         REQUIRE(b >= 126); REQUIRE(b <= 130);
     }
+}
+
+// ── Lifetime: queued main-thread work must never outlive its target ──────────
+//
+// Pinhole methods marshal GTK work to the main thread via g_idle_add().  These
+// tests queue that work, destroy the target (Pinhole or window), and only then
+// pump the main loop.  Run under ASAN (-DANYAR_ASAN=ON) to catch regressions:
+// without the Impl liveness guard the first test is a heap-use-after-free.
+// The second is a smoke test of the realized-GL path through the guard (it did
+// not reproduce the dead-widget case on the pre-fix code: window teardown here
+// does not free the GtkGLArea before queued idles run).
+
+static void pump_main_loop(int max_iterations = 200) {
+    for (int i = 0; i < max_iterations && g_main_context_pending(nullptr); ++i)
+        g_main_context_iteration(nullptr, FALSE);
+}
+
+TEST_CASE("Pinhole: queued idle work is dropped after the Pinhole is destroyed",
+          "[pinhole][lifetime][display]")
+{
+    if (!has_display()) {
+        WARN("Skipping display-gated pinhole test (no DISPLAY / ANYAR_HAS_DISPLAY)");
+        return;
+    }
+
+    anyar::WindowCreateOptions win_opts;
+    win_opts.title = "test_pinhole_lifetime_a";
+    win_opts.width = 400;
+    win_opts.height = 300;
+
+    auto window = std::make_shared<anyar::Window>(win_opts, 0);
+    auto pin = window->create_pinhole("life-a", {});  // queues create_gl_area()
+    pin->set_continuous(true);                        // queues tick install
+    pin->set_continuous(false);                       // queues tick removal
+    pin->set_rect(0, 0, 100, 100);
+
+    // Drop every owner before any queued idle runs.
+    pin.reset();
+    window.reset();
+
+    pump_main_loop();
+    SUCCEED("queued idles after Pinhole destruction were no-ops");
+}
+
+TEST_CASE("Pinhole: request_redraw racing window close does not touch the dead GL area",
+          "[pinhole][lifetime][display]")
+{
+    if (!has_display()) {
+        WARN("Skipping display-gated pinhole test (no DISPLAY / ANYAR_HAS_DISPLAY)");
+        return;
+    }
+
+    anyar::WindowCreateOptions win_opts;
+    win_opts.title = "test_pinhole_lifetime_b";
+    win_opts.width = 400;
+    win_opts.height = 300;
+
+    auto window = std::make_shared<anyar::Window>(win_opts, 0);
+    window->show();  // builds the GtkOverlay; pinholes must be created after
+    auto pin = window->create_pinhole("life-b", {});
+    pin->set_rect(10, 10, 200, 150);
+    std::atomic<int> renders{0};
+    pin->on_render([&](anyar::PinholeRenderContext& ctx) {
+        renders.fetch_add(1);
+        ctx.clear(0.f, 0.f, 0.f, 1.f);
+    });
+
+    // Let the GL area be created, realized and rendered at least once.
+    auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(3);
+    while (renders.load() == 0 && std::chrono::steady_clock::now() < deadline) {
+        pin->request_redraw();
+        pump_main_loop(50);
+        g_usleep(5000);  // let the frame clock / compositor catch up
+    }
+    if (!pin->is_native() || renders.load() == 0) {
+        WARN("Native GL pinhole unavailable here — skipping race check (is_native="
+             << pin->is_native() << ", renders=" << renders.load() << ")");
+        pin.reset();
+        window.reset();
+        pump_main_loop();
+        return;
+    }
+
+    // A producer (e.g. decode fiber) queues redraws / state changes...
+    pin->request_redraw();
+    pin->set_window_active(false);
+    pin->set_visible(true);
+    // ...and the window closes before the main loop services them.
+    window.reset();
+
+    pump_main_loop();
+    pin.reset();  // user-held Pinhole outlives its window
+    pump_main_loop();
+    SUCCEED("queued idles after window close were no-ops");
 }
 
 #endif // __linux__ (outer)

@@ -21,6 +21,7 @@ std::pair<int, int> PinholeRenderContext::size_px() const { return {0, 0}; }
 double PinholeRenderContext::dpr() const { return 1.0; }
 void PinholeRenderContext::clear(float, float, float, float) {}
 void PinholeRenderContext::draw_image(const uint8_t*, std::size_t, int, int, pixel_format) {}
+void PinholeRenderContext::draw_frame(const Frame&, bool) {}
 
 // ── Pinhole::Impl (stub) ─────────────────────────────────────────────────────
 

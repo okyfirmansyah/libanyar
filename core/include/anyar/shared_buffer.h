@@ -116,7 +116,11 @@ public:
 class SharedBufferPool {
 public:
     /// Create a pool of `count` buffers, each of `buffer_size` bytes.
-    /// Buffer names will be `base_name_0`, `base_name_1`, etc.
+    /// Buffer names will be `base_name_0`, `base_name_1`, etc.  Buffer names
+    /// are process-global: creating a pool whose names are still in use
+    /// (e.g. the previous pool with the same base name has not been
+    /// destroyed yet) throws std::runtime_error.  Destroy the old pool first,
+    /// or give each pool generation its own base name.
     SharedBufferPool(const std::string& base_name, size_t buffer_size,
                      size_t count = 3);
 
@@ -127,13 +131,29 @@ public:
     /// Throws SharedBufferPoolClosed if the pool is closed while waiting.
     SharedBuffer& acquire_write();
 
-    /// Producer: mark the buffer as ready and notify the frontend.
-    /// @param metadata_json  JSON string with frame metadata (width, height, etc.)
-    /// @param window         Target window to notify
+    /// Producer: non-blocking variant of acquire_write().  Returns nullptr
+    /// if no slot is FREE right now (live producers should drop the frame
+    /// instead of stalling).  Throws SharedBufferPoolClosed if closed.
+    SharedBuffer* try_acquire_write();
+
+    /// Producer: mark a WRITING buffer READY for the consumer.
+    /// The caller is responsible for notifying the frontend (e.g. emitting
+    /// `buffer:ready`).  No-op unless the slot is currently WRITING.
+    /// @param metadata_json  Reserved (kept for API compatibility).
     void release_write(SharedBuffer& buf, const std::string& metadata_json);
 
-    /// Consumer (called from IPC): mark a buffer as available for reuse.
+    /// Producer: give back a WRITING buffer that will NOT be published
+    /// (dropped frame, seek, shutdown).  WRITING → FREE.  No-op otherwise.
+    void release_unpublished(SharedBuffer& buf);
+
+    /// Consumer (called from IPC): mark a READY/READING buffer as available
+    /// for reuse.  Never frees a slot the producer is writing, so a stale or
+    /// duplicate release cannot corrupt an in-progress frame.
     void release_read(const std::string& buffer_name);
+
+    /// Shared ownership of a slot's buffer — keeps the mapping alive even if
+    /// the pool is destroyed.  Returns null if @p buffer_name is not in this pool.
+    std::shared_ptr<SharedBuffer> buffer(const std::string& buffer_name) const;
 
     /// Cancel any blocked producers and reject future acquire_write() calls.
     void close();

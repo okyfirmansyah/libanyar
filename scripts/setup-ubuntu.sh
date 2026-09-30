@@ -53,9 +53,19 @@ apt-get install -y \
     libpq-dev \
     libgtk-3-dev \
     libwebkit2gtk-4.0-dev \
+    libepoxy-dev \
+    gstreamer1.0-plugins-base \
+    gstreamer1.0-plugins-good \
     gstreamer1.0-plugins-bad \
+    gstreamer1.0-libav \
     libappindicator3-dev \
-    libnotify-dev
+    libnotify-dev \
+    libavformat-dev libavcodec-dev libswresample-dev libswscale-dev libavutil-dev \
+    libnl-3-dev libnl-genl-3-dev
+# libepoxy: Pinhole (core).  gstreamer1.0-libav: H.264/AAC playback in the
+# webview's <audio>/<video>.  FFmpeg: examples/video-player.
+# libnl: examples/wifi-analyzer.  All are needed for the default build
+# (examples are ON by default).
 
 # ─── 2. Boost 1.81 ──────────────────────────────────────────────────────────
 if [ -f /usr/local/include/boost/version.hpp ]; then

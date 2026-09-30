@@ -267,6 +267,71 @@ TEST_CASE("SharedBufferPool: close rejects blocked acquire_write", "[buffer][poo
     SharedBufferRegistry::instance().clear();
 }
 
+TEST_CASE("SharedBufferPool: try_acquire_write never blocks", "[buffer][pool]") {
+    SharedBufferRegistry::instance().clear();
+    SharedBufferPool pool("try-pool", 64, 1);
+    SharedBuffer* a = pool.try_acquire_write();
+    REQUIRE(a != nullptr);
+    REQUIRE(pool.try_acquire_write() == nullptr);   // exhausted → null, no wait
+    pool.release_unpublished(*a);
+    REQUIRE(pool.try_acquire_write() == a);
+    pool.close();
+    REQUIRE_THROWS_AS(pool.try_acquire_write(), SharedBufferPoolClosed);
+    SharedBufferRegistry::instance().clear();
+}
+
+TEST_CASE("SharedBufferPool: release_unpublished returns a WRITING slot to FREE", "[buffer][pool]") {
+    SharedBufferRegistry::instance().clear();
+    SharedBufferPool pool("unpub-pool", 256, 1);
+    SharedBuffer& buf = pool.acquire_write();
+    pool.release_unpublished(buf);
+    SharedBuffer& again = pool.acquire_write();   // would spin forever if leaked
+    REQUIRE(&again == &buf);
+    SharedBufferRegistry::instance().clear();
+}
+
+TEST_CASE("SharedBufferPool: stale release_read cannot free a slot being written", "[buffer][pool]") {
+    SharedBufferRegistry::instance().clear();
+    SharedBufferPool pool("stale-pool", 256, 1);
+    SharedBuffer& buf = pool.acquire_write();     // WRITING
+    pool.release_read(buf.name());                // stale consumer release → ignored
+    pool.release_write(buf, "{}");                // WRITING → READY still works
+    pool.release_read(buf.name());                // READY → FREE
+    SharedBuffer& again = pool.acquire_write();
+    REQUIRE(&again == &buf);
+    // release_write on a slot that is not WRITING is a no-op
+    pool.release_unpublished(again);
+    pool.release_write(again, "{}");
+    SharedBuffer& third = pool.acquire_write();   // still FREE → acquirable
+    REQUIRE(&third == &buf);
+    SharedBufferRegistry::instance().clear();
+}
+
+TEST_CASE("SharedBufferPool: buffer() keeps the mapping alive past the pool", "[buffer][pool]") {
+    SharedBufferRegistry::instance().clear();
+    std::shared_ptr<SharedBuffer> keep;
+    {
+        SharedBufferPool pool("keep-pool", 64, 2);
+        keep = pool.buffer("keep-pool_1");
+        REQUIRE(keep);
+        REQUIRE(pool.buffer("nope") == nullptr);
+        std::memset(keep->data(), 0xAB, keep->size());
+    }
+    REQUIRE(keep->data()[63] == 0xAB);            // still mapped
+    keep.reset();
+    SharedBufferRegistry::instance().clear();
+}
+
+TEST_CASE("SharedBufferPool: same base name only after the old pool is gone", "[buffer][pool]") {
+    SharedBufferRegistry::instance().clear();
+    auto first = std::make_unique<SharedBufferPool>("dup-pool", 64, 2);
+    REQUIRE_THROWS_WITH(SharedBufferPool("dup-pool", 64, 2),
+                        Catch::Contains("already exists"));
+    first.reset();
+    REQUIRE_NOTHROW(SharedBufferPool("dup-pool", 64, 2));
+    SharedBufferRegistry::instance().clear();
+}
+
 TEST_CASE("SharedBufferPool: destroy cleans up registry", "[buffer][pool]") {
     SharedBufferRegistry::instance().clear();
 

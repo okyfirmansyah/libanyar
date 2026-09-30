@@ -1,4 +1,5 @@
 #include <anyar/app.h>
+#include <anyar/http_file.h>
 #include <anyar/main_thread.h>
 #include <anyar/pinhole.h>
 #include <anyar/shared_buffer.h>
@@ -24,6 +25,30 @@
 #endif
 
 namespace anyar {
+
+DistPathResolution resolve_dist_path(const std::string& dist_path) {
+    namespace fs = std::filesystem;
+    DistPathResolution res;
+    fs::path p(dist_path);
+    std::vector<fs::path> candidates;
+    if (p.is_absolute()) {
+        candidates.push_back(p);
+    } else {
+        std::error_code ec;
+        candidates.push_back(fs::absolute(p, ec));
+#ifdef __linux__
+        fs::path exe = fs::read_symlink("/proc/self/exe", ec);
+        if (!ec) candidates.push_back(exe.parent_path() / p);
+#endif
+    }
+    for (auto& c : candidates) {
+        std::string abs = c.lexically_normal().string();
+        res.tried.push_back(abs);
+        std::error_code ec;
+        if (res.path.empty() && fs::is_directory(c, ec)) res.path = abs;
+    }
+    return res;
+}
 
 // ── Platform-Specific Initialization ────────────────────────────────────────
 
@@ -316,7 +341,8 @@ void App::start_server() {
     if (!allowed_file_roots_.empty()) {
         auto roots = allowed_file_roots_;  // capture a copy
         server_->on_http_request("/__anyar__/file/<path>", "GET",
-            [roots](asyik::http_request_ptr req, asyik::http_route_args args) {
+            [roots, weak_server = std::weak_ptr<asyik::http_server<asyik::http_stream_type>>(server_)](
+                asyik::http_request_ptr req, asyik::http_route_args args) {
                 std::string rel = args[1];
                 // Reject obvious traversal attempts
                 if (rel.find("..") != std::string::npos) {
@@ -332,34 +358,8 @@ void App::start_server() {
                     if (ec || !fs::is_regular_file(canon, ec)) continue;
                     // Verify the canonical path is under the allowed root
                     if (canon.string().rfind(root, 0) != 0) continue;
-                    // Read and serve the file
-                    std::ifstream ifs(canon, std::ios::binary);
-                    if (!ifs) continue;
-                    std::string body((std::istreambuf_iterator<char>(ifs)),
-                                     std::istreambuf_iterator<char>());
-                    // Determine Content-Type from extension
-                    std::string ext = canon.extension().string();
-                    std::string ct = "application/octet-stream";
-                    if (ext == ".png") ct = "image/png";
-                    else if (ext == ".jpg" || ext == ".jpeg") ct = "image/jpeg";
-                    else if (ext == ".gif") ct = "image/gif";
-                    else if (ext == ".webp") ct = "image/webp";
-                    else if (ext == ".svg") ct = "image/svg+xml";
-                    else if (ext == ".mp4") ct = "video/mp4";
-                    else if (ext == ".webm") ct = "video/webm";
-                    else if (ext == ".mp3") ct = "audio/mpeg";
-                    else if (ext == ".wav") ct = "audio/wav";
-                    else if (ext == ".ogg") ct = "audio/ogg";
-                    else if (ext == ".pdf") ct = "application/pdf";
-                    else if (ext == ".json") ct = "application/json";
-                    else if (ext == ".txt") ct = "text/plain";
-                    else if (ext == ".html") ct = "text/html";
-                    else if (ext == ".css") ct = "text/css";
-                    else if (ext == ".js") ct = "text/javascript";
-                    req->response.body = std::move(body);
-                    req->response.headers.set("Content-Type", ct);
-                    req->response.headers.set("Cache-Control", "no-store");
-                    req->response.result(200);
+                    // Range-aware, streamed in chunks read on the worker pool.
+                    serve_file(weak_server.lock(), req, canon.string());
                     return;
                 }
                 req->response.body = "File not found or access denied";
@@ -411,21 +411,29 @@ void App::start_server() {
             }
         );
     } else {
-        // Filesystem mode: serve frontend from dist directory
-        std::string dist_abs = std::filesystem::absolute(config_.dist_path).string();
-        if (std::filesystem::exists(dist_abs)) {
+        // Filesystem mode: serve frontend from dist directory (cwd first,
+        // then next to the executable — see resolve_dist_path()).
+        auto dist = resolve_dist_path(config_.dist_path);
+        if (!dist.path.empty()) {
             asyik::static_file_config cfg;
             cfg.cache_control = "no-cache";
             cfg.index_file    = "index.html";
-            server_->serve_static("/", dist_abs, cfg);
+            server_->serve_static("/", dist.path, cfg);
         } else {
+            std::string tried;
+            for (auto& t : dist.tried) {
+                std::cerr << "[LibAnyar] No frontend at " << t << std::endl;
+                tried += "<li><code>" + t + "</code></li>";
+            }
             server_->on_http_request("/", "GET",
-                [](asyik::http_request_ptr req, asyik::http_route_args args) {
+                [tried](asyik::http_request_ptr req, asyik::http_route_args args) {
                     req->response.body =
                         "<!DOCTYPE html><html><head><title>LibAnyar</title></head>"
                         "<body style='font-family:system-ui;padding:40px'>"
                         "<h1>LibAnyar</h1>"
-                        "<p>No frontend build found. Place your built frontend in <code>./dist</code>.</p>"
+                        "<p>No frontend build found. Looked in:</p><ul>" + tried + "</ul>"
+                        "<p>Build your frontend into one of these, or embed it with "
+                        "<code>anyar build --embed</code>.</p>"
                         "</body></html>";
                     req->response.headers.set("Content-Type", "text/html");
                     req->response.result(200);

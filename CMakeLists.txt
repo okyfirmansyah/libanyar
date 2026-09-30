@@ -10,6 +10,13 @@ option(ANYAR_ENABLE_SOCI    "Enable SOCI database support (SQLite + PostgreSQL)"
 option(ANYAR_BUILD_EXAMPLES "Build example applications" ON)
 option(ANYAR_BUILD_CLI      "Build anyar CLI tool" ON)
 option(ANYAR_BUILD_TESTS    "Build tests" OFF)
+option(ANYAR_BUILD_BENCHMARKS "Build performance benchmark harness" OFF)
+option(ANYAR_ASAN           "Build with AddressSanitizer (debug lifetime bugs)" OFF)
+
+if(ANYAR_ASAN)
+    add_compile_options(-fsanitize=address -fno-omit-frame-pointer)
+    add_link_options(-fsanitize=address)
+endif()
 option(ANYAR_EMBED_FRONTEND "Embed frontend assets into binaries (requires built frontend)" OFF)
 
 # Make cmake/ modules available (CMakeRC, AnyarEmbed)
@@ -40,4 +47,9 @@ endif()
 if(ANYAR_BUILD_TESTS)
     enable_testing()
     add_subdirectory(tests)
+endif()
+
+# ── Benchmarks ───────────────────────────────────────────────────────────────
+if(ANYAR_BUILD_BENCHMARKS)
+    add_subdirectory(benchmarks)
 endif()

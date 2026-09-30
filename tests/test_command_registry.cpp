@@ -4,6 +4,12 @@
 #include <catch2/catch.hpp>
 #include <anyar/command_registry.h>
 
+#include <libasyik/service.hpp>
+#include <boost/fiber/operations.hpp>
+
+#include <chrono>
+#include <thread>
+
 using namespace anyar;
 
 TEST_CASE("CommandRegistry: register and dispatch sync handler", "[command_registry]") {
@@ -115,4 +121,75 @@ TEST_CASE("CommandRegistry: dispatch with empty args", "[command_registry]") {
 
     REQUIRE(resp.error.empty());
     REQUIRE(resp.data["pong"] == true);
+}
+
+TEST_CASE("CommandRegistry: async handler may reply later from another thread", "[command_registry]") {
+    CommandRegistry reg;
+    std::thread worker;
+
+    reg.add_async("later", [&](const json& args, CommandReply reply) {
+        int n = args.value("n", 0);
+        worker = std::thread([reply, n] {
+            std::this_thread::sleep_for(std::chrono::milliseconds(30));
+            reply({{"double", n * 2}}, "");
+        });
+    });
+
+    IpcRequest req{"7", "later", {{"n", 21}}};
+    auto resp = reg.dispatch(req);   // waits for the worker's reply
+    worker.join();
+
+    REQUIRE(resp.error.empty());
+    REQUIRE(resp.data["double"] == 42);
+}
+
+TEST_CASE("CommandRegistry: async reply from another fiber does not block the service", "[command_registry]") {
+    CommandRegistry reg;
+    auto svc = asyik::make_service();
+
+    reg.add_async("fiber-later", [&](const json&, CommandReply reply) {
+        svc->execute([reply] {
+            boost::this_fiber::sleep_for(std::chrono::milliseconds(20));
+            reply("done", "");
+        });
+    });
+
+    IpcResponse resp;
+    int ticks = 0;
+    svc->execute([&] {
+        bool finished = false, ticker_exited = false;
+        svc->execute([&] {   // proves the dispatching fiber only suspends itself
+            while (!finished) { ++ticks; boost::this_fiber::sleep_for(std::chrono::milliseconds(2)); }
+            ticker_exited = true;
+        });
+        resp = reg.dispatch({"8", "fiber-later", json::object()});
+        finished = true;
+        // Fibers must be gone before svc->stop() (libasyik rule).
+        while (!ticker_exited) boost::this_fiber::sleep_for(std::chrono::milliseconds(1));
+        svc->stop();
+    });
+    svc->run();
+
+    REQUIRE(resp.error.empty());
+    REQUIRE(resp.data == "done");
+    REQUIRE(ticks >= 3);
+}
+
+TEST_CASE("CommandRegistry: async error reply and duplicate replies", "[command_registry]") {
+    CommandRegistry reg;
+    reg.add_async("twice", [](const json&, CommandReply reply) {
+        reply(nullptr, "first wins");
+        reply({{"ignored", true}}, "");
+    });
+    auto resp = reg.dispatch({"9", "twice", json::object()});
+    REQUIRE(resp.error == "first wins");
+}
+
+TEST_CASE("CommandRegistry: async handler that throws reports the exception", "[command_registry]") {
+    CommandRegistry reg;
+    reg.add_async("throws", [](const json&, CommandReply) {
+        throw std::runtime_error("kaboom");
+    });
+    auto resp = reg.dispatch({"10", "throws", json::object()});
+    REQUIRE(resp.error.find("kaboom") != std::string::npos);
 }

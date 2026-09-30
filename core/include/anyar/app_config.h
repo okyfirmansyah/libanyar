@@ -2,6 +2,7 @@
 
 #include <functional>
 #include <string>
+#include <vector>
 
 /// @file app_config.h
 /// @brief Application and window configuration structures for LibAnyar.
@@ -119,8 +120,34 @@ struct AppConfig {
 
     /// @brief Path to the frontend build output directory.
     /// Served as static files by the HTTP server. Typically `"./dist"`.
+    /// A relative path is looked up in the current working directory first,
+    /// then next to the executable (see resolve_dist_path()), so apps work
+    /// no matter where they are launched from.
     std::string dist_path;
 };
+
+/// @brief Result of resolving AppConfig::dist_path.
+struct DistPathResolution {
+    /// Absolute directory to serve, or empty if no candidate exists.
+    std::string path;
+    /// Every absolute candidate checked, in order (for error messages).
+    std::vector<std::string> tried;
+};
+
+/// @brief Resolve a frontend dist directory.
+///
+/// Absolute paths are used as-is. Relative paths are tried against the
+/// current working directory, then against the directory of the running
+/// executable (Linux: `/proc/self/exe`).
+///
+/// @param dist_path  Configured path, e.g. `"./dist"`.
+/// @returns The first existing directory plus the list of candidates tried.
+///
+/// @code
+/// auto r = anyar::resolve_dist_path("./dist");
+/// if (r.path.empty()) { /* nothing found; r.tried lists where we looked */ }
+/// @endcode
+DistPathResolution resolve_dist_path(const std::string& dist_path);
 
 /// @brief Callback type for serving embedded frontend resources.
 ///
