@@ -39,7 +39,7 @@
 
   // Chart plot-area geometry (from BitrateChart) used to align waveform
   let chartPlotLeft = $state(0);
-  let chartPlotWidth = $state(0);
+  let chartPlotRight = $state(0);   // gap between plot area and chart's right edge
 
   // Bottom panel auto-hide during playback
   let playing = $state(false);       // bound from VideoPlayer
@@ -108,10 +108,11 @@
     };
   });
 
-  async function openFile() {
+  /** @param {string} [pathOverride]  skip the dialog (automated UI test) */
+  async function openFile(pathOverride) {
     try {
       errorMsg = '';
-      const paths = await invoke('dialog:open', {
+      const paths = typeof pathOverride === 'string' ? [pathOverride] : await invoke('dialog:open', {
         title: 'Select Video File',
         filters: [
           { name: 'Video Files', extensions: ['mp4', 'webm', 'mkv', 'avi', 'mov', 'ogg', 'flv', 'wmv'] }
@@ -120,7 +121,10 @@
       if (!paths || paths.length === 0) return;
 
       loading = true;
+      playing = false;          // the new file starts paused
+      seekTarget = null;        // don't replay the previous file's seek
       videoInfo = null;
+      videoUrl = '';            // unmounts the old player (stops its audio + listeners)
       bitrateData = null;
       waveformData = null;
       currentTime = 0;
@@ -143,6 +147,15 @@
     } finally {
       loading = false;
     }
+  }
+
+  function handlePlayerError(message) {
+    errorMsg = message;
+  }
+
+  // Automated UI test hook (only when main.cpp injected a test script).
+  if (window.__VIDEO_PLAYER_TEST__) {
+    window.__videoPlayerTest = { open: (path) => openFile(path) };
   }
 
   function handleSeek(time) {
@@ -218,16 +231,20 @@
     {#if videoUrl}
       <!-- Video: fills the entire content area -->
       <div class="flex-1 min-h-0">
-        <VideoPlayer
-          audioSrc={videoUrl}
-          {videoInfo}
-          {renderMode}
-          bind:currentTime
-          bind:duration
-          bind:playing
-          {seekTarget}
-          ontoggleplay={(fn) => vpTogglePlay = fn}
-        />
+        <!-- {#key}: a fresh player per file — no state leaks between files -->
+        {#key videoUrl}
+          <VideoPlayer
+            audioSrc={videoUrl}
+            {videoInfo}
+            {renderMode}
+            bind:currentTime
+            bind:duration
+            bind:playing
+            {seekTarget}
+            ontoggleplay={(fn) => vpTogglePlay = fn}
+            onerror={handlePlayerError}
+          />
+        {/key}
       </div>
 
       <!-- Transport controls: always visible at bottom, highest z-index -->
@@ -249,7 +266,8 @@
 
         <div class="flex items-center gap-3 ml-auto">
           <span class="text-xs" style="color: rgba(255,255,255,0.3);">
-            {videoInfo?.width}×{videoInfo?.height} SharedBuffer WebGL{gpuRenderer ? ` · ${gpuRenderer}` : ''}
+            {videoInfo?.width}×{videoInfo?.height} ·
+            {renderMode === 'pinhole' ? 'Pinhole (native GL)' : `SharedBuffer WebGL${gpuRenderer ? ` · ${gpuRenderer}` : ''}`}
           </span>
           <span style="width: 1px; height: 12px; background: rgba(255,255,255,0.15);"></span>
           <img src="/assets/text.png" alt="LibAnyar" class="h-[15px]" style="opacity: 0.6;" />
@@ -275,6 +293,7 @@
               {currentTime}
               onseek={handleSeek}
               padLeft={showBitrate && bitrateData ? chartPlotLeft : 0}
+              padRight={showBitrate && bitrateData ? chartPlotRight : 0}
             />
           </section>
         {/if}
@@ -315,7 +334,7 @@
             {currentTime}
             {duration}
             onseek={handleSeek}
-            onlayout={(l, w) => { chartPlotLeft = l; chartPlotWidth = w; }}
+            onlayout={(l, w, total) => { chartPlotLeft = l; chartPlotRight = Math.max(0, total - l - w); }}
           />
         {/if}
       </div>

@@ -13,6 +13,11 @@
    * - `onlayout` (which writes parent $state) is always called OUTSIDE
    *   any $effect scope (via queueMicrotask or ResizeObserver callback)
    *   to prevent effect_update_depth_exceeded.
+   *
+   * Coordinates: uPlot's posToVal()/valToPos() work in CSS px relative to
+   * the PLOT AREA (`chart.over`), not the chart root — the y-axis gutter
+   * sits to the left of it.  The x scale is pinned to [0, duration] so the
+   * axis, the cursor and click-to-seek all share one mapping.
    */
   import uPlot from 'uplot';
   import 'uplot/dist/uPlot.min.css';
@@ -36,6 +41,7 @@
   let chart = null;
   let plotLeft = 0;
   let plotWidth = 0;
+  let totalWidth = 0;
   let resizeObs = null;
 
   // Bumped after geometry is (re-)computed so the cursor $effect re-runs
@@ -62,8 +68,9 @@
     const bbox = chart.bbox;
     plotLeft = bbox.left / devicePixelRatio;
     plotWidth = bbox.width / devicePixelRatio;
+    totalWidth = chart.width;
     geoSeq++;                       // nudge cursor $effect
-    onlayout?.(plotLeft, plotWidth); // safe — not inside an $effect
+    onlayout?.(plotLeft, plotWidth, totalWidth); // safe — not inside an $effect
   }
 
   // ── Create / recreate chart when data props change ─────────────────
@@ -93,7 +100,9 @@
       },
       legend: { show: false },
       scales: {
-        x: { time: false },
+        // Fixed to the media timeline (not the data extent, which ends
+        // half a bucket early and would skew every position).
+        x: { time: false, range: (u, min, max) => [0, duration > 0 ? duration : max] },
         y: { auto: true, range: (u, min, max) => [0, max * 1.1] },
       },
       axes: [
@@ -141,10 +150,11 @@
     const bbox = c.bbox;
     plotLeft = bbox.left / devicePixelRatio;
     plotWidth = bbox.width / devicePixelRatio;
+    totalWidth = c.width;
 
     // Notify parent via microtask (outside this $effect's tracking scope)
     queueMicrotask(() => {
-      onlayout?.(plotLeft, plotWidth);
+      onlayout?.(plotLeft, plotWidth, totalWidth);
       geoSeq++;   // trigger cursor $effect
     });
 
@@ -158,35 +168,41 @@
     resizeObs.observe(chartEl);
   });
 
+  // ── Re-pin the x scale when the duration becomes known / changes ───
+  $effect(() => {
+    const d = duration;
+    const _ = geoSeq;
+    if (chart && d > 0) chart.setScale('x', { min: 0, max: d });
+  });
+
   // ── Position cursor overlay ────────────────────────────────────────
-  // Uses simple linear interpolation instead of chart.valToPos() so
-  // there is zero dependency on the chart object (plain let).
+  // Same mapping as the axis: valToPos() is plot-relative, so offset by
+  // the plot's left edge within the chart.
   // Tracked deps: currentTime, cursorEl, geoSeq, duration.
   $effect(() => {
     const t = currentTime;
     const el = cursorEl;
     const _ = geoSeq;          // re-run when chart geometry changes
 
-    if (!el || plotWidth <= 0 || duration <= 0) {
+    if (!el || !chart || plotWidth <= 0 || duration <= 0) {
       if (el) el.style.opacity = '0';
       return;
     }
 
-    const frac = Math.max(0, Math.min(t / duration, 1));
-    const x = plotLeft + frac * plotWidth;
+    const clamped = Math.max(0, Math.min(t, duration));
+    const x = plotLeft + chart.valToPos(clamped, 'x');
     el.style.transform = `translateX(${x}px)`;
     el.style.opacity = '1';
   });
 
-  // Click to seek (uses chart.posToVal for accuracy)
+  // Click to seek — measure from the plot area, which is what posToVal expects.
   function handleClick(e) {
-    if (!chart || !wrapEl || duration <= 0 || !onseek) return;
-    try {
-      const rect = chartEl.getBoundingClientRect();
-      const x = e.clientX - rect.left;
-      const time = chart.posToVal(x, 'x');
-      if (time >= 0 && time <= duration) onseek(time);
-    } catch (_) {}
+    if (!chart || duration <= 0 || !onseek) return;
+    const over = chart.over.getBoundingClientRect();
+    const x = e.clientX - over.left;
+    if (x < 0 || x > over.width) return;   // click on the axis gutter
+    const time = chart.posToVal(x, 'x');
+    onseek(Math.max(0, Math.min(time, duration)));
   }
 
   onDestroy(() => {

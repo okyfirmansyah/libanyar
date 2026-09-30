@@ -3,38 +3,44 @@
 // VideoPlugin — FFmpeg-based video analysis, HTTP streaming, and raw frame decoding
 //
 // Commands:
-//   video:open      { path }         → { url, duration, width, height, videoCodec, audioCodec, ... }
-//   video:bitrate   { step? }        → { timestamps[], videoBps[], audioBps[] }
-//   video:waveform  { samples? }     → { peaks[] }
-//   video:play      {}               → { ok }
-//   video:pause     {}               → { ok }
-//   video:seek      { time }         → { ok }
-//   video:sync      { time }         → { ok }
-//   video:close     {}               → {}
+//   video:open         { path }         → { url, duration, width, height, videoCodec, audioCodec, ... }
+//                                           (stops any previous playback, starts a paused session
+//                                            and shows the first frame)
+//   video:bitrate      { step? }        → { timestamps[], videoBps[], audioBps[] }
+//   video:waveform     { samples? }     → { peaks[] }
+//   video:play         {}               → { ok }
+//   video:pause        {}               → { ok }
+//   video:seek         { time, id }     → { ok }   (acknowledged by `video:seeked`)
+//   video:sync         { time }         → { ok }   (audio master clock from the frontend)
+//   video:pool-release { name }         → { ok }   (WebGL mode)
+//   video:close        {}               → { closed }
+//   video:get-mode     {}               → { mode: "pinhole" | "webgl" }
 //
 // Events:
-//   buffer:ready    { name, pool, url, size, metadata }  — per-frame notification
-//   video:ended     {}                                   — end of stream
-//   video:ready     { width, height, fps }               — first frame decoded
+//   video:ready      { width, height, fps, format }      — first frame decoded
+//   video:seeked     { id, time, pts }                   — seek done, preview frame shown
+//   video:frame-pts  { pts }                             — preview frame shown (pinhole mode)
+//   buffer:ready     { name, pool, url, size, metadata } — per-frame (WebGL mode)
+//   video:ended      {}                                  — end of stream (video-only files)
+//   video:error      { message }
 //
-// Shared Memory:
-//   Pool "video-frames" (3 buffers) served via anyar-shm:// URI scheme
+// Threading: every command and the decode loop run as fibers on the service
+// thread; all FFmpeg work runs on the worker pool via anyar::run_blocking(),
+// so IPC stays responsive while decoding/analysing.
 
+#include <anyar/frame_mailbox.h>
 #include <anyar/plugin.h>
-#include <anyar/shared_buffer.h>
+#include <anyar/task.h>
 
+#include <boost/fiber/future.hpp>
 #include <boost/fiber/mutex.hpp>
-#include <boost/fiber/condition_variable.hpp>
-#include <mutex>
-#include <string>
+
 #include <memory>
+#include <optional>
+#include <string>
+#include <vector>
 
-// Forward declarations — avoid leaking FFmpeg / libasyik headers into consumers
-struct AVFormatContext;
-struct AVCodecContext;
-struct SwsContext;
-
-namespace anyar { class EventBus; class Pinhole; }
+namespace anyar { class EventBus; class Pinhole; class SharedBufferPool; }
 
 namespace videoplayer {
 
@@ -51,9 +57,27 @@ struct ProbeResult {
     int          channels   = 0;
 };
 
+/// Immutable description of the currently opened file.  Shared with the
+/// decode session and analysis jobs so they never read mutable plugin state.
+struct MediaInfo {
+    std::string  path;
+    ProbeResult  probe;
+    bool has_video() const { return !probe.videoCodec.empty(); }
+    bool has_audio() const { return !probe.audioCodec.empty(); }
+};
+
+/// Audio-only copy of the opened file for the frontend's <audio> element.
+/// Prepared in the background on open; the temp file is deleted when the
+/// last holder (plugin or an in-flight HTTP response) releases it.
+struct AudioStream {
+    boost::fibers::shared_future<std::string> ready;   // path to serve ("" = use original)
+    std::string temp_path;                            // owned temp file, if any
+    ~AudioStream();
+};
+
 /// Per-file bitrate analysis result
 struct BitrateData {
-    std::vector<double>  timestamps;   // seconds
+    std::vector<double>  timestamps;   // bucket centres, seconds
     std::vector<double>  videoBps;     // bits per second per bucket
     std::vector<double>  audioBps;
 };
@@ -64,92 +88,70 @@ struct WaveformData {
 };
 
 /// Renderer selected at startup.  WebGL routes raw frames to the JS canvas
-/// via the SharedBufferPool + buffer:ready event; Pinhole routes them to the
+/// via a SharedBufferPool + buffer:ready event; Pinhole routes them to the
 /// native GtkGLArea overlay (no JS in the hot path).
 enum class RenderMode { WebGL, Pinhole };
 
-/// Shared state for a frame streaming WebSocket session
-struct FrameStreamState {
-    boost::fibers::mutex mtx;
-    bool playing      = false;
-    bool seek_pending  = false;
-    double seek_time   = 0.0;
-    bool stop          = false;
+/// Control block for one playback session.  Written by command fibers, read
+/// by the decode fiber — both on the service thread, so plain fields suffice.
+struct PlaybackControl {
+    uint64_t session       = 0;
+    bool     playing       = false;
+    double   pending_seek  = -1.0;   // next seek target (–1 = none)
+    uint64_t seek_id       = 0;      // echoed back in video:seeked
+    double   audio_time    = -1.0;   // audio clock from frontend (–1 = unknown)
+    std::unique_ptr<anyar::SharedBufferPool> pool;   // WebGL mode only
+    ~PlaybackControl();
 };
 
 class VideoPlugin : public anyar::IAnyarPlugin {
 public:
-    /// @param mode  Default render mode reported via `video:get-mode`.
-    ///              Pinhole mode also requires set_pinhole() to be called
-    ///              before the first `video:play` command.
+    /// @param mode  Render mode reported via `video:get-mode`.  Pinhole mode
+    ///              also requires set_pinhole() before the first frame.
     explicit VideoPlugin(RenderMode mode = RenderMode::Pinhole) : mode_(mode) {}
 
     std::string name() const override { return "video"; }
     void initialize(anyar::PluginContext& ctx) override;
     void shutdown() override;
 
-    /// Bind a Pinhole to drive in pinhole mode.  Must be called from main
-    /// before `video:play`; the plugin installs an `on_render` callback
-    /// that draws whatever frame the decode loop most recently published.
-    /// No-op in WebGL mode.
+    /// Bind a Pinhole to draw into (main thread, before app.run()).  Installs
+    /// an on_render callback that draws the latest frame from the mailbox.
     void set_pinhole(std::shared_ptr<anyar::Pinhole> pin);
 
 private:
-    // Currently opened file state (single-file model for simplicity)
-    boost::fibers::mutex   mtx_;
-    AVFormatContext*        fmt_ctx_     = nullptr;
-    std::string            file_path_;
-    ProbeResult            probe_;
-    int                    video_stream_ = -1;
-    int                    audio_stream_ = -1;
+    // Serialises open / close / shutdown (session start + stop).
+    boost::fibers::mutex                    mtx_;
 
-    // Cached analysis (computed once on open or first request)
-    bool                   bitrate_ready_   = false;
-    BitrateData            bitrate_;
-    bool                   waveform_ready_  = false;
-    WaveformData           waveform_;
+    std::shared_ptr<const MediaInfo>        media_;   // null = no file open
+    std::shared_ptr<AudioStream>            audio_;   // what /video/stream serves
 
-    // Service pointer for launching async fibres after initialization
-    asyik::service_ptr service_;
+    // Analysis caches, valid for the MediaInfo they were computed from.
+    std::shared_ptr<const MediaInfo>        bitrate_for_;
+    BitrateData                             bitrate_;
+    std::shared_ptr<const MediaInfo>        waveform_for_;
+    WaveformData                            waveform_;
 
-    // Event bus for emitting events to frontend
-    anyar::EventBus* events_ = nullptr;
+    asyik::service_ptr                      service_;
+    anyar::EventBus*                        events_ = nullptr;
 
-    // ── Frame-streaming state (decode loop ↔ control commands) ───────────
-    bool   streaming_    = false;   // decode-loop fibre alive
-    bool   playing_      = false;   // actively pushing frames
-    double pending_seek_ = -1.0;    // next seek target (–1 = none)
-    double audio_time_   = -1.0;    // audio clock from frontend (–1 = no sync)
+    RenderMode                              mode_ = RenderMode::Pinhole;
+    std::shared_ptr<anyar::Pinhole>         pinhole_;
+    // Decoded frames; the pinhole's on_render reads latest() from it.
+    std::shared_ptr<anyar::FrameMailbox>    mailbox_ = std::make_shared<anyar::FrameMailbox>(12);
 
-    // SharedBufferPool for zero-copy frame delivery
-    std::unique_ptr<anyar::SharedBufferPool> frame_pool_;
+    anyar::BackgroundTask                   decode_task_;
+    std::shared_ptr<PlaybackControl>        playback_;
+    uint64_t                                session_counter_ = 0;
 
-    // ── Pinhole-mode state ───────────────────────────────────────────────
-    RenderMode                       mode_       = RenderMode::Pinhole;
-    std::shared_ptr<anyar::Pinhole>  pinhole_;
-
-    // Latest frame published to the pinhole.  Owned by `frame_pool_`;
-    // we hold the WRITING-side reference until the next frame swaps in,
-    // at which point the previous slot is recycled (release_write+release_read).
-    // Guarded by `latest_mu_` (std::mutex — locked from both fiber thread
-    // and GTK main thread, neither of which may use boost::fibers::mutex).
-    std::mutex                       latest_mu_;
-    anyar::SharedBuffer*             latest_buf_ = nullptr;
-    int                              latest_w_   = 0;
-    int                              latest_h_   = 0;
-    std::string                      latest_fmt_;  // "yuv420" / "nv12" / "rgba" / ...
-
-    // ── Internal helpers ────────────────────────────────────────────────────
-    void open_file(const std::string& path);
-    void close_file();
-    void compute_bitrate(double step);
-    void compute_waveform(int num_samples);
-    void register_stream_route();
-    void stop_streaming();
-    void run_decode_loop();
-    /// Drop the currently-held latest frame back into the pool (FREE).
-    /// Caller must NOT hold latest_mu_.
-    void release_latest_frame();
+    void start_playback(std::shared_ptr<const MediaInfo> media);
+    void stop_playback();
+    std::shared_ptr<AudioStream> prepare_audio_stream(std::shared_ptr<const MediaInfo> media);
+    void run_decode_loop(anyar::StopToken stop,
+                         std::shared_ptr<const MediaInfo> media,
+                         std::shared_ptr<PlaybackControl> pb);
+    void present_frame(PlaybackControl& pb, const std::shared_ptr<anyar::Frame>& frame,
+                       bool preview);
+    void emit(const std::string& event, const nlohmann::json& payload);
 };
 
 } // namespace videoplayer

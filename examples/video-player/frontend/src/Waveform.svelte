@@ -7,7 +7,7 @@
   import WaveSurfer from 'wavesurfer.js';
   import { onDestroy } from 'svelte';
 
-  let { peaks = [], duration = 0, currentTime = 0, onseek, padLeft = 0 } = $props();
+  let { peaks = [], duration = 0, currentTime = 0, onseek, padLeft = 0, padRight = 0 } = $props();
 
   let wrapEl = $state(null);
   let wsContainer = $state(null);
@@ -55,11 +55,12 @@
 
   // Click-to-seek handler
   function handleClick(e) {
-    if (!wrapEl || duration <= 0 || !onseek) return;
-    const rect = wrapEl.getBoundingClientRect();
-    // Offset by padLeft so clicks map to the correct timeline position
-    const clickX = e.clientX - rect.left - padLeft;
-    const drawWidth = rect.width - padLeft;
+    if (!wrapEl || !wsContainer || duration <= 0 || !onseek) return;
+    // Map over the drawn area only (the paddings mirror the bitrate
+    // chart's plot area so both timelines line up pixel-for-pixel).
+    const inner = wsContainer.getBoundingClientRect();
+    const clickX = e.clientX - inner.left;
+    const drawWidth = inner.width;
     if (drawWidth <= 0) return;
     const progress = clickX / drawWidth;
     const time = Math.max(0, Math.min(progress * duration, duration));
@@ -78,8 +79,9 @@
 <!-- svelte-ignore a11y_no_static_element_interactions -->
 <div
   bind:this={wrapEl}
+  data-testid="waveform"
   class="rounded-lg cursor-pointer overflow-hidden relative"
-  style="background: var(--surface); border: 1px solid var(--border); padding: 6px 0; padding-left: {padLeft}px;"
+  style="background: var(--surface); border: 1px solid var(--border); padding: 6px 0; padding-left: {padLeft}px; padding-right: {padRight}px;"
   onclick={handleClick}
 >
   <div bind:this={wsContainer}></div>
