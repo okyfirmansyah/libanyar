@@ -15,27 +15,78 @@ int cmd_init(int argc, char* argv[]);
 int cmd_dev(int argc, char* argv[]);
 int cmd_build(int argc, char* argv[]);
 
-// ── Packaging (Linux) ───────────────────────────────────────────────────────
+// ── Packaging ───────────────────────────────────────────────────────────────
 
 /// Package a built application into the given format.
-/// @param format   "deb", "appimage", or "all"
+/// Linux: "deb", "appimage", or "all".  Windows: "zip" (or "all").
+/// @param format   Package format (see above)
 /// @param project_name  CMake project name (binary name)
 /// @param project_dir   Root of the application project
 /// @param build_dir     Build directory containing the binary
 /// @param version       Semantic version string (e.g. "0.1.0")
-int package_linux(const std::string& format,
-                  const std::string& project_name,
-                  const fs::path& project_dir,
-                  const fs::path& build_dir,
-                  const std::string& version);
+/// @param build_type    CMake configuration (multi-config generators put the
+///                      binary in build_dir/<build_type>/)
+int package_app(const std::string& format,
+                const std::string& project_name,
+                const fs::path& project_dir,
+                const fs::path& build_dir,
+                const std::string& version,
+                const std::string& build_type);
 
-// ── Utility functions ───────────────────────────────────────────────────────
+// ── Processes (process_posix.cpp / process_win32.cpp) ───────────────────────
 
-/// Run a shell command, return exit code.  Streams stdout/stderr to terminal.
+/// A background child started by run_bg().  On Windows the child and all its
+/// descendants live in a job object, so kill_child() stops the whole tree
+/// (cmd → npm → node).
+struct ChildProcess {
+    long long pid = 0;        ///< OS process id (0 = not running)
+    void* handle = nullptr;   ///< Windows process HANDLE
+    void* job = nullptr;      ///< Windows job object HANDLE
+    bool valid() const { return pid != 0; }
+};
+
+/// Run a shell command (sh -c / cmd.exe /c), return its exit code.
+/// Streams stdout/stderr to the terminal.
 int run(const std::string& cmd, const fs::path& cwd = "");
 
-/// Run a shell command in the background, return PID.
-pid_t run_bg(const std::string& cmd, const fs::path& cwd = "");
+/// Start a shell command in the background.  Returns an invalid handle on
+/// failure.
+ChildProcess run_bg(const std::string& cmd, const fs::path& cwd = "");
+
+/// Block until @p child exits; returns its exit code (-1 if unknown).
+int wait_child(ChildProcess& child);
+
+/// Terminate @p child (Windows: its whole process tree) and reap it.
+void kill_child(ChildProcess& child);
+
+/// Call @p fn on Ctrl+C / SIGINT / SIGTERM (then the process exits).
+void on_interrupt(void (*fn)());
+
+/// Prepare the terminal (Windows: UTF-8 output + ANSI colour sequences).
+void init_console();
+
+/// Absolute path of the running `anyar` executable, or empty.
+fs::path executable_path();
+
+/// Quote @p s as one shell argument for run()/run_bg() (sh or cmd.exe).
+std::string shell_quote(const std::string& s);
+
+/// Check if a command is available on PATH
+bool has_command(const std::string& cmd);
+
+// ── Build helpers (util.cpp) ────────────────────────────────────────────────
+
+/// Read `project(<name> ...)` from a CMakeLists.txt; "app" if not found.
+std::string read_project_name(const fs::path& cmakelists);
+
+/// Extra `cmake` configure arguments for this platform on a FRESH build dir
+/// (Windows: vcpkg toolchain + LibAsyik prefix when found).  Leading space.
+std::string platform_configure_args(const fs::path& build_dir);
+
+/// Locate the built app binary (single- or multi-config layout).  Empty if
+/// not found.
+fs::path find_app_binary(const fs::path& build_dir, const std::string& name,
+                         const std::string& build_type);
 
 /// Prompt the user for text input (with a default value)
 std::string prompt(const std::string& question, const std::string& default_val = "");
@@ -49,9 +100,6 @@ void print_success(const std::string& text);
 void print_error(const std::string& text);
 void print_info(const std::string& text);
 void print_step(const std::string& text);
-
-/// Check if a command is available on PATH
-bool has_command(const std::string& cmd);
 
 /// Find libanyar root by searching upward for ARCHITECTURE.md
 fs::path find_libanyar_root(const fs::path& start = fs::current_path());

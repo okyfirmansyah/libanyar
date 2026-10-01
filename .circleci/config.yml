@@ -168,7 +168,7 @@ jobs:
               -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE} \
               -DANYAR_BUILD_TESTS=ON \
               -DANYAR_BUILD_EXAMPLES=OFF \
-              -DANYAR_BUILD_CLI=OFF
+              -DANYAR_BUILD_CLI=ON
       - run:
           name: "C++: Build"
           command: |

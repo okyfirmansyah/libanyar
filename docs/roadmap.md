@@ -1358,7 +1358,7 @@ If any of these are needed, use `@libanyar/api/canvas` (Phase 4f path) instead.
 - [x] Test on Windows 11 — 12/12 ctest incl. `window_close` + `native_ipc` E2E through WebView2 (2026-09-30); Windows 10 untested
 - [ ] Bundle WebView2 bootstrapper for systems without Edge
 - [x] UTF-8 paths in `fs:*` / `resolve_dist_path` / `allow_file_access` / `serve_file` — `<anyar/path.h>`; file routes percent-decode + component-wise root check (2026-09-30)
-- [ ] Port the `anyar` CLI (`dev`: `CreateProcess` + job objects; `build`; `package` → 7.4)
+- [x] Port the `anyar` CLI — `process_win32.cpp` (`CreateProcess` via cmd.exe + kill-on-close job objects, Ctrl+C), `cmake --build --config`, auto vcpkg/LibAsyik configure args; init/build/dev verified on Windows 11 (2026-10-01)
 - [x] Port examples: key-storage (FindSQLite3, UTF-8 paths, no GCC `?:`) and video-player (vcpkg FFmpeg, FFmpeg 5.1+ channel-layout API, webgl default) — smoke-tested in WebView2 (2026-09-30)
 - [ ] Port wifi-analyzer (needs a WLAN API backend instead of libnl)
 - [ ] Pinhole-less video on Windows: canvas fallback in `pinhole_stub.cpp`, or the DComp port
@@ -1391,6 +1391,7 @@ If any of these are needed, use `@libanyar/api/canvas` (Phase 4f path) instead.
 - [ ] Artifact publishing
 
 ### 7.4 Cross-Platform Packaging
+- [x] Portable zip (Windows) — `anyar build --package zip` (exe + DLLs + dist + README) (2026-10-01)
 - [ ] MSI/NSIS (Windows), DMG (macOS) — extends Phase 5 Linux packaging
 
 ### Phase 7 Deliverable

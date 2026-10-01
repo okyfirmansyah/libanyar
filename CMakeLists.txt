@@ -45,19 +45,18 @@ if(ANYAR_BUILD_EXAMPLES)
     endif()
 endif()
 
+# Enable CTest before any subdirectory registers tests (cli/ has one).
+if(ANYAR_BUILD_TESTS)
+    enable_testing()
+endif()
+
 # ── CLI Tool ─────────────────────────────────────────────────────────────────
 if(ANYAR_BUILD_CLI)
-    if(WIN32)
-        # cli/ still uses fork/exec, popen, /proc and dpkg — not ported yet.
-        message(STATUS "anyar CLI is not yet ported to Windows — skipping")
-    else()
-        add_subdirectory(cli)
-    endif()
+    add_subdirectory(cli)
 endif()
 
 # ── Tests ────────────────────────────────────────────────────────────────────
 if(ANYAR_BUILD_TESTS)
-    enable_testing()
     add_subdirectory(tests)
 endif()
 

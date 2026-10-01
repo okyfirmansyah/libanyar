@@ -23,7 +23,7 @@ C++17 (GCC 11+/Clang 10+/MSVC 2019+), CMake ≥ 3.16. Deps: LibAsyik 1.8.1 (pinn
 - Windows: `scripts\setup-windows.ps1` (vcpkg deps + LibAsyik → `build-deps\libasyik`), then `cmake -B build-win -G "Visual Studio 17 2022" -A x64 -DCMAKE_TOOLCHAIN_FILE=<vcpkg>\scripts\buildsystems\vcpkg.cmake -DCMAKE_PREFIX_PATH=build-deps\libasyik -DANYAR_BUILD_TESTS=ON`, `cmake --build build-win --config Release`, `ctest --test-dir build-win -C Release`
 - JS: `cd js-bridge && npm i && npm run build && npm test && npm run typecheck`
 - Run: `./run.sh examples/hello-world/hello_world` (clears snap GTK env)
-- CLI: `anyar init|dev|build [--embed] [--package deb|appimage|all]`
+- CLI: `anyar init|dev|build [--embed] [--package deb|appimage|zip|all]` (Linux + Windows; zip on Windows)
 
 ## Repo Map
 `core/` C++ lib · `js-bridge/` `@libanyar/api` · `cli/` `anyar` · `tests/` Catch2+WebGL · `examples/` (hello-world, key-storage, video-player, wifi-analyzer, pinhole-hello) · `benchmarks/` perf harness · `docs/` ADRs+roadmap.

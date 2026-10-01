@@ -19,7 +19,8 @@ static void print_build_usage() {
     --no-backend      Skip C++ backend build
     --clean           Clean build directory before building
     --embed           Embed frontend into binary (single-file deployment)
-    --package FORMAT  Package after build (deb, appimage, all)
+    --package FORMAT  Package after build (Linux: deb, appimage, all;
+                      Windows: zip, all)
     --version VER     Application version for packaging (default: 0.1.0)
     --help, -h        Show this help
 
@@ -56,24 +57,7 @@ int cmd_build(int argc, char* argv[]) {
         return 1;
     }
 
-    // Detect project name
-    std::string project_name;
-    {
-        std::ifstream f(project_dir / "CMakeLists.txt");
-        std::string line;
-        while (std::getline(f, line)) {
-            auto pos = line.find("project(");
-            if (pos != std::string::npos) {
-                auto start = pos + 8;
-                auto end = line.find_first_of(" )", start);
-                if (end != std::string::npos) {
-                    project_name = line.substr(start, end - start);
-                }
-                break;
-            }
-        }
-    }
-    if (project_name.empty()) project_name = "app";
+    const std::string project_name = read_project_name(project_dir / "CMakeLists.txt");
 
     print_header("Building " + project_name + " (" + build_type + ")");
 
@@ -111,10 +95,9 @@ int cmd_build(int argc, char* argv[]) {
         fs::create_directories(build_dir);
 
         print_step("Configuring CMake (" + build_type + ")...");
-        std::string cmake_cmd = "cmake .. -DCMAKE_BUILD_TYPE=" + build_type;
-        if (embed) {
-            cmake_cmd += " -DANYAR_EMBED_FRONTEND=ON";
-        }
+        std::string cmake_cmd = "cmake .. -DCMAKE_BUILD_TYPE=" + build_type +
+                                platform_configure_args(build_dir);
+        cmake_cmd += embed ? " -DANYAR_EMBED_FRONTEND=ON" : " -DANYAR_EMBED_FRONTEND=OFF";
         int rc = run(cmake_cmd, build_dir);
         if (rc != 0) {
             print_error("CMake configuration failed");
@@ -125,15 +108,16 @@ int cmd_build(int argc, char* argv[]) {
         if (cores == 0) cores = 4;
 
         print_step("Compiling C++ backend...");
-        rc = run("make -j" + std::to_string(cores), build_dir);
+        rc = run("cmake --build . --config " + build_type + " --parallel " +
+                 std::to_string(cores), build_dir);
         if (rc != 0) {
             print_error("C++ build failed");
             return 1;
         }
 
         // Check binary exists
-        fs::path binary = build_dir / project_name;
-        if (fs::exists(binary)) {
+        fs::path binary = find_app_binary(build_dir, project_name, build_type);
+        if (!binary.empty()) {
             auto size = fs::file_size(binary);
             std::string size_str;
             if (size > 1024 * 1024) {
@@ -141,7 +125,8 @@ int cmd_build(int argc, char* argv[]) {
             } else {
                 size_str = std::to_string(size / 1024) + " KB";
             }
-            print_success("Binary: build/" + project_name + " (" + size_str + ")");
+            print_success("Binary: " + fs::relative(binary, project_dir).generic_string() +
+                          " (" + size_str + ")");
         }
     }
 
@@ -153,16 +138,20 @@ int cmd_build(int argc, char* argv[]) {
     if (!package_format.empty()) {
         std::cout << std::endl;
         fs::path build_dir = project_dir / "build";
-        int rc = package_linux(package_format, project_name, project_dir,
-                               build_dir, app_version);
+        int rc = package_app(package_format, project_name, project_dir,
+                             build_dir, app_version, build_type);
         if (rc != 0) return rc;
     }
 
     if (build_backend && package_format.empty()) {
-        std::cout << std::endl;
-        std::cout << "  Run your app:" << std::endl;
-        std::cout << "    cd build && ./" << project_name << std::endl;
-        std::cout << std::endl;
+        fs::path binary = find_app_binary(project_dir / "build", project_name, build_type);
+        if (!binary.empty()) {
+            std::cout << std::endl;
+            std::cout << "  Run your app:" << std::endl;
+            std::cout << "    " << fs::relative(binary, project_dir).make_preferred().string()
+                      << std::endl;
+            std::cout << std::endl;
+        }
     }
 
     return 0;

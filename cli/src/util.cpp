@@ -1,16 +1,15 @@
-// anyar CLI — utility functions
+// anyar CLI — utility functions (platform-neutral).
+// Process spawning lives in process_posix.cpp / process_win32.cpp.
 
 #include "cli.h"
-#include <iostream>
 #include <cstdlib>
-#include <cstdio>
-#include <csignal>
-#include <unistd.h>
-#include <sys/wait.h>
+#include <fstream>
+#include <iostream>
 
 namespace anyar_cli {
 
 // ── ANSI colors ─────────────────────────────────────────────────────────────
+// (Windows consoles understand these once init_console() enabled VT mode.)
 
 static const char* RESET   = "\033[0m";
 static const char* BOLD    = "\033[1m";
@@ -39,32 +38,6 @@ void print_info(const std::string& text) {
 
 void print_step(const std::string& text) {
     std::cout << YELLOW << "  → " << RESET << text << std::endl;
-}
-
-// ── Shell execution ─────────────────────────────────────────────────────────
-
-int run(const std::string& cmd, const fs::path& cwd) {
-    std::string full_cmd = cmd;
-    if (!cwd.empty()) {
-        full_cmd = "cd " + cwd.string() + " && " + cmd;
-    }
-    return WEXITSTATUS(std::system(full_cmd.c_str()));
-}
-
-pid_t run_bg(const std::string& cmd, const fs::path& cwd) {
-    pid_t pid = fork();
-    if (pid == 0) {
-        // Child process
-        if (!cwd.empty()) {
-            if (chdir(cwd.c_str()) != 0) {
-                _exit(1);
-            }
-        }
-        // Run via shell
-        execlp("sh", "sh", "-c", cmd.c_str(), nullptr);
-        _exit(1);  // exec failed
-    }
-    return pid;
 }
 
 // ── User prompts ────────────────────────────────────────────────────────────
@@ -109,41 +82,103 @@ int pick(const std::string& question, const std::vector<std::string>& choices, i
 
 // ── Path utilities ──────────────────────────────────────────────────────────
 
-bool has_command(const std::string& cmd) {
-    std::string check = "command -v " + cmd + " >/dev/null 2>&1";
-    return std::system(check.c_str()) == 0;
+static bool is_libanyar_root(const fs::path& dir) {
+    return fs::exists(dir / "ARCHITECTURE.md") && fs::exists(dir / "core" / "CMakeLists.txt");
 }
 
 fs::path find_libanyar_root(const fs::path& start) {
     // 1) Walk up from start (usually cwd)
     fs::path dir = fs::absolute(start);
     while (!dir.empty() && dir != dir.root_path()) {
-        if (fs::exists(dir / "ARCHITECTURE.md") && fs::exists(dir / "core" / "CMakeLists.txt")) {
-            return dir;
-        }
+        if (is_libanyar_root(dir)) return dir;
         dir = dir.parent_path();
     }
 
     // 2) Walk up from the binary's own location (e.g. build/cli/anyar → ../../)
-    fs::path exe;
-    #ifdef __linux__
-    {
-        char buf[4096];
-        ssize_t len = ::readlink("/proc/self/exe", buf, sizeof(buf) - 1);
-        if (len > 0) { buf[len] = '\0'; exe = fs::path(buf).parent_path(); }
-    }
-    #endif
+    fs::path exe = executable_path();
     if (!exe.empty()) {
-        dir = exe;
+        dir = exe.parent_path();
         while (!dir.empty() && dir != dir.root_path()) {
-            if (fs::exists(dir / "ARCHITECTURE.md") && fs::exists(dir / "core" / "CMakeLists.txt")) {
-                return dir;
-            }
+            if (is_libanyar_root(dir)) return dir;
             dir = dir.parent_path();
         }
     }
 
+    // 3) LIBANYAR_DIR environment variable
+    if (const char* env = std::getenv("LIBANYAR_DIR")) {
+        if (is_libanyar_root(env)) return fs::path(env);
+    }
+
     return {};  // not found
+}
+
+// ── Build helpers ───────────────────────────────────────────────────────────
+
+std::string read_project_name(const fs::path& cmakelists) {
+    std::ifstream f(cmakelists);
+    std::string line;
+    while (std::getline(f, line)) {
+        auto pos = line.find("project(");
+        if (pos != std::string::npos) {
+            auto start = pos + 8;
+            auto end = line.find_first_of(" )", start);
+            if (end != std::string::npos) {
+                return line.substr(start, end - start);
+            }
+            break;
+        }
+    }
+    return "app";
+}
+
+std::string platform_configure_args(const fs::path& build_dir) {
+#ifdef _WIN32
+    // Only on a fresh build dir: a cached toolchain must not change.
+    if (fs::exists(build_dir / "CMakeCache.txt")) return {};
+    std::string args;
+
+    // vcpkg toolchain: VCPKG_ROOT, else the conventional C:\vcpkg
+    fs::path vcpkg;
+    if (const char* env = std::getenv("VCPKG_ROOT")) vcpkg = env;
+    else if (fs::exists("C:/vcpkg/vcpkg.exe")) vcpkg = "C:/vcpkg";
+    fs::path toolchain = vcpkg / "scripts" / "buildsystems" / "vcpkg.cmake";
+    if (!vcpkg.empty() && fs::exists(toolchain)) {
+        args += " -DCMAKE_TOOLCHAIN_FILE=" + shell_quote(toolchain.generic_string());
+    }
+
+    // LibAsyik install: ANYAR_LIBASYIK_PREFIX, else what setup-windows.ps1
+    // produces inside the libanyar tree (build-deps/libasyik).
+    fs::path prefix;
+    if (const char* env = std::getenv("ANYAR_LIBASYIK_PREFIX")) {
+        prefix = env;
+    } else {
+        fs::path root = find_libanyar_root();
+        if (!root.empty() && fs::exists(root / "build-deps" / "libasyik")) {
+            prefix = root / "build-deps" / "libasyik";
+        }
+    }
+    if (!prefix.empty()) {
+        args += " -DCMAKE_PREFIX_PATH=" + shell_quote(prefix.generic_string());
+    }
+    return args;
+#else
+    (void)build_dir;
+    return {};
+#endif
+}
+
+fs::path find_app_binary(const fs::path& build_dir, const std::string& name,
+                         const std::string& build_type) {
+#ifdef _WIN32
+    const std::string file = name + ".exe";
+#else
+    const std::string& file = name;
+#endif
+    for (const fs::path& p : {build_dir / build_type / file,   // multi-config (VS)
+                              build_dir / file}) {             // single-config
+        if (fs::exists(p)) return p;
+    }
+    return {};
 }
 
 } // namespace anyar_cli

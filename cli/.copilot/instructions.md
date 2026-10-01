@@ -1,37 +1,40 @@
 # cli/ — `anyar` CLI Tool
 
 ## Purpose
-C++ CLI binary that scaffolds, runs, builds, and packages LibAnyar projects.
-
-**Linux-only for now**: uses fork/exec, `popen`, `/proc/self/exe`, `chmod`, dpkg. The root `CMakeLists.txt` skips `cli/` on Windows (ADR-010); a port needs `CreateProcess`/job objects for `dev`, and MSI/NSIS for `package`.
+C++ CLI binary that scaffolds, runs, builds, and packages LibAnyar projects. Builds on Linux (GCC) and Windows (MSVC).
 
 ## Layout
 
 ```
 cli/
-├── CMakeLists.txt
+├── CMakeLists.txt          # platform source split; cli_init_smoke CTest (ANYAR_BUILD_TESTS)
+├── tests/init_smoke.cmake  # cmake -P: --version, build --help, init --no-install, path checks
 └── src/
-    ├── main.cpp        # arg parsing → dispatch
-    ├── cli.h           # shared types, util decls
-    ├── cmd_init.cpp    # scaffold project (svelte-ts/react-ts/vanilla)
-    ├── cmd_dev.cpp     # vite + C++ backend concurrently
-    ├── cmd_build.cpp   # frontend build + cmake build (--embed via cmrc)
-    ├── cmd_package.cpp # DEB + AppImage (linuxdeploy)
-    ├── templates.cpp   # gen_cmake / gen_main_cpp / gen_agent_instructions / gen_gitignore / gen_readme / gen_{svelte_ts,react_ts,vanilla}
-    └── util.cpp        # exe-path finder (readlink /proc/self/exe — guarded)
+    ├── main.cpp            # arg parsing → dispatch; init_console() first
+    ├── cli.h               # shared decls: ChildProcess, run/run_bg/wait_child/kill_child, package_app, build helpers
+    ├── cmd_init.cpp        # scaffold project (svelte-ts/react-ts/vanilla), --no-install
+    ├── cmd_dev.cpp         # vite + C++ backend concurrently
+    ├── cmd_build.cpp       # frontend build + cmake build (--embed via cmrc) + --package
+    ├── cmd_package.cpp     # Linux: DEB + AppImage (linuxdeploy)
+    ├── package_win32.cpp   # Windows: portable zip
+    ├── process_posix.cpp   # fork/exec `sh -c`, signals, /proc/self/exe
+    ├── process_win32.cpp   # CreateProcess `cmd.exe /d /s /c`, job objects, Ctrl+C, VT console
+    ├── templates.cpp       # gen_cmake / gen_main_cpp / gen_agent_instructions / gen_gitignore / gen_readme / gen_{svelte_ts,react_ts,vanilla}
+    └── util.cpp            # colours, prompts, find_libanyar_root, read_project_name, platform_configure_args, find_app_binary
 ```
 
 ## Commands
 ```bash
-anyar init <name> [-t svelte-ts|react-ts|vanilla]   # interactive picker if -t omitted
+anyar init <name> [-t svelte-ts|react-ts|vanilla] [--no-install]   # interactive picker if -t omitted
 anyar dev [--no-frontend] [--no-backend]
-anyar build [--release|--debug] [--embed] [--clean] [--no-frontend] [--no-backend] [--package deb|appimage|all] [--version VER]
+anyar build [--release|--debug] [--embed] [--clean] [--no-frontend] [--no-backend] [--package deb|appimage|zip|all] [--version VER]
 ```
 
 ## Templates
 - **svelte-ts** (preferred), **react-ts**, **vanilla**
 - Tailwind CSS 4 only in svelte-ts; react-ts and vanilla use plain CSS
 - Dark theme via CSS custom properties
+- Paths embedded in generated files (CMake `LIBANYAR_DIR`, vite `@libanyar/api` alias) use `generic_string()` — a Windows `C:\Users\…` in a CMake/JS string is an escape sequence (checked by `cli_init_smoke`)
 
 ## Generated Project Skeleton
 ```
@@ -49,29 +52,34 @@ my-app/
 - C++ naming: `snake_case` funcs, `PascalCase` classes
 - Generated files emitted via `templates.cpp` helpers
 - **Avoid nested raw-string literals**: use `"\"key\":\"value\""` inside an outer `R"(...)"` to prevent parser errors
-- `find_libanyar_root()` walks up from cwd, then from the `anyar` binary, looking for `ARCHITECTURE.md` + `core/CMakeLists.txt` (don't rename/move those); `init` falls back to `$LIBANYAR_DIR`
-- Exe-path discovery is platform-guarded (`#ifdef __linux__` for `/proc/self/exe`); add Win32 (`GetModuleFileNameW`) / macOS (`_NSGetExecutablePath`) branches before porting
+- `find_libanyar_root()` walks up from cwd, then from the `anyar` binary (`executable_path()`), then `$LIBANYAR_DIR`, looking for `ARCHITECTURE.md` + `core/CMakeLists.txt` (don't rename/move those)
+- Process/OS code goes in `process_<os>.cpp` behind `cli.h`; command files stay platform-neutral. Quote paths in command strings with `shell_quote()`
+- Builds use `cmake --build . --config <type> --parallel N` (works for make, Ninja and multi-config VS); locate binaries with `find_app_binary()` (`build/<type>/<name>.exe` or `build/<name>`)
+
+## Windows specifics
+- Commands run via `cmd.exe /d /s /c "<cmd>"` (so `npm` = npm.cmd works); `run_bg()` children are created suspended inside a kill-on-close job object → `kill_child()` ends the whole cmd → npm → node tree
+- `platform_configure_args()` on a fresh build dir: `-DCMAKE_TOOLCHAIN_FILE` from `$VCPKG_ROOT` or `C:\vcpkg`, `-DCMAKE_PREFIX_PATH` from `$ANYAR_LIBASYIK_PREFIX` or `<libanyar>/build-deps/libasyik`
+- `init_console()`: UTF-8 output code page + ANSI VT sequences; MSVC builds with `/utf-8`
 
 ## Build Flags
-- `--embed` → passes `-DANYAR_EMBED_FRONTEND=ON` to CMake (cmrc compiles `dist/` into binary)
-- `--package deb` → builds DEB with auto-detected deps via `ldd` → Debian package map
-- `--package appimage` → downloads `linuxdeploy`, creates AppDir, bundles libs
-- Outputs land in project `build/`: `build/<name>`, `build/<deb_name>.deb`, `build/<name>-<ver>-<arch>.AppImage`
+- `--embed` → `-DANYAR_EMBED_FRONTEND=ON` (otherwise `=OFF` explicitly, so a cached ON doesn't stick)
+- Linux: `--package deb` (deps via `ldd` → Debian package map), `--package appimage` (downloads `linuxdeploy`); outputs `build/<deb_name>.deb`, `build/<name>-<ver>-<arch>.AppImage`
+- Windows: `--package zip` → `build/pkg-zip/<name>-<ver>-win64/` (exe + every DLL next to it + `dist/` + README with the WebView2 runtime note) → `build/<name>-<ver>-win64.zip` via `tar -a` (Compress-Archive fallback). MSI/NSIS: roadmap 7.4
 
 ## Dev Mode (`anyar dev`)
 1. Spawn `npm run dev` in `frontend/` (Vite, port 5173, `strictPort:false`)
-2. `cmake .. -DCMAKE_BUILD_TYPE=Debug && make -j` in `build/`, then run `build/<name>` (via libanyar-root `run.sh` if found)
-3. Wait for the app to exit, then SIGTERM Vite; SIGINT/SIGTERM handler kills both
+2. `cmake .. -DCMAKE_BUILD_TYPE=Debug` + `cmake --build . --config Debug` in `build/`, then run the binary (Linux: via libanyar-root `run.sh` if found)
+3. Wait for the app to exit, then kill Vite (tree); Ctrl+C / SIGTERM kills both. `--no-backend` keeps Vite running until Ctrl+C
 - No dev-URL redirect exists: the webview still loads the backend's `serve_static` dist, not the Vite server
 
 ## Build Mode (`anyar build`)
 1. `npm install` if `frontend/node_modules` missing; `npm run build` → `frontend/dist/`
-2. in `build/`: `cmake .. -DCMAKE_BUILD_TYPE=Release|Debug [-DANYAR_EMBED_FRONTEND=ON]` (`--clean` wipes `build/` first)
-3. `make -j<cores>`
-4. If `--package`: copy binary + assets, run packaging step
+2. in `build/`: `cmake .. -DCMAKE_BUILD_TYPE=Release|Debug -DANYAR_EMBED_FRONTEND=ON|OFF` (+ platform args; `--clean` wipes `build/` first)
+3. `cmake --build . --config <type> --parallel <cores>`
+4. If `--package`: `package_app()` (per-OS)
 
 ## Testing
-No dedicated CLI unit tests — exercised via integration on the example projects in CI. Smoke-test by running `anyar init` against a temp dir and verifying it builds.
+`cli_init_smoke` (label `cli`, runs in both CI jobs): `--version`, `build --help`, `init smokeapp --template vanilla --no-install`, then checks the files and that `LIBANYAR_DIR` / the vite alias point at the repo with forward slashes. Full flow (manual, needs Node): `anyar init demo` in a temp dir → `anyar build` → `anyar build --package zip|deb` → `anyar dev`.
 
 ## Modifying Templates
 Update `templates.cpp` `gen_main_cpp()` etc. Keep the generated shutdown guidance (main.cpp lifecycle comment + `gen_agent_instructions`) consistent with docs/graceful-shutdown.md. After change, regenerate an example to verify output compiles:

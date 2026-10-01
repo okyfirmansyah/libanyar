@@ -50,7 +50,7 @@ See [roadmap.md](roadmap.md) for full per-task checklists and [roadmap.md — Ne
 ## Next Priorities
 
 1. **Land the Windows port safely** — the port touched shared code (`app.cpp` platform hooks, `window.cpp` Impl restructure, `shared_buffer.cpp` split, OS-chosen ports, LibAsyik 1.8.1 on Linux CI with a fresh `cpp-deps-v5` cache) that was only compiled on Windows. Confirm Linux CI (incl. xvfb display tests), get the first `build-windows` CircleCI run green, then enable `tests/native_ipc` on Linux.
-2. **Windows follow-ups (Phase 7.1)** — `anyar` CLI port; Windows packaging (7.4); Pinhole DComp port (ADR-008, breaking).
+2. **Windows follow-ups (Phase 7.1)** — MSI/NSIS installer + WebView2 bootstrapper (7.4); Pinhole DComp port (ADR-008, breaking).
 3. **Productize the SharedBuffer WebProcess extension** — prototype in `benchmarks/shm_webext/` reads 1080p in ~0.4 ms vs ~21 ms via `anyar-shm://` (root cause: WebKit's 8 KB-chunked URI-scheme IPC). Needs packaging (DEB/AppImage), `App` wiring, `@libanyar/api/buffer` API + `FrameRenderer` use.
 4. **Pinhole created before `Window::show()`** — gets a null overlay forever; `create_gl_area()` re-queues itself every idle (never renders, busy main loop). Fix: wire overlay on show, or create the GL area lazily.
 5. **Migrate remaining plugin loops to `BackgroundTask`** — wifi-analyzer still uses a bare `execute()` loop + flag (no join); audit built-in plugins for blocking calls that should use `run_blocking()`.
@@ -74,14 +74,14 @@ See [roadmap.md](roadmap.md) for full per-task checklists and [roadmap.md — Ne
 | ~~`/__anyar__/file/` + `anyar-file://` never decoded URLs; string-prefix root check~~ | ✅ Fixed 2026-09-30 | Files with spaces/non-ASCII names were unreachable on every platform; root `/data` admitted `/database/…`. Now `percent_decode()` then `..` check, and component-wise `is_path_within()`. |
 | ~~Windows: SharedBuffer over HTTP~~ | ✅ Fixed 2026-10-01 | Zero-copy WebView2 shared buffers (ADR-011): 8 MiB read ~60 ms (HTTP) → ~0 (live view; ~2 ms only when revalidating). Buffers created before any window still use HTTP. `anyar-file://` unavailable (use `/__anyar__/file/`). |
 | Windows: first page load deferred to `run()` | Low | WebView2 only applies bind/init scripts to later navigations, so a window created before the main loop starts loads nothing until `run()` (child windows created at runtime load in `show()`). |
-| Windows: CLI, wifi-analyzer, Pinhole, packaging | Medium | Not ported: `anyar` CLI (POSIX), wifi-analyzer (libnl), Pinhole (stub — video-player defaults to webgl on Windows), MSI/NSIS. |
+| Windows: wifi-analyzer, Pinhole, installers | Medium | Not ported: wifi-analyzer (libnl), Pinhole (stub — video-player defaults to webgl on Windows), MSI/NSIS (portable zip exists). |
 | ~~`window:close-all` before the main window exists was a no-op~~ | ✅ Fixed 2026-10-01 | IPC is live while WebView2 creates the window (~2 s); the command found no main window and the app never quit. Now sticky (`close_all_requested_`); regression `tests/early_close`. |
 | Windows `std::_Exit()` can hang | Low | Runs DLL detach, which can deadlock with WebView2/FFmpeg threads; use `TerminateProcess` for hard exits (video-player `test:quit`). |
 | ~~Random server ports hit reserved/in-use ports~~ | ✅ Fixed 2026-09-30 | `App` and tests now take an OS-chosen port (Windows reserves blocks of 49152–65535; a failed bind inside a test fiber hung `run()` ~13% of runs). |
 | Pinhole Windows port is a breaking change | Medium | Requires WebView2 visual hosting → major version bump (ADR-008). |
 | Pinhole native path in CI | Medium | Unverified whether CI (xvfb/mesa) exercises native GL or only the canvas fallback. |
 | Pinhole CSS/scroll limitations | Low (by design) | Flat rect; hides during scroll; z-sibling detection best-effort (ADR-008). |
-| CLI has no unit tests | Low–Medium | Exercised only indirectly via examples. |
+| CLI has few tests | Low | `cli_init_smoke` (both CI jobs) covers init + generated paths; build/dev/package are verified manually (they need Node and a full C++ build). |
 | SharedBuffer `anyar-shm://` far slower than documented | High | ~21 ms per 1080p fetch (≈370 MB/s): WebKit streams custom-scheme responses in 8 KB IPC chunks (not fixable from our side); JSC Gigacage forbids true zero-copy. Webext prototype: ~0.4 ms (one memcpy). |
 | ~~Pinhole idle callbacks hold raw pointers~~ | ✅ Fixed 2026-09-24 | All `g_idle_add` tasks + GTK signal handlers go through an `ImplGuard` liveness token; ASAN regression test in `test_pinhole_linux`. |
 | Pinhole created before `Window::show()` never renders | Medium | Null overlay captured at create; `create_gl_area()` spins on idle re-queue. `App::on_window_ready` path is safe (runs after show). |
@@ -239,3 +239,11 @@ See [roadmap.md](roadmap.md) for full per-task checklists and [roadmap.md — Ne
 - JS: `fetchBuffer(nameOrUrl, {copy?, id?})` — snapshot by default, live zero-copy view with `copy:false`; `id` from `buffer:ready` skips the round trip. `createBufferRenderer` and video-player use the live path. 5 new Vitest cases (144/144)
 - `native_ipc` E2E extended: buffer created from a fiber after the window exists, attached, then mutated by C++ → visible in the SAME ArrayBuffer; same-generation re-attach not re-posted. Per 8 MiB: HTTP ~60 ms, attach IPC ~2 ms, slice ~4–6 ms, live ~0.01 ms
 - video-player smoke (3/3): ~90 frames, 4 `buffer:attach` (one per pool slot), 0 HTTP fetches
+
+### `anyar` CLI on Windows (2026-10-01)
+- Process layer split: `process_posix.cpp` (existing fork/exec, signals) / `process_win32.cpp` (`cmd.exe /d /s /c`, suspended → job object (kill-on-close) → resume so `kill_child()` ends cmd → npm → node; Ctrl+C handler; UTF-8 + VT console). `cli.h`: `ChildProcess`, `run_bg/wait_child/kill_child/on_interrupt/shell_quote/executable_path`
+- Builds: `cmake --build . --config <type> --parallel`, `find_app_binary()` (multi-config layout), `platform_configure_args()` (vcpkg toolchain + LibAsyik prefix on a fresh build dir); `--embed` now also forces `OFF` when absent
+- Packaging: `package_app()` per OS; Windows `--package zip` (exe + DLLs + dist + README)
+- Templates: generated `LIBANYAR_DIR` and vite alias used native paths — `D:\Works\…` broke the vite build (backslashes eaten as escapes) → `generic_string()`
+- Fixed: `anyar dev --no-backend` killed Vite immediately; now waits
+- Tests: `cli_init_smoke` CTest; Linux CI now builds the CLI (`-DANYAR_BUILD_CLI=ON`). Manual E2E on Windows 11: `init demoapp` (svelte-ts) → `build` → `build --package zip` (4 MB; unzipped copy runs and serves its dist) → `dev` (Vite + Debug app; close-all → dev exits 0, no Vite node left). ctest 14/14

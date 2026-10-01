@@ -45,7 +45,7 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # Point to LibAnyar source tree
-set(LIBANYAR_DIR ")" + libanyar_root.string() + R"(" CACHE PATH "Path to libanyar source tree")
+set(LIBANYAR_DIR ")" + libanyar_root.generic_string() + R"(" CACHE PATH "Path to libanyar source tree")
 
 # Make AnyarEmbed.cmake discoverable
 list(APPEND CMAKE_MODULE_PATH "${LIBANYAR_DIR}/cmake")
@@ -193,7 +193,7 @@ anyar dev
 
 # Or manually:
 cd frontend && npm run dev &
-cd build && cmake .. && make -j$(nproc) && ./)" + name + R"(
+cmake -B build && cmake --build build --parallel   # then run build/)" + name + R"( (Windows: build/Debug/)" + name + R"(.exe)
 ```
 
 ## Build for Production
@@ -203,7 +203,7 @@ anyar build
 
 # Or manually:
 cd frontend && npm run build
-cd build && cmake .. -DCMAKE_BUILD_TYPE=Release && make -j$(nproc)
+cmake -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build --config Release --parallel
 ```
 
 ## Project Structure
@@ -260,7 +260,7 @@ export default defineConfig({
   plugins: [svelte(), tailwindcss()],
   resolve: {
     alias: {
-      '@libanyar/api': path.resolve(__dirname, ')" + libanyar_root.string() + R"(/js-bridge/src'),
+      '@libanyar/api': path.resolve(__dirname, ')" + libanyar_root.generic_string() + R"(/js-bridge/src'),
     },
   },
   build: {
@@ -429,7 +429,7 @@ export default defineConfig({
   plugins: [react()],
   resolve: {
     alias: {
-      '@libanyar/api': path.resolve(__dirname, ')" + libanyar_root.string() + R"(/js-bridge/src'),
+      '@libanyar/api': path.resolve(__dirname, ')" + libanyar_root.generic_string() + R"(/js-bridge/src'),
     },
   },
   build: {
@@ -600,7 +600,7 @@ import path from 'path';
 export default defineConfig({
   resolve: {
     alias: {
-      '@libanyar/api': path.resolve(__dirname, ')" + libanyar_root.string() + R"(/js-bridge/src'),
+      '@libanyar/api': path.resolve(__dirname, ')" + libanyar_root.generic_string() + R"(/js-bridge/src'),
     },
   },
   build: {

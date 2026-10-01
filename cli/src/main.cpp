@@ -34,6 +34,8 @@ static void print_usage() {
 }
 
 int main(int argc, char* argv[]) {
+    anyar_cli::init_console();  // Windows: UTF-8 + ANSI colours
+
     if (argc < 2) {
         print_usage();
         return 0;
