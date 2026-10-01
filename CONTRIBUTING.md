@@ -37,7 +37,7 @@ cd build
 ctest --output-on-failure
 # Windows: ctest --test-dir build-win -C Release --output-on-failure
 # Tests labelled "display" open real windows (Linux CI runs them under xvfb;
-# Windows CI skips them with -LE display).
+# Windows CI runs them as a non-blocking step).
 ```
 
 Platform code lives in `*_linux.cpp` / `*_win32.cpp`. If you change shared code

@@ -15,6 +15,10 @@
 //     it only when no WebView2 runtime is registered — --webview2
 //   - Start Menu + desktop shortcuts, Add/Remove Programs entry, uninstaller
 //     that deletes exactly the files it installed
+// msi:       build/<name>-<version>-win64.msi        (WiX v4+, generated .wxs)
+//   - per-machine (GPO / Intune / SCCM), Start Menu shortcut, major upgrades
+//     keyed by a stable UpgradeCode, same WebView2 bootstrapper logic as a
+//     deferred custom action
 
 #include "cli.h"
 
@@ -25,8 +29,11 @@
 #define NOMINMAX
 #endif
 #include <windows.h>
+#include <bcrypt.h>
 
 #include <algorithm>
+#include <cctype>
+#include <cstdio>
 #include <cstdlib>
 #include <fstream>
 #include <iostream>
@@ -34,6 +41,7 @@
 #include <set>
 #include <vector>
 
+#pragma comment(lib, "bcrypt.lib")
 
 namespace anyar_cli {
 
@@ -407,7 +415,8 @@ int package_installer(const std::string& name, const fs::path& build_dir,
     const fs::path nsi = st.stage_root / (st.stem + ".nsi");
     {
         std::ofstream f(nsi, std::ios::binary);
-        f << generate_nsi(name, opts, st, fs::absolute(bootstrapper), out_exe);
+        f << generate_nsi(name, opts, st,
+                          bootstrapper.empty() ? fs::path() : fs::absolute(bootstrapper), out_exe);
     }
     std::error_code ec;
     fs::remove(out_exe, ec);
@@ -432,6 +441,262 @@ int package_installer(const std::string& name, const fs::path& build_dir,
     return 0;
 }
 
+// ── MSI (WiX Toolset v4+) ────────────────────────────────────────────────────
+
+/// wix.exe on PATH, as a .NET global tool, or in a WiX MSI install.
+std::string find_wix() {
+    if (has_command("wix")) return "wix";
+    if (const char* home = std::getenv("USERPROFILE")) {
+        fs::path p = fs::path(home) / ".dotnet" / "tools" / "wix.exe";
+        if (fs::exists(p)) return p.string();
+    }
+    std::vector<fs::path> found;
+    for (const char* var : {"ProgramFiles", "ProgramFiles(x86)"}) {
+        const char* pf = std::getenv(var);
+        if (!pf) continue;
+        std::error_code ec;
+        for (const auto& d : fs::directory_iterator(pf, ec)) {
+            if (d.path().filename().string().rfind("WiX Toolset v", 0) != 0) continue;
+            fs::path p = d.path() / "bin" / "wix.exe";
+            if (fs::exists(p)) found.push_back(p);
+        }
+    }
+    if (found.empty()) return {};
+    std::sort(found.begin(), found.end());
+    return found.back().string();
+}
+
+/// XML attribute text, with WiX preprocessor/bind-variable openers escaped.
+std::string wix_str(const std::string& s) {
+    std::string out;
+    for (size_t i = 0; i < s.size(); ++i) {
+        const char c = s[i];
+        const bool opener = i + 1 < s.size() && s[i + 1] == '(';
+        if (c == '&') out += "&amp;";
+        else if (c == '<') out += "&lt;";
+        else if (c == '>') out += "&gt;";
+        else if (c == '"') out += "&quot;";
+        else if ((c == '$' || c == '!') && opener) { out += c; out += c; }
+        else out += c;
+    }
+    return out;
+}
+
+/// "1.2.3-beta" → "1.2.3": MSI ProductVersion is major.minor.build
+/// (≤255.≤255.≤65535; Windows Installer ignores a 4th field for upgrades).
+/// Empty if out of range.
+std::string msi_version(const std::string& v) {
+    const std::string v4 = four_part_version(v);
+    unsigned long p[3] = {};
+    size_t pos = 0;
+    for (int i = 0; i < 3; ++i) {
+        size_t dot = v4.find('.', pos);
+        p[i] = std::stoul(v4.substr(pos, dot - pos));
+        pos = dot + 1;
+    }
+    if (p[0] > 255 || p[1] > 255 || p[2] > 65535) return {};
+    return std::to_string(p[0]) + "." + std::to_string(p[1]) + "." + std::to_string(p[2]);
+}
+
+/// "{xxxxxxxx-…}" / "xxxxxxxx-…" → upper-case without braces; empty if not a GUID.
+std::string normalize_guid(std::string g) {
+    if (g.size() == 38 && g.front() == '{' && g.back() == '}') g = g.substr(1, 36);
+    if (g.size() != 36) return {};
+    for (size_t i = 0; i < g.size(); ++i) {
+        const bool dash = i == 8 || i == 13 || i == 18 || i == 23;
+        if (dash ? g[i] != '-' : !std::isxdigit(static_cast<unsigned char>(g[i]))) return {};
+        g[i] = static_cast<char>(std::toupper(static_cast<unsigned char>(g[i])));
+    }
+    return g;
+}
+
+/// Stable UpgradeCode: RFC 4122 name-based (v5, SHA-1) UUID of
+/// "<publisher>/<name>" (lower-case) in a LibAnyar namespace.  The same app
+/// therefore gets the same code on every machine and release, so a newer MSI
+/// replaces the old one (MajorUpgrade).
+std::string derived_upgrade_code(const std::string& publisher, const std::string& name) {
+    // Namespace UUID (random, fixed forever): 3b0f6f52-9a7c-4f0e-8d1b-5c2e7a4d9f60
+    const unsigned char ns[16] = {0x3b, 0x0f, 0x6f, 0x52, 0x9a, 0x7c, 0x4f, 0x0e,
+                                  0x8d, 0x1b, 0x5c, 0x2e, 0x7a, 0x4d, 0x9f, 0x60};
+    std::string key = publisher + "/" + name;
+    for (auto& c : key) c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    std::vector<unsigned char> data(ns, ns + 16);
+    data.insert(data.end(), key.begin(), key.end());
+
+    unsigned char hash[20] = {};
+    BCRYPT_ALG_HANDLE alg = nullptr;
+    if (BCryptOpenAlgorithmProvider(&alg, BCRYPT_SHA1_ALGORITHM, nullptr, 0) != 0) return {};
+    const bool ok = BCryptHash(alg, nullptr, 0, data.data(), static_cast<ULONG>(data.size()),
+                               hash, sizeof(hash)) == 0;
+    BCryptCloseAlgorithmProvider(alg, 0);
+    if (!ok) return {};
+    hash[6] = static_cast<unsigned char>((hash[6] & 0x0F) | 0x50);  // version 5
+    hash[8] = static_cast<unsigned char>((hash[8] & 0x3F) | 0x80);  // RFC 4122 variant
+    char out[37];
+    snprintf(out, sizeof(out),
+             "%02X%02X%02X%02X-%02X%02X-%02X%02X-%02X%02X-%02X%02X%02X%02X%02X%02X",
+             hash[0], hash[1], hash[2], hash[3], hash[4], hash[5], hash[6], hash[7], hash[8],
+             hash[9], hash[10], hash[11], hash[12], hash[13], hash[14], hash[15]);
+    return out;
+}
+
+std::string generate_wxs(const std::string& name, const PackageOptions& opts, const Staged& st,
+                         const std::string& version, const std::string& upgrade_code,
+                         const fs::path& bootstrapper) {
+    const std::string publisher = opts.publisher.empty() ? name : opts.publisher;
+    const std::string exe = st.exe_name.string();
+    // Paths are relative to the .wxs (written into stage_root, wix runs there).
+    const std::string stage = wix_str(st.stem);
+
+    std::string s;
+    s += "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n";
+    s += "<!-- Generated by anyar build (package: msi); do not edit. -->\n";  // no "--" in XML comments
+    s += "<Wix xmlns=\"http://wixtoolset.org/schemas/v4/wxs\">\n";
+    s += "  <Package Name=\"" + wix_str(name) + "\" Manufacturer=\"" + wix_str(publisher) +
+         "\" Version=\"" + version + "\" UpgradeCode=\"" + upgrade_code +
+         "\" Scope=\"perMachine\" Compressed=\"yes\" Language=\"1033\">\n";
+    s += "    <SummaryInformation Description=\"" + wix_str(name) + " " + wix_str(opts.version) +
+         "\" />\n";
+    s += "    <MajorUpgrade DowngradeErrorMessage=\"A newer version of [ProductName] is already "
+         "installed.\" />\n";
+    s += "    <MediaTemplate EmbedCab=\"yes\" CompressionLevel=\"high\" />\n";
+    s += "    <Property Id=\"ARPNOMODIFY\" Value=\"1\" />\n";
+    if (!opts.icon.empty()) {
+        s += "    <Icon Id=\"AppIcon.ico\" SourceFile=\"" +
+             wix_str(fs::absolute(opts.icon).string()) + "\" />\n";
+        s += "    <Property Id=\"ARPPRODUCTICON\" Value=\"AppIcon.ico\" />\n";
+    }
+    s += "\n    <StandardDirectory Id=\"ProgramFiles64Folder\">\n";
+    s += "      <Directory Id=\"INSTALLFOLDER\" Name=\"" + wix_str(name) + "\" />\n";
+    s += "    </StandardDirectory>\n";
+    s += "    <StandardDirectory Id=\"ProgramMenuFolder\" />\n\n";
+
+    s += "    <ComponentGroup Id=\"AppFiles\" Directory=\"INSTALLFOLDER\">\n";
+    s += "      <Component Id=\"MainExecutable\">\n";
+    s += "        <File Id=\"MainExecutable\" Source=\"" + stage + "\\" + wix_str(exe) +
+         "\" KeyPath=\"yes\">\n";
+    s += "          <Shortcut Id=\"StartMenuShortcut\" Directory=\"ProgramMenuFolder\" Name=\"" +
+         wix_str(name) + "\" WorkingDirectory=\"INSTALLFOLDER\" Advertise=\"no\" />\n";
+    s += "        </File>\n      </Component>\n";
+    s += "      <Files Include=\"" + stage + "\\**\">\n";
+    s += "        <Exclude Files=\"" + stage + "\\" + wix_str(exe) + "\" />\n";
+    s += "      </Files>\n";
+    s += "    </ComponentGroup>\n";
+    s += "    <Feature Id=\"Main\" Title=\"" + wix_str(name) + "\">\n";
+    s += "      <ComponentGroupRef Id=\"AppFiles\" />\n";
+    s += "    </Feature>\n";
+
+    if (!bootstrapper.empty()) {
+        // Same detection as the NSIS installer: the Evergreen runtime's "pv"
+        // per machine (32-bit view) or per user.  The bootstrapper runs as
+        // LocalSystem (deferred, no impersonation) → machine-wide runtime.
+        // Return="ignore": an offline machine still gets the app; deploy the
+        // standalone runtime separately there (docs/packaging.md).
+        const std::string key = "SOFTWARE\\" + std::string(kWebView2ClientKey);
+        s += "\n    <Property Id=\"WVRT_MACHINE\">\n";
+        s += "      <RegistrySearch Id=\"WebView2Machine\" Root=\"HKLM\" Key=\"" + wix_str(key) +
+             "\" Name=\"pv\" Type=\"raw\" Bitness=\"always32\" />\n    </Property>\n";
+        s += "    <Property Id=\"WVRT_USER\">\n";
+        s += "      <RegistrySearch Id=\"WebView2User\" Root=\"HKCU\" Key=\"" + wix_str(key) +
+             "\" Name=\"pv\" Type=\"raw\" />\n    </Property>\n";
+        s += "    <Binary Id=\"WebView2Setup\" SourceFile=\"" + wix_str(bootstrapper.string()) +
+             "\" />\n";
+        s += "    <CustomAction Id=\"InstallWebView2\" BinaryRef=\"WebView2Setup\" "
+             "ExeCommand=\"/silent /install\" Execute=\"deferred\" Impersonate=\"no\" "
+             "Return=\"ignore\" />\n";
+        s += "    <InstallExecuteSequence>\n";
+        s += "      <Custom Action=\"InstallWebView2\" Before=\"InstallFinalize\" Condition=\""
+             "NOT REMOVE AND (NOT WVRT_MACHINE OR WVRT_MACHINE = &quot;0.0.0.0&quot;) AND "
+             "(NOT WVRT_USER OR WVRT_USER = &quot;0.0.0.0&quot;)\" />\n";
+        s += "    </InstallExecuteSequence>\n";
+    }
+    s += "  </Package>\n</Wix>\n";
+    return s;
+}
+
+/// @param optional  `--package all`: skip (with a note) when WiX is missing.
+int package_msi(const std::string& name, const fs::path& build_dir, const PackageOptions& opts,
+                bool optional) {
+    print_header("Packaging " + name + " (msi, per-machine)");
+
+    const std::string wix = find_wix();
+    if (wix.empty()) {
+        if (optional) {
+            print_info("WiX Toolset not found — skipping the MSI "
+                       "(dotnet tool install --global wix)");
+            return 0;
+        }
+        print_error("wix (WiX Toolset v4+) not found.");
+        print_info("Install it with: dotnet tool install --global wix");
+        print_info("(or the WiX MSI from https://wixtoolset.org; needs the .NET 6+ SDK/runtime)");
+        return 1;
+    }
+
+    const std::string version = msi_version(opts.version);
+    if (version.empty()) {
+        print_error("Version " + opts.version + " does not fit MSI's major.minor.build "
+                    "(max 255.255.65535)");
+        return 1;
+    }
+    const std::string publisher = opts.publisher.empty() ? name : opts.publisher;
+    std::string upgrade_code;
+    if (!opts.upgrade_code.empty()) {
+        upgrade_code = normalize_guid(opts.upgrade_code);
+        if (upgrade_code.empty()) {
+            print_error("--upgrade-code is not a GUID: " + opts.upgrade_code);
+            return 1;
+        }
+    } else {
+        upgrade_code = derived_upgrade_code(publisher, name);
+        if (upgrade_code.empty()) {
+            print_error("Could not derive an UpgradeCode — pass --upgrade-code");
+            return 1;
+        }
+    }
+
+    Staged st;
+    if (!stage_app(name, build_dir, opts, st)) return 1;
+
+    fs::path bootstrapper;
+    if (opts.webview2 == "bootstrapper") {
+        bootstrapper = webview2_bootstrapper();
+        if (bootstrapper.empty()) {
+            print_info("Re-run with --webview2 skip to build without it.");
+            return 1;
+        }
+    }
+
+    const fs::path out_msi = fs::absolute(build_dir / (st.stem + ".msi"));
+    const fs::path wxs = st.stage_root / (st.stem + ".wxs");
+    {
+        std::ofstream f(wxs, std::ios::binary);
+        f << generate_wxs(name, opts, st, version, upgrade_code,
+                          bootstrapper.empty() ? fs::path() : fs::absolute(bootstrapper));
+    }
+    std::error_code ec;
+    fs::remove(out_msi, ec);
+
+    print_step("Running wix build...");
+    int rc = run(shell_quote(wix) + " build -nologo -arch x64 -o " + shell_quote(out_msi.string()) +
+                 " " + shell_quote(wxs.filename().string()), st.stage_root);
+    if (rc != 0 || !fs::exists(out_msi)) {
+        print_error("wix build failed (" + std::to_string(rc) + ") — source: " + wxs.string());
+        return 1;
+    }
+    // wix leaves a .wixpdb (debug symbols) next to the output
+    fs::path pdb = out_msi;
+    pdb.replace_extension(".wixpdb");
+    fs::remove(pdb, ec);
+
+    if (opts.sign && !sign_file(out_msi, name + " Setup")) return 1;
+    print_success("MSI: " + out_msi.string() + " (" + human_size(fs::file_size(out_msi)) + ")");
+    print_info("UpgradeCode " + upgrade_code + (opts.upgrade_code.empty()
+                   ? " (derived from publisher + name; pin it with --upgrade-code)" : ""));
+    print_info("Silent install: msiexec /i " + out_msi.filename().string() +
+               " /qn   (uninstall: msiexec /x " + out_msi.filename().string() + " /qn)");
+    return 0;
+}
+
 } // namespace
 
 int package_app(const PackageOptions& opts,
@@ -442,14 +707,18 @@ int package_app(const PackageOptions& opts,
     if (opts.format == "installer" || opts.format == "nsis") {
         return package_installer(project_name, build_dir, opts);
     }
+    if (opts.format == "msi") return package_msi(project_name, build_dir, opts, false);
     if (opts.format == "all") {
         int rc = package_zip(project_name, build_dir, opts);
         if (rc != 0) return rc;
         std::cout << std::endl;
-        return package_installer(project_name, build_dir, opts);
+        rc = package_installer(project_name, build_dir, opts);
+        if (rc != 0) return rc;
+        std::cout << std::endl;
+        return package_msi(project_name, build_dir, opts, true);
     }
     print_error("Unsupported package format on Windows: " + opts.format);
-    print_info("Supported formats: zip, installer, all  (deb / appimage are Linux-only)");
+    print_info("Supported formats: zip, installer, msi, all  (deb / appimage are Linux-only)");
     return 1;
 }
 

@@ -2,17 +2,14 @@
 # LibAnyar — CircleCI Configuration
 # ─────────────────────────────────────────────────────────────────────────────
 # Builds the C++ core library + tests, and validates the JS bridge compiles.
-# Linux: Ubuntu 22.04 (matches dev environment). Windows: Server 2022, MSVC +
-# vcpkg (build-windows job).
+# Linux only: Ubuntu 22.04 (matches dev environment). Windows CI runs on GitHub
+# Actions (.github/workflows/windows.yml), so each platform has its own badge.
 #
 # C++ dependencies (Boost 1.81, SOCI 4.0.3, LibAsyik) are built from source
 # and stored in a single /usr/local cache to avoid CircleCI glob limitations.
 # ─────────────────────────────────────────────────────────────────────────────
 
 version: 2.1
-
-orbs:
-  win: circleci/windows@5.0
 
 # ── Jobs ─────────────────────────────────────────────────────────────────────
 
@@ -200,98 +197,6 @@ jobs:
           path: build/Testing/Temporary/LastTest.log
           destination: test-log
 
-  # ── Windows (MSVC + vcpkg) — mirrors LibAsyik's own Windows job ──────────
-  build-windows:
-    executor:
-      name: win/server-2022
-      shell: bash.exe
-    environment:
-      # Pinned vcpkg commit (Boost 1.90, OpenSSL 3, SOCI 4.0.3) — same pin as
-      # LibAsyik 1.8.1's CI. Bump it together with the cache keys below.
-      VCPKG_COMMIT: 58950f88544e4637524dbd6a01d0317cf4cb77fc
-      VCPKG_ROOT: C:/vcpkg-ci
-      VCPKG_DEFAULT_BINARY_CACHE: C:/vcpkg-bincache
-      VCPKG_DISABLE_METRICS: 1
-      LIBASYIK_VERSION: 1.8.1
-      LIBASYIK_PREFIX: C:/libasyik
-    steps:
-      - checkout
-
-      - run:
-          name: Bootstrap vcpkg
-          command: |
-            git init -q "$VCPKG_ROOT"
-            cd "$VCPKG_ROOT"
-            git fetch -q --depth 1 https://github.com/microsoft/vcpkg "$VCPKG_COMMIT"
-            git checkout -q FETCH_HEAD
-            ./bootstrap-vcpkg.bat -disableMetrics
-            mkdir -p "$VCPKG_DEFAULT_BINARY_CACHE"
-
-      # vcpkg binary cache: without it every run rebuilds Boost/OpenSSL/SOCI
-      # from source (~30 min)
-      - restore_cache:
-          keys:
-            - anyar-vcpkg-bin-v1-58950f88-{{ checksum ".circleci/config.yml" }}
-            - anyar-vcpkg-bin-v1-58950f88-
-
-      - run:
-          name: Install dependencies (vcpkg)
-          no_output_timeout: 60m
-          command: |
-            "$VCPKG_ROOT/vcpkg.exe" install --triplet x64-windows \
-              boost-fiber boost-context boost-beast boost-asio boost-url \
-              boost-date-time boost-atomic boost-any boost-convert boost-regex \
-              boost-algorithm boost-optional openssl "soci[postgresql,sqlite3]" \
-              sqlite3 nlohmann-json webview2
-
-      - save_cache:
-          key: anyar-vcpkg-bin-v1-58950f88-{{ checksum ".circleci/config.yml" }}
-          paths:
-            - C:/vcpkg-bincache
-
-      # cmake is not on the executor's PATH; use the one vcpkg provides
-      - run:
-          name: Build LibAsyik
-          no_output_timeout: 30m
-          command: |
-            CMAKE="$("$VCPKG_ROOT/vcpkg.exe" fetch cmake)"
-            git clone --branch "$LIBASYIK_VERSION" --depth 1 --recurse-submodules \
-              --shallow-submodules https://github.com/okyfirmansyah/libasyik /c/libasyik-src
-            "$CMAKE" -S /c/libasyik-src -B /c/libasyik-build -G "Visual Studio 17 2022" -A x64 \
-              -DCMAKE_TOOLCHAIN_FILE="$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" \
-              -DCMAKE_INSTALL_PREFIX="$LIBASYIK_PREFIX" -DLIBASYIK_ENABLE_SOCI=ON
-            "$CMAKE" --build /c/libasyik-build --config Release --target libasyik -- -m -v:m
-            "$CMAKE" --install /c/libasyik-build --config Release
-
-      - run:
-          name: "C++: Configure"
-          command: |
-            CMAKE="$("$VCPKG_ROOT/vcpkg.exe" fetch cmake)"
-            "$CMAKE" -S . -B build -G "Visual Studio 17 2022" -A x64 \
-              -DCMAKE_TOOLCHAIN_FILE="$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" \
-              -DCMAKE_PREFIX_PATH="$LIBASYIK_PREFIX" \
-              -DANYAR_BUILD_TESTS=ON
-
-      - run:
-          name: "C++: Build"
-          no_output_timeout: 30m
-          command: |
-            CMAKE="$("$VCPKG_ROOT/vcpkg.exe" fetch cmake)"
-            "$CMAKE" --build build --config Release -- -m -v:m
-
-      # "display" tests create WebView2 windows; server executors have no
-      # interactive desktop / WebView2 runtime guarantee.
-      - run:
-          name: "C++: Run unit tests"
-          no_output_timeout: 10m
-          command: |
-            CTEST="$(dirname "$("$VCPKG_ROOT/vcpkg.exe" fetch cmake)")/ctest"
-            "$CTEST" --test-dir build -C Release --output-on-failure \
-                     --label-exclude display --timeout 60
-
-      - store_test_results:
-          path: build/Testing
-
   js-bridge-typecheck:
     docker:
       - image: node:20-slim
@@ -325,5 +230,4 @@ workflows:
   build-test:
     jobs:
       - build-and-test
-      - build-windows
       - js-bridge-typecheck

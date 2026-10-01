@@ -20,13 +20,16 @@ static void print_build_usage() {
     --clean           Clean build directory before building
     --embed           Embed frontend into binary (single-file deployment)
     --package FORMAT  Package after build (Linux: deb, appimage, all;
-                      Windows: zip, installer, all)
+                      Windows: zip, installer, msi, all)
     --version VER     Application version for packaging (default: 0.1.0)
     --publisher NAME  Installer publisher (Windows; default: app name)
-    --install-scope S Windows installer: user (default, no admin prompt) or
-                      machine (Program Files, needs admin)
-    --webview2 MODE   Windows installer: bootstrapper (default: installs the
+    --install-scope S Windows NSIS installer: user (default, no admin prompt)
+                      or machine (Program Files, needs admin). The MSI is
+                      always per-machine.
+    --webview2 MODE   Windows installers: bootstrapper (default: installs the
                       WebView2 runtime if missing) or skip
+    --upgrade-code G  Windows MSI UpgradeCode GUID (default: derived from
+                      publisher + app name; keep it stable across releases)
 
   Code signing (Windows, Authenticode via signtool):
     --sign                 Sign the app (and installer + uninstaller) using
@@ -93,7 +96,8 @@ int cmd_build(int argc, char* argv[]) {
         if (arg == "--publisher" && i + 1 < argc) { pkg.publisher = argv[++i]; continue; }
         if (arg == "--install-scope" && i + 1 < argc) { pkg.install_scope = argv[++i]; continue; }
         if (arg == "--webview2" && i + 1 < argc) { pkg.webview2 = argv[++i]; continue; }
-        if (arg == "--sign") { pkg.sign = true; continue; }
+        if (arg == "--upgrade-code" && i + 1 < argc) { pkg.upgrade_code = argv[++i]; continue; }
+        if (arg == "--sign"){ pkg.sign = true; continue; }
         if (arg == "--sign-cert" && i + 1 < argc) { sign_cert = argv[++i]; pkg.sign = true; continue; }
         if (arg == "--sign-thumbprint" && i + 1 < argc) { sign_thumbprint = argv[++i]; pkg.sign = true; continue; }
         if (arg == "--sign-timestamp" && i + 1 < argc) { sign_timestamp = argv[++i]; continue; }

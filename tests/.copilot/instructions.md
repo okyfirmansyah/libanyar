@@ -83,7 +83,7 @@ ctest --output-on-failure
 `run.sh` clears snap GTK env before invoking — required when host has snap-installed VS Code etc.
 
 ## WebGL E2E (CI)
-- Runs under `xvfb-run` (CircleCI Ubuntu 22.04)
+- Runs under `xvfb-run` (CircleCI Ubuntu 22.04). Windows CI (GitHub Actions) runs the `display` label as a non-blocking step on the runner's desktop
 - Has a **5-second `_exit(0)` watchdog thread** as safety net for shutdown races (see ADR-007)
 - Validates: SharedBuffer create → C++ writes pixels → JS fetch via `anyar-shm://` → WebGL render → `readPixels` matches expected
 

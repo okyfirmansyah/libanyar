@@ -735,10 +735,15 @@ libanyar/
 ├── ARCHITECTURE.md                 # This file (also the CLI's repo-root marker)
 ├── CLAUDE.md                       # Root agent context (#imports .github/copilot-instructions.md)
 ├── run.sh                          # Launch helper: clears snap GTK env
+├── .circleci/config.yml            # Linux CI (Ubuntu 22.04) + JS bridge
 ├── .github/
-│   └── copilot-instructions.md     # Global agent context (Copilot + Claude)
+│   ├── copilot-instructions.md     # Global agent context (Copilot + Claude)
+│   └── workflows/windows.yml       # Windows CI (GitHub Actions): build/test + package E2E
+├── scripts/
+│   ├── setup-ubuntu.sh / setup-windows.ps1   # dependency setup
+│   └── ci/windows-package-e2e.ps1  # zip/NSIS/MSI install-upgrade-uninstall E2E (admin)
 ├── docs/
-│   ├── decisions.md                # Architecture decision log (ADR-001..008)
+│   ├── decisions.md                # Architecture decision log (ADR-001..014)
 │   ├── roadmap.md                  # Phased plan + status
 │   ├── progress.md                 # Current progress tracking
 │   ├── pinhole-rendering.md        # Pinhole native overlay guide
@@ -806,7 +811,7 @@ libanyar/
 │       ├── cmd_dev.cpp
 │       ├── cmd_build.cpp
 │       ├── cmd_package.cpp         # Linux: DEB + AppImage packaging
-│       ├── package_win32.cpp       # Windows: portable zip + NSIS installer
+│       ├── package_win32.cpp       # Windows: portable zip + NSIS installer + MSI (WiX)
 │       ├── process_{posix,win32}.cpp  # spawning (fork/exec | CreateProcess + job objects)
 │       ├── templates.cpp           # svelte-ts / react-ts / vanilla project templates
 │       └── util.cpp

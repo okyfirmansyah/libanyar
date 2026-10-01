@@ -1,0 +1,209 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# LibAnyar — Windows CI (GitHub Actions)
+# ─────────────────────────────────────────────────────────────────────────────
+# Linux runs on CircleCI (.circleci/config.yml); Windows runs here so each
+# platform has its own status badge.  Server 2022, MSVC (VS 2022), vcpkg deps
+# pinned to the same commit as LibAsyik 1.8.1's CI.
+#
+#   build-test  core + CLI + examples + tests; unit tests gate, display tests
+#               (WebView2 windows) run non-blocking until proven stable on
+#               hosted runners
+#   packages    zip / NSIS / MSI from a scaffolded app, then a real per-machine
+#               MSI install → upgrade → uninstall (runners are admin)
+# ─────────────────────────────────────────────────────────────────────────────
+
+name: Windows CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: windows-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  VCPKG_COMMIT: 58950f88544e4637524dbd6a01d0317cf4cb77fc
+  VCPKG_ROOT: C:/vcpkg-ci
+  VCPKG_DEFAULT_BINARY_CACHE: C:/vcpkg-bincache
+  VCPKG_DISABLE_METRICS: 1
+  LIBASYIK_VERSION: 1.8.1
+  LIBASYIK_PREFIX: C:/libasyik
+  # read by `anyar build` when configuring generated apps
+  ANYAR_LIBASYIK_PREFIX: C:/libasyik
+  VCPKG_PACKAGES: >-
+    boost-fiber boost-context boost-beast boost-asio boost-url boost-date-time
+    boost-atomic boost-any boost-convert boost-regex boost-algorithm boost-optional
+    openssl soci[postgresql,sqlite3] sqlite3 nlohmann-json webview2
+
+jobs:
+  build-test:
+    name: Build + test (MSVC)
+    runs-on: windows-2022
+    timeout-minutes: 120
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Bootstrap vcpkg
+        run: |
+          git init -q "$VCPKG_ROOT"
+          cd "$VCPKG_ROOT"
+          git fetch -q --depth 1 https://github.com/microsoft/vcpkg "$VCPKG_COMMIT"
+          git checkout -q FETCH_HEAD
+          ./bootstrap-vcpkg.bat -disableMetrics
+          mkdir -p "$VCPKG_DEFAULT_BINARY_CACHE"
+
+      # Without the binary cache every run rebuilds Boost/OpenSSL/SOCI (~30 min)
+      - name: Restore vcpkg binary cache
+        uses: actions/cache@v4
+        with:
+          path: C:\vcpkg-bincache
+          key: vcpkg-bin-v1-${{ env.VCPKG_COMMIT }}-${{ hashFiles('.github/workflows/windows.yml') }}
+          restore-keys: vcpkg-bin-v1-${{ env.VCPKG_COMMIT }}-
+
+      - name: Install dependencies (vcpkg)
+        run: |
+          set -f  # soci[...] is not a glob
+          "$VCPKG_ROOT/vcpkg.exe" install --triplet x64-windows $VCPKG_PACKAGES
+
+      - name: Restore LibAsyik install
+        id: libasyik-cache
+        uses: actions/cache@v4
+        with:
+          path: C:\libasyik
+          key: libasyik-${{ env.LIBASYIK_VERSION }}-${{ env.VCPKG_COMMIT }}-v1
+
+      # cmake: the one vcpkg pins (the runner's may be too new for LibAsyik)
+      - name: Build LibAsyik
+        if: steps.libasyik-cache.outputs.cache-hit != 'true'
+        run: |
+          CMAKE="$("$VCPKG_ROOT/vcpkg.exe" fetch cmake)"
+          git clone --branch "$LIBASYIK_VERSION" --depth 1 --recurse-submodules \
+            --shallow-submodules https://github.com/okyfirmansyah/libasyik /c/libasyik-src
+          "$CMAKE" -S /c/libasyik-src -B /c/libasyik-build -G "Visual Studio 17 2022" -A x64 \
+            -DCMAKE_TOOLCHAIN_FILE="$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" \
+            -DCMAKE_INSTALL_PREFIX="$LIBASYIK_PREFIX" -DLIBASYIK_ENABLE_SOCI=ON
+          "$CMAKE" --build /c/libasyik-build --config Release --target libasyik -- -m -v:m
+          "$CMAKE" --install /c/libasyik-build --config Release
+
+      - name: "C++: Configure"
+        run: |
+          CMAKE="$("$VCPKG_ROOT/vcpkg.exe" fetch cmake)"
+          "$CMAKE" -S . -B build -G "Visual Studio 17 2022" -A x64 \
+            -DCMAKE_TOOLCHAIN_FILE="$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake" \
+            -DCMAKE_PREFIX_PATH="$LIBASYIK_PREFIX" \
+            -DANYAR_BUILD_TESTS=ON -DANYAR_BUILD_CLI=ON
+
+      - name: "C++: Build"
+        run: |
+          CMAKE="$("$VCPKG_ROOT/vcpkg.exe" fetch cmake)"
+          "$CMAKE" --build build --config Release -- -m -v:m
+
+      - name: "C++: Unit tests"
+        run: |
+          CTEST="$(dirname "$("$VCPKG_ROOT/vcpkg.exe" fetch cmake)")/ctest"
+          "$CTEST" --test-dir build -C Release --output-on-failure \
+                   --label-exclude display --timeout 120
+
+      # WebView2 / DirectComposition windows on a hosted runner's desktop.
+      # Non-blocking until a few green runs prove the runner can host them.
+      - name: "C++: Display tests (WebView2, Pinhole) — non-blocking"
+        continue-on-error: true
+        run: |
+          CTEST="$(dirname "$("$VCPKG_ROOT/vcpkg.exe" fetch cmake)")/ctest"
+          "$CTEST" --test-dir build -C Release --output-on-failure \
+                   --label-regex display --timeout 120
+
+      - name: Upload test log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ctest-log
+          path: build/Testing/Temporary/LastTest.log
+          if-no-files-found: ignore
+
+      # Hand the CLI to the packaging job
+      - name: Upload anyar CLI
+        uses: actions/upload-artifact@v4
+        with:
+          name: anyar-cli
+          path: build/cli/Release/anyar.exe
+
+  packages:
+    name: Packages (zip / NSIS / MSI)
+    needs: build-test
+    runs-on: windows-2022
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Bootstrap vcpkg
+        shell: bash
+        run: |
+          git init -q "$VCPKG_ROOT"
+          cd "$VCPKG_ROOT"
+          git fetch -q --depth 1 https://github.com/microsoft/vcpkg "$VCPKG_COMMIT"
+          git checkout -q FETCH_HEAD
+          ./bootstrap-vcpkg.bat -disableMetrics
+          mkdir -p "$VCPKG_DEFAULT_BINARY_CACHE"
+
+      # Restore only: build-test saves these
+      - uses: actions/cache/restore@v4
+        with:
+          path: C:\vcpkg-bincache
+          key: vcpkg-bin-v1-${{ env.VCPKG_COMMIT }}-${{ hashFiles('.github/workflows/windows.yml') }}
+          restore-keys: vcpkg-bin-v1-${{ env.VCPKG_COMMIT }}-
+      - uses: actions/cache/restore@v4
+        with:
+          path: C:\libasyik
+          key: libasyik-${{ env.LIBASYIK_VERSION }}-${{ env.VCPKG_COMMIT }}-v1
+          fail-on-cache-miss: true
+
+      - name: Install dependencies (vcpkg)
+        shell: bash
+        run: |
+          set -f  # soci[...] is not a glob
+          "$VCPKG_ROOT/vcpkg.exe" install --triplet x64-windows $VCPKG_PACKAGES
+
+      # The CLI must sit inside the checkout: it finds the libanyar sources
+      # by walking up from its own location.
+      - uses: actions/download-artifact@v4
+        with:
+          name: anyar-cli
+          path: build/cli/Release
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Packaging tools (NSIS, WiX, CMake)
+        shell: pwsh
+        run: |
+          if (-not (Get-Command makensis -ErrorAction SilentlyContinue)) {
+            $nsis = "${env:ProgramFiles(x86)}\NSIS"
+            if (-not (Test-Path "$nsis\makensis.exe")) { choco install nsis -y --no-progress }
+            "$nsis" | Out-File -Append $env:GITHUB_PATH
+          }
+          dotnet tool install --global wix --version 5.0.2
+          "$env:USERPROFILE\.dotnet\tools" | Out-File -Append $env:GITHUB_PATH
+          # generated apps are configured with the same pinned cmake
+          $cmake = & "$env:VCPKG_ROOT\vcpkg.exe" fetch cmake
+          (Split-Path $cmake) | Out-File -Append $env:GITHUB_PATH
+
+      - name: Package + install/upgrade/uninstall E2E
+        shell: pwsh
+        run: >-
+          scripts/ci/windows-package-e2e.ps1 -Anyar build/cli/Release/anyar.exe
+          -WorkDir "${{ runner.temp }}/anyar-package-e2e"
+
+      - name: Upload MSI logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: msi-logs
+          path: ${{ runner.temp }}/anyar-package-e2e/*.log
+          if-no-files-found: ignore

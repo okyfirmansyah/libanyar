@@ -3,7 +3,7 @@
 LibAnyar apps can be packaged directly from the CLI:
 
 - **Linux:** **DEB** packages (Ubuntu/Debian) and **AppImage** bundles (portable).
-- **Windows:** a portable **zip** and an **NSIS installer** (`setup.exe`). The installer bundles the WebView2 runtime bootstrapper, and you can optionally **code-sign** it. Both formats embed the **app icon** — see [Windows](#windows).
+- **Windows:** a portable **zip**, an **NSIS installer** (`setup.exe`) and an **MSI** for managed deployment. Both installers bundle the WebView2 runtime bootstrapper. Everything can be **code-signed**, and every format embeds the **app icon** — see [Windows](#windows).
 
 ## Quick Start
 
@@ -11,7 +11,8 @@ LibAnyar apps can be packaged directly from the CLI:
 # ── Windows ──
 anyar build --package installer --version 1.0.0     # build/myapp-1.0.0-setup.exe
 anyar build --package zip --version 1.0.0           # build/myapp-1.0.0-win64.zip
-anyar build --package all --version 1.0.0 --sign-cert cert.pfx   # both, signed
+anyar build --package msi --version 1.0.0           # build/myapp-1.0.0-win64.msi
+anyar build --package all --version 1.0.0 --sign-cert cert.pfx   # all three, signed
 
 # ── Linux ──
 # DEB package
@@ -36,11 +37,12 @@ build/
 
 | Flag | Values | Default | Description |
 |------|--------|---------|-------------|
-| `--package` | Linux: `deb`, `appimage`, `all` · Windows: `zip`, `installer` (alias `nsis`), `all` | *(none — skip packaging)* | Package format(s) to produce |
+| `--package` | Linux: `deb`, `appimage`, `all` · Windows: `zip`, `installer` (alias `nsis`), `msi`, `all` | *(none — skip packaging)* | Package format(s) to produce |
 | `--version` | Semver string | `0.1.0` | Application version embedded in the package |
 | `--publisher` | Text | app name | Windows installer: publisher in Add/Remove Programs |
-| `--install-scope` | `user`, `machine` | `user` | Windows installer: per-user (no admin) or Program Files (admin) |
-| `--webview2` | `bootstrapper`, `skip` | `bootstrapper` | Windows installer: bundle the WebView2 runtime bootstrapper |
+| `--install-scope` | `user`, `machine` | `user` | Windows NSIS installer: per-user (no admin) or Program Files (admin). The MSI is always per-machine |
+| `--webview2` | `bootstrapper`, `skip` | `bootstrapper` | Windows installers: bundle the WebView2 runtime bootstrapper |
+| `--upgrade-code` | GUID | derived from publisher + name | Windows MSI: UpgradeCode — keep it stable across releases |
 | `--sign` / `--sign-cert` / `--sign-thumbprint` / `--sign-command` / `--sign-timestamp` | see [Code signing](#code-signing-windows) | off | Windows: Authenticode-sign the app, installer and uninstaller |
 
 These can be combined with other `anyar build` flags:
@@ -193,12 +195,33 @@ anyar build --package installer --version 1.0.0 --publisher "Acme Inc."
 - You get Start Menu and desktop shortcuts, an Add/Remove Programs entry, and an uninstaller that removes exactly the files it installed.
 - **Prerequisite:** NSIS 3.08+ (`winget install NSIS.NSIS`). `makensis` is found on `PATH`, under `%NSIS_HOME%`, or in the default install directories.
 
+### MSI (WiX)
+
+Use the MSI for managed deployment: Group Policy, Intune, SCCM, or anything else that expects `msiexec`. For people downloading the app themselves, the NSIS installer is the friendlier choice.
+
+```powershell
+anyar build --package msi --version 1.4.2 --publisher "Acme Inc."
+# build/myapp-1.4.2-win64.msi
+msiexec /i myapp-1.4.2-win64.msi /qn      # silent install (admin)
+msiexec /x myapp-1.4.2-win64.msi /qn      # silent uninstall
+```
+
+- **Per-machine:** installs to `Program Files\<name>` with a Start Menu shortcut and an Add/Remove Programs entry that carries the app icon. Installing needs admin, as GPO deployment expects. `--install-scope` does not apply to the MSI.
+- **Upgrades:** each MSI replaces any older version of the same app (MajorUpgrade). Installing an older version over a newer one is refused. Upgrades are matched by the **UpgradeCode**. By default it is derived from the publisher and app name (a name-based UUID), so it is identical on every build machine. The CLI prints it. **Pin it** with `--upgrade-code {GUID}` before you ship, because renaming the app or changing `--publisher` would otherwise change it, and the new MSI would install alongside the old one.
+- **Version:** MSI versions are `major.minor.build`, with limits of 255.255.65535. `1.4.2-beta.1` becomes `1.4.2`. A fourth field or a pre-release suffix is dropped, because Windows Installer ignores both when comparing upgrades.
+- **WebView2:** with `--webview2 bootstrapper` (the default), the bootstrapper runs as a deferred custom action, only when no runtime is registered. If it fails, for example on an offline machine, the app still installs. On such fleets, deploy the [WebView2 Standalone/Fixed runtime](https://developer.microsoft.com/microsoft-edge/webview2/) separately.
+- **Signing:** `--sign*` signs both the exe inside the MSI and the `.msi` itself.
+- **Prerequisite:** WiX Toolset v4 or newer: `dotnet tool install --global wix`, which needs the .NET 6+ SDK. The `wix` executable is found on `PATH`, in `%USERPROFILE%\.dotnet\tools`, or in `Program Files\WiX Toolset v*`. No WiX extensions are required.
+- `--package all` builds zip + NSIS + MSI. When WiX is missing, the MSI is skipped with a note. An explicit `--package msi` fails instead.
+- The generated `build/pkg-win/<stem>.wxs` is kept for inspection. It is regenerated on every build, so don't edit it.
+
 ### Code signing (Windows)
 
 Unsigned apps trigger SmartScreen's "Windows protected your PC" warning. `anyar build` can Authenticode-sign with `signtool` (from the newest Windows SDK, or `%SIGNTOOL%`). It signs:
 
-- the staged `myapp.exe`, which goes into both the zip and the installer;
-- the installer, together with its uninstaller. NSIS signs both through `!finalize` / `!uninstfinalize` hooks that call back into `anyar sign-file`.
+- the staged `myapp.exe`, which goes into the zip, the installer and the MSI;
+- the installer, together with its uninstaller. NSIS signs both through `!finalize` / `!uninstfinalize` hooks that call back into `anyar sign-file`;
+- the `.msi`.
 
 After signing, every file is checked with `WinVerifyTrust`. The raw build output in `build/Release/` stays unsigned.
 
@@ -341,3 +364,11 @@ The file is signed, but the certificate does not chain to a trusted root. That i
 ### Windows: `Could not download …MicrosoftEdgeWebview2Setup.exe`
 
 Download it manually from https://go.microsoft.com/fwlink/p/?LinkId=2124703 into `%LOCALAPPDATA%\anyar\cache\MicrosoftEdgeWebview2Setup.exe`. Alternatively, build with `--webview2 skip`.
+
+### Windows: `wix (WiX Toolset v4+) not found`
+
+Install it as a .NET global tool with `dotnet tool install --global wix`; the .NET SDK comes from `winget install Microsoft.DotNet.SDK.8`. Then open a new terminal so `%USERPROFILE%\.dotnet\tools` is on `PATH`. WiX 3 (`candle` / `light`) is not supported.
+
+### Windows: MSI install fails with error 1925 / exit code 1603
+
+The MSI is per-machine, so run `msiexec` from an elevated prompt, or let it raise the UAC prompt by double-clicking the `.msi`. The verbose log (`msiexec /i app.msi /l*v install.log`) names the failing action.

@@ -25,7 +25,7 @@ See [Getting Started](getting-started.md) for prerequisites and full setup instr
 ## Reference
 
 - [Architecture Overview](../ARCHITECTURE.md) — System architecture, IPC protocol, threading model
-- [Architecture Decisions](decisions.md) — ADR-001..013
+- [Architecture Decisions](decisions.md) — ADR-001..014
 - [Roadmap](roadmap.md) — Phased plan and status
 - [Progress](progress.md) — Current progress tracking
 - [C++ API Reference](api/cpp/html/index.html) — Generated from Doxygen (run `doxygen Doxyfile`)

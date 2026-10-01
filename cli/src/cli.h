@@ -20,13 +20,14 @@ int cmd_build(int argc, char* argv[]);
 /// Options for package_app() (from `anyar build --package …`).
 struct PackageOptions {
     /// Linux: "deb", "appimage", "all".  Windows: "zip", "installer"
-    /// (alias "nsis"), "all".
+    /// (alias "nsis"), "msi", "all".
     std::string format;
     std::string version = "0.1.0";   ///< Semantic version, e.g. "1.2.3"
     std::string build_type = "Release";  ///< multi-config subdir (VS)
     std::string publisher;           ///< Installer publisher (default: app name)
     std::string install_scope = "user";  ///< Windows installer: "user" | "machine"
-    std::string webview2 = "bootstrapper";  ///< Windows installer: "bootstrapper" | "skip"
+    std::string webview2 = "bootstrapper";  ///< Windows installers: "bootstrapper" | "skip"
+    std::string upgrade_code;        ///< Windows MSI UpgradeCode GUID (default: derived)
     bool sign = false;               ///< Windows: Authenticode-sign app + installer
     fs::path icon;                   ///< Windows: .ico for the installer (from prepare_icon)
 };

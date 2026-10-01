@@ -2,7 +2,8 @@
 
 # LibAnyar
 
-[![CircleCI](https://dl.circleci.com/status-badge/img/gh/okyfirmansyah/libanyar/tree/main.svg?style=shield)](https://dl.circleci.com/status-badge/redirect/gh/okyfirmansyah/libanyar/tree/main)
+[![Linux CI](https://img.shields.io/circleci/build/github/okyfirmansyah/libanyar/main?label=Linux%20CI)](https://dl.circleci.com/status-badge/redirect/gh/okyfirmansyah/libanyar/tree/main)
+[![Windows CI](https://img.shields.io/github/actions/workflow/status/okyfirmansyah/libanyar/windows.yml?branch=main&label=Windows%20CI)](https://github.com/okyfirmansyah/libanyar/actions/workflows/windows.yml)
 
 > **Anyar** (Indonesian/Javanese) — "new", "fresh", "modern"
 
@@ -169,10 +170,11 @@ Works on Windows: windows/multi-window, native IPC, events, dialogs, clipboard, 
 SharedBuffer (zero-copy WebView2 shared memory), Pinhole (DirectComposition + D3D11), UTF-8 paths;
 examples hello-world, key-storage, pinhole-hello and video-player (needs `vcpkg install
 ffmpeg:x64-windows`). Not yet: the `anyar-shm://` / `anyar-file://` URI schemes (use `fetchBuffer()` /
-`/__anyar__/file/`), and the wifi-analyzer example.
+`/__anyar__/file/`), and the wifi-analyzer example (planned).
 
 Ship with `anyar build --package installer` (NSIS `setup.exe`: per-user by default, bundles the
-WebView2 bootstrapper for machines without the runtime; needs NSIS 3) or `--package zip`. Put an
+WebView2 bootstrapper for machines without the runtime; needs NSIS 3), `--package msi`
+(per-machine MSI for GPO/Intune with major upgrades; needs WiX v4+) or `--package zip`. Put an
 `icon.png` in the project root to brand the exe, window and installer. Add `--sign-cert app.pfx` (or
 `--sign-thumbprint` / `--sign-command`) to Authenticode-sign the app, installer and uninstaller. See
 [docs/packaging.md](docs/packaging.md#windows).

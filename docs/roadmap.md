@@ -19,7 +19,7 @@
 | 5 | [CLI Tool](#phase-5-cli-tool) | 🟡 Partial | 2-3 weeks |
 | 6 | [Polish & Documentation](#phase-6-polish--documentation) | 🟡 Partial | Ongoing |
 | **→** | **[Next Steps (Prioritized)](#next-steps-prioritized)** | **🎯 Active** | — |
-| 7 | [Windows & macOS Support](#phase-7-windows--macos-support) | 🟡 Windows done except MSI + wifi-analyzer (ADR-010..012); macOS not started | 3-4 weeks |
+| 7 | [Windows & macOS Support](#phase-7-windows--macos-support) | 🟡 Windows done (ADR-010..014; wifi-analyzer port deferred to Phase 8); macOS not started | 3-4 weeks |
 | 8 | [Plugin System & Packaging](#phase-8-plugin-system--packaging) | 🔲 Not Started | 2-3 weeks |
 
 ---
@@ -1360,7 +1360,7 @@ If any of these are needed, use `@libanyar/api/canvas` (Phase 4f path) instead.
 - [x] UTF-8 paths in `fs:*` / `resolve_dist_path` / `allow_file_access` / `serve_file` — `<anyar/path.h>`; file routes percent-decode + component-wise root check (2026-09-30)
 - [x] Port the `anyar` CLI — `process_win32.cpp` (`CreateProcess` via cmd.exe + kill-on-close job objects, Ctrl+C), `cmake --build --config`, auto vcpkg/LibAsyik configure args; init/build/dev verified on Windows 11 (2026-10-01)
 - [x] Port examples: key-storage (FindSQLite3, UTF-8 paths, no GCC `?:`) and video-player (vcpkg FFmpeg, FFmpeg 5.1+ channel-layout API, webgl default) — smoke-tested in WebView2 (2026-09-30)
-- [ ] Port wifi-analyzer (needs a WLAN API backend instead of libnl)
+- [ ] ~~Port wifi-analyzer~~ — deferred to Phase 8.5 (2026-10-01)
 - [x] ~~Pinhole-less video on Windows~~ — superseded by the DComp Pinhole port (ADR-012)
 
 ### 7.2 macOS
@@ -1385,7 +1385,7 @@ If any of these are needed, use `@libanyar/api/canvas` (Phase 4f path) instead.
 - [x] Remove hard-coded `WEBVIEW_GTK=1` — let webview/webview auto-detect via its `macros.h`
 
 ### 7.3 CI/CD
-- [ ] CircleCI `build-windows` job (Server 2022, MSVC, vcpkg; non-display tests) — added 2026-09-30, first run pending
+- [ ] Windows CI on GitHub Actions (`.github/workflows/windows.yml`, own README badge): Server 2022, MSVC, vcpkg; unit tests gate, display tests non-blocking; package job does a real MSI install → upgrade → uninstall — added 2026-10-01 (replaces the unrun CircleCI `build-windows` job), first run pending
 - [ ] Matrix: Linux (GCC), Windows (MSVC), macOS (Clang)
 - [ ] Build + test on all platforms per commit
 - [ ] Artifact publishing
@@ -1395,7 +1395,8 @@ If any of these are needed, use `@libanyar/api/canvas` (Phase 4f path) instead.
 - [x] NSIS installer (Windows) — `anyar build --package installer`: per-user/per-machine, shortcuts, Add/Remove Programs, exact-file uninstaller (2026-10-01)
 - [x] Code signing (Windows) — `anyar build --sign-cert/--sign-thumbprint/--sign-command`: staged exe + installer + uninstaller (NSIS `!finalize` hooks), timestamped, verified with WinVerifyTrust (2026-10-01)
 - [x] App icon (Windows) — `icon.png`/`icon.ico` → multi-size .ico (WIC) → exe resource 32512 via `anyar_app_icon()` + installer icons (2026-10-01)
-- [ ] MSI (Windows; GPO deployment), DMG (macOS)
+- [x] MSI (Windows) — `anyar build --package msi` (WiX v4+): per-machine for GPO/Intune/SCCM, stable derived UpgradeCode (`--upgrade-code` to pin), major upgrades + downgrade block, Start Menu shortcut, WebView2 bootstrapper custom action, signed with `--sign*` (2026-10-01)
+- [ ] DMG (macOS)
 
 ### Phase 7 Deliverable
 > LibAnyar apps compile and run on Linux, Windows, and macOS.
@@ -1424,6 +1425,9 @@ If any of these are needed, use `@libanyar/api/canvas` (Phase 4f path) instead.
 - [ ] Check for updates via LibAsyik HTTP client
 - [ ] Download + verify update package
 - [ ] Apply update and restart
+
+### 8.5 Deferred Example Ports
+- [ ] wifi-analyzer on Windows — WLAN API (`WlanScan` / `WlanGetNetworkBssList`) backend in place of libnl; also move its scan loop to `BackgroundTask` (deferred from Phase 7.1 on 2026-10-01)
 
 ### Phase 8 Deliverable
 > Feature-complete framework with plugin ecosystem and distribution tooling.

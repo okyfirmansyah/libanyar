@@ -4,6 +4,31 @@
 
 ---
 
+## ADR-014: Windows MSI via WiX v4+, and Windows CI on GitHub Actions
+
+**Date**: 2026-10-01
+**Status**: Accepted
+
+**Context**: Enterprises deploy software through GPO, Intune or SCCM, all of which expect an MSI. The NSIS `setup.exe` does not fit that path. On CI: the project's single CircleCI badge summarises the whole pipeline, so Linux and Windows status cannot be shown separately. In addition, the CircleCI `build-windows` job had never run. A per-machine MSI also can only be truly tested by installing it as admin, which the dev box cannot do.
+
+**Decision**:
+- **WiX v4+** (`wix build`, a .NET tool) generates the MSI from a `.wxs`, the same way NSIS generates the installer from a `.nsi`. WiX 3 (`candle`/`light`) is end-of-life and not supported. No WiX extensions are used: no UI dialogs, just the basic progress UI. This matches managed deployment, and NSIS remains the interactive installer.
+- **Always per-machine.** Per-user MSIs need HKCU key paths for every component (ICE38/ICE64), and deployment tools target machines. `--install-scope` stays NSIS-only.
+- **UpgradeCode:** a name-based UUID v5 of `publisher/name` under a fixed LibAnyar namespace, overridable with `--upgrade-code`. Builds on any machine produce the same code without storing state in the project. The namespace bytes are now a compatibility contract.
+- **Upgrades and versions:** `MajorUpgrade` with a downgrade error. Versions are trimmed to `major.minor.build`, since Windows Installer ignores the fourth field.
+- **WebView2:** the bootstrapper the NSIS installer uses runs as a deferred, non-impersonated custom action, gated on the runtime's `pv` registry value, with `Return="ignore"` so offline installs still succeed.
+- **CI split:** Linux stays on CircleCI; Windows moves to GitHub Actions (`.github/workflows/windows.yml`). Each workflow has its own README badge. Hosted runners are admin, so the `packages` job installs, upgrades, downgrades and uninstalls the MSI for real (`scripts/ci/windows-package-e2e.ps1`).
+
+**Rationale**: Generating `.wxs` mirrors the NSIS design, so there is one staged tree and one signing path. The v5 UUID avoids a "remember to commit the GUID" step while staying overridable. GitHub Actions gives per-platform badges and admin Windows runners at no extra setup.
+
+**Consequence**:
+- `--package all` = zip + NSIS + MSI. The MSI is skipped with a note when WiX is missing.
+- Renaming the app or changing `--publisher` changes the derived UpgradeCode. The docs say to pin it before the first release.
+- Display tests run non-blocking on Windows CI until the hosted desktop proves reliable.
+- Two CI systems to maintain. They share no config, but the vcpkg commit pin must move in step with LibAsyik's.
+
+---
+
 ## ADR-013: Windows Code Signing and App Icon in the CLI
 
 **Date**: 2026-10-01
@@ -111,9 +136,9 @@
 - Zero-copy buffers landed without a hook (ADR-011).
 - Pinhole uses DirectComposition (ADR-012).
 - The `anyar` CLI and the key-storage / video-player examples are ported.
-- Packaging ships a zip and an NSIS installer, with Authenticode signing and an app icon (ADR-013).
+- Packaging ships a zip and an NSIS installer, with Authenticode signing and an app icon (ADR-013), plus an MSI (ADR-014).
 
-Still open: wifi-analyzer and MSI.
+Still open: the wifi-analyzer example, deferred to roadmap Phase 8.5.
 
 ---
 
