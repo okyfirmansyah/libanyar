@@ -23,7 +23,7 @@ C++17 (GCC 11+/Clang 10+/MSVC 2019+), CMake ≥ 3.16. Deps: LibAsyik 1.8.1 (pinn
 - Windows: `scripts\setup-windows.ps1` (vcpkg deps + LibAsyik → `build-deps\libasyik`), then `cmake -B build-win -G "Visual Studio 17 2022" -A x64 -DCMAKE_TOOLCHAIN_FILE=<vcpkg>\scripts\buildsystems\vcpkg.cmake -DCMAKE_PREFIX_PATH=build-deps\libasyik -DANYAR_BUILD_TESTS=ON`, `cmake --build build-win --config Release`, `ctest --test-dir build-win -C Release`
 - JS: `cd js-bridge && npm i && npm run build && npm test && npm run typecheck`
 - Run: `./run.sh examples/hello-world/hello_world` (clears snap GTK env)
-- CLI: `anyar init|dev|build [--embed] [--package deb|appimage|zip|installer|all]` (Linux + Windows; zip + NSIS installer on Windows)
+- CLI: `anyar init|dev|build [--embed] [--package deb|appimage|zip|installer|all]` (Linux + Windows; zip + NSIS installer, `--sign*` Authenticode signing and `icon.png`/`.ico` app icon on Windows)
 
 ## Repo Map
 `core/` C++ lib · `js-bridge/` `@libanyar/api` · `cli/` `anyar` · `tests/` Catch2+WebGL · `examples/` (hello-world, key-storage, video-player, wifi-analyzer, pinhole-hello) · `benchmarks/` perf harness · `docs/` ADRs+roadmap.
@@ -32,7 +32,7 @@ C++17 (GCC 11+/Clang 10+/MSVC 2019+), CMake ≥ 3.16. Deps: LibAsyik 1.8.1 (pinn
 Each module has `<module>/.copilot/instructions.md`; `<module>/CLAUDE.md` imports it via `@.copilot/instructions.md` (Claude Code import syntax — never `#import`). Modules: `core/`, `js-bridge/`, `cli/`, `tests/`, `examples/`.
 
 ## References
-[ARCHITECTURE.md](../ARCHITECTURE.md) · [CONTRIBUTING.md](../CONTRIBUTING.md) · [docs/decisions.md](../docs/decisions.md) (ADR-001..012) · [docs/roadmap.md](../docs/roadmap.md)
+[ARCHITECTURE.md](../ARCHITECTURE.md) · [CONTRIBUTING.md](../CONTRIBUTING.md) · [docs/decisions.md](../docs/decisions.md) (ADR-001..013) · [docs/roadmap.md](../docs/roadmap.md)
 
 ## Status & Docs Hygiene (MUST)
 - Current state, next priorities, open risks: [docs/progress.md](../docs/progress.md) — read before planning work.

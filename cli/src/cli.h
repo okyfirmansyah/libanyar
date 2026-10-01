@@ -27,6 +27,8 @@ struct PackageOptions {
     std::string publisher;           ///< Installer publisher (default: app name)
     std::string install_scope = "user";  ///< Windows installer: "user" | "machine"
     std::string webview2 = "bootstrapper";  ///< Windows installer: "bootstrapper" | "skip"
+    bool sign = false;               ///< Windows: Authenticode-sign app + installer
+    fs::path icon;                   ///< Windows: .ico for the installer (from prepare_icon)
 };
 
 /// Package a built application.
@@ -94,6 +96,36 @@ std::string platform_configure_args(const fs::path& build_dir);
 fs::path find_app_binary(const fs::path& build_dir, const std::string& name,
                          const std::string& build_type);
 
+/// The app icon for Windows builds: icon.ico / icon.png in the project root,
+/// assets/ or frontend/public/ (first match; .ico preferred).  Empty if none.
+fs::path find_app_icon(const fs::path& project_dir);
+
+// ── Windows: icons + code signing (icon_win32.cpp / sign_win32.cpp) ─────────
+#ifdef _WIN32
+/// Convert a PNG/JPEG/BMP (or copy an .ico) to a multi-size .ico (16–256 px).
+bool make_ico(const fs::path& src, const fs::path& dst);
+
+/// Result of an Authenticode check.
+struct SignatureInfo {
+    long status = 0;        ///< WinVerifyTrust result (0 = trusted)
+    bool signed_ = false;   ///< carries a signature at all
+    bool trusted = false;   ///< chain trusted on this machine
+    std::string signer;     ///< leaf certificate subject (simple display name)
+};
+SignatureInfo verify_signature(const fs::path& file);
+std::string describe(const SignatureInfo& s);
+
+/// True if ANYAR_SIGN_COMMAND / _THUMBPRINT / _CERT is set.
+bool signing_configured();
+
+/// Sign @p file with the ANYAR_SIGN_* configuration and verify a signature is
+/// present afterwards.
+bool sign_file(const fs::path& file, const std::string& description);
+
+/// `anyar sign-file <file> [description]` — used by the NSIS !finalize hooks.
+int cmd_sign_file(int argc, char* argv[]);
+#endif
+
 /// Prompt the user for text input (with a default value)
 std::string prompt(const std::string& question, const std::string& default_val = "");
 
@@ -106,6 +138,9 @@ void print_success(const std::string& text);
 void print_error(const std::string& text);
 void print_info(const std::string& text);
 void print_step(const std::string& text);
+
+/// ASCII-only, colourless output (for output relayed through other tools).
+void set_plain_output(bool plain);
 
 /// Find libanyar root by searching upward for ARCHITECTURE.md
 fs::path find_libanyar_root(const fs::path& start = fs::current_path());

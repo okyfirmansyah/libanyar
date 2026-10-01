@@ -19,7 +19,7 @@
 | 5 | [CLI Tool](#phase-5-cli-tool) | 🟡 Partial | 2-3 weeks |
 | 6 | [Polish & Documentation](#phase-6-polish--documentation) | 🟡 Partial | Ongoing |
 | **→** | **[Next Steps (Prioritized)](#next-steps-prioritized)** | **🎯 Active** | — |
-| 7 | [Windows & macOS Support](#phase-7-windows--macos-support) | 🟡 Windows core started (ADR-010) | 3-4 weeks |
+| 7 | [Windows & macOS Support](#phase-7-windows--macos-support) | 🟡 Windows done except MSI + wifi-analyzer (ADR-010..012); macOS not started | 3-4 weeks |
 | 8 | [Plugin System & Packaging](#phase-8-plugin-system--packaging) | 🔲 Not Started | 2-3 weeks |
 
 ---
@@ -324,7 +324,7 @@ Tauri sits on top of WRY + tao, providing the high-level multi-window API. Key f
 
 The public API is **platform-neutral**. No GTK/Cocoa/Win32 types appear in any public header.
 
-| Concern | Public API (header) | Linux Impl (.cpp) | Windows Impl (Phase 7) | macOS Impl (Phase 7) |
+| Concern | Public API (header) | Linux Impl (.cpp) | Windows Impl (Phase 7, ✅ done) | macOS Impl (Phase 7) |
 |---------|--------------------|--------------------|-------------------------|------------------------|
 | Main-thread dispatch | `run_on_main_thread(fn)` | `g_idle_add()` | `PostMessage()` to UI thread | `dispatch_async(main_queue)` |
 | Window handle | `Window::native_handle() → void*` | cast to `GtkWindow*` | cast to `HWND` | cast to `NSWindow*` |
@@ -688,14 +688,14 @@ Linux implementation (`window_linux.cpp`, inside `Window::Impl`):
 
 - [x] Rename `dialog_plugin.cpp` → `dialog_linux.cpp`
 - [x] Create CMake `if(LINUX)` / `if(WIN32)` / `if(APPLE)` source selection in `core/CMakeLists.txt`
-- [ ] Phase 7 adds: `dialog_win32.cpp` (`IFileDialog`, `TaskDialog`), `dialog_macos.mm` (`NSOpenPanel`, `NSSavePanel`, `NSAlert`)
+- [ ] Phase 7 adds: ✅ `dialog_win32.cpp` (`IFileDialog`, `TaskDialog`; done 2026-09-30), `dialog_macos.mm` (`NSOpenPanel`, `NSSavePanel`, `NSAlert`)
 
 ### 4e.3 Clipboard Plugin — Platform-Split Implementation
 
 > **Currently**: `clipboard_plugin.cpp` uses GTK clipboard. Header is clean.
 
 - [x] Rename `clipboard_plugin.cpp` → `clipboard_linux.cpp`
-- [ ] Phase 7 adds: `clipboard_win32.cpp` (`OpenClipboard`/`SetClipboardData`), `clipboard_macos.mm` (`NSPasteboard`)
+- [ ] Phase 7 adds: ✅ `clipboard_win32.cpp` (done 2026-09-30) (`OpenClipboard`/`SetClipboardData`), `clipboard_macos.mm` (`NSPasteboard`)
 
 ### 4e.4 Shell Plugin — Cross-Platform Process Execution
 
@@ -706,7 +706,7 @@ Linux implementation (`window_linux.cpp`, inside `Window::Impl`):
   - `shell:openUrl` — Linux: `xdg-open`, Windows: `ShellExecuteW`, macOS: `open`
   - `shell:openPath` — same as above but with file paths
   - `shell:execute` — Linux: `fork/execvp`, Windows: `CreateProcess`, macOS: `posix_spawn` or `fork/execvp`
-- [ ] Phase 7 adds: `shell_win32.cpp`, `shell_macos.cpp`
+- [ ] Phase 7 adds: ✅ `shell_win32.cpp` (done 2026-09-30), `shell_macos.cpp`
 
 ### 4e.5 App Startup — Platform-Conditional Initialization
 
@@ -714,7 +714,7 @@ Linux implementation (`window_linux.cpp`, inside `Window::Impl`):
 
 - [x] Wrap `sanitise_snap_env()` call in `#ifdef __linux__` guard — refactored to `platform_init()` with `#ifdef __linux__` / `#else` no-op
 - [x] Or extract to `core/src/platform_linux.cpp` with a `platform_init()` function — done inline in app.cpp with `#ifdef` guard
-- [ ] Phase 7: Add `platform_win32.cpp` (COM init, DPI awareness), `platform_macos.mm` (NSApplication setup)
+- [ ] Phase 7: ✅ `platform_win32.cpp` (COM init, DPI awareness; done 2026-09-30), `platform_macos.mm` (NSApplication setup)
 
 ### 4e.6 CLI Executable Path Finder
 
@@ -913,13 +913,13 @@ Feature 1 (`buffer`) is a standalone general-purpose API. Feature 2 (`canvas`) i
   - Store `fd`, `ptr`, `size`, `shm_name` (auto-generated `/anyar_<pid>_<name>`)
   - Destructor: `munmap()` + `shm_unlink()`
   - `post_to_window()`: dispatches a lightweight event via native IPC telling JS the buffer name + metadata
-- [ ] Phase 7 adds: `shared_buffer_win32.cpp` (WebView2 `CreateSharedBuffer`), `shared_buffer_macos.cpp` (POSIX shm)
+- [ ] Phase 7 adds: ✅ `shared_buffer_win32.cpp` (WebView2 `CreateSharedBuffer`; done 2026-10-01, ADR-011), `shared_buffer_macos.cpp` (POSIX shm)
 
 #### 4f.1.2 SharedBuffer URI Scheme (Linux)
 - [x] Register `anyar-shm://` custom URI scheme via `webkit_web_context_register_uri_scheme()` in `App` startup
 - [x] Scheme handler: parses `anyar-shm://<buffer-name>` → looks up SharedBuffer by name → creates `GMemoryInputStream` from mapped pointer → responds with `application/octet-stream`
 - [x] CORS headers for cross-origin fetch from `http://127.0.0.1:<port>`
-- [ ] Phase 7: Windows uses `PostSharedBufferToScript()` (no URI scheme needed); macOS uses `WKURLSchemeHandler`
+- [ ] Phase 7: ✅ Windows uses `PostSharedBufferToScript()` (no URI scheme needed; done 2026-10-01); macOS uses `WKURLSchemeHandler`
 
 #### 4f.1.3 SharedBufferPool (Ring Buffer for Streaming)
 - [x] Add `core/include/anyar/shared_buffer_pool.h`:
@@ -1042,7 +1042,7 @@ Feature 1 (`buffer`) is a standalone general-purpose API. Feature 2 (`canvas`) i
 ### 4f.4 CMake & Build Integration
 - [x] Add `shared_buffer_linux.cpp` to `core/CMakeLists.txt` under Linux guard
 - [x] Link `-lrt` on Linux (required for `shm_open`)
-- [ ] Phase 7 adds: `shared_buffer_win32.cpp`, `shared_buffer_macos.cpp`
+- [ ] Phase 7 adds: ✅ `shared_buffer_win32.cpp` (2026-10-01), `shared_buffer_macos.cpp`
 
 ### 4f.5 HTTP Binary Fallback Path
 - [x] HTTP GET `/__anyar__/buffer/<name>` endpoint serves raw buffer bytes for browser dev mode
@@ -1355,13 +1355,13 @@ If any of these are needed, use `@libanyar/api/canvas` (Phase 4f path) instead.
   - [x] `tests/pinhole_win32` — PrintWindow pixel checks (position×DPI, z-order, visibility, move, fallback)
 - [x] WebView2 integration (webview/webview windowed hosting kept)
 - [x] CMake + MSVC build support — vcpkg deps, `scripts/setup-windows.ps1`, LibAsyik 1.8.1 (2026-09-30)
-- [x] Test on Windows 11 — 12/12 ctest incl. `window_close` + `native_ipc` E2E through WebView2 (2026-09-30); Windows 10 untested
+- [x] Test on Windows 11 — 15/15 ctest (now incl. pinhole_win32, early_close, cli_init_smoke); originally 12/12 incl. `window_close` + `native_ipc` E2E through WebView2 (2026-09-30); Windows 10 untested
 - [x] Bundle WebView2 bootstrapper — `anyar build --package installer` embeds the signature-checked Evergreen bootstrapper, run only when no runtime is registered (2026-10-01)
 - [x] UTF-8 paths in `fs:*` / `resolve_dist_path` / `allow_file_access` / `serve_file` — `<anyar/path.h>`; file routes percent-decode + component-wise root check (2026-09-30)
 - [x] Port the `anyar` CLI — `process_win32.cpp` (`CreateProcess` via cmd.exe + kill-on-close job objects, Ctrl+C), `cmake --build --config`, auto vcpkg/LibAsyik configure args; init/build/dev verified on Windows 11 (2026-10-01)
 - [x] Port examples: key-storage (FindSQLite3, UTF-8 paths, no GCC `?:`) and video-player (vcpkg FFmpeg, FFmpeg 5.1+ channel-layout API, webgl default) — smoke-tested in WebView2 (2026-09-30)
 - [ ] Port wifi-analyzer (needs a WLAN API backend instead of libnl)
-- [ ] Pinhole-less video on Windows: canvas fallback in `pinhole_stub.cpp`, or the DComp port
+- [x] ~~Pinhole-less video on Windows~~ — superseded by the DComp Pinhole port (ADR-012)
 
 ### 7.2 macOS
 - [ ] Add `core/src/window_macos.mm` — implement `Window::Impl` using `webview/webview` + Cocoa APIs
@@ -1393,6 +1393,8 @@ If any of these are needed, use `@libanyar/api/canvas` (Phase 4f path) instead.
 ### 7.4 Cross-Platform Packaging
 - [x] Portable zip (Windows) — `anyar build --package zip` (exe + DLLs + dist + README) (2026-10-01)
 - [x] NSIS installer (Windows) — `anyar build --package installer`: per-user/per-machine, shortcuts, Add/Remove Programs, exact-file uninstaller (2026-10-01)
+- [x] Code signing (Windows) — `anyar build --sign-cert/--sign-thumbprint/--sign-command`: staged exe + installer + uninstaller (NSIS `!finalize` hooks), timestamped, verified with WinVerifyTrust (2026-10-01)
+- [x] App icon (Windows) — `icon.png`/`icon.ico` → multi-size .ico (WIC) → exe resource 32512 via `anyar_app_icon()` + installer icons (2026-10-01)
 - [ ] MSI (Windows; GPO deployment), DMG (macOS)
 
 ### Phase 7 Deliverable

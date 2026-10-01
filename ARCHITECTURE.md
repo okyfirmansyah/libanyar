@@ -317,7 +317,7 @@ pin->request_redraw();   // from any thread; or set_continuous(true) for vsync
 - **Formats**: same 7 as `FrameRenderer` (RGBA, RGB, BGRA, Grayscale, YUV420, NV12, NV21); YUV→RGB in shader.
 - **Fallback**: never throws. If GL init fails (or `force_fallback`), `is_native()` is false and rendering goes CPU → `SharedBuffer` → injected canvas-2D; `set_continuous(true)` is a no-op there.
 - **Threading**: `on_render` runs on the GTK main thread (not a fiber) with GL current; exceptions are caught and the frame dropped. `request_redraw`/`set_rect`/`set_visible`/`set_z_index` are thread-safe.
-- **Limits**: the overlay is a flat rectangle — `border-radius`, transforms, opacity/filter/blend, and `position: sticky` are not honored; DOM above the placeholder must be transparent. Linux only today (Windows/macOS: Phase 7; `pinhole_stub.cpp` elsewhere).
+- **Limits**: the overlay is a flat rectangle — `border-radius`, transforms, opacity/filter/blend, and `position: sticky` are not honored; DOM above the placeholder must be transparent. Linux (GtkGLArea) and Windows (DirectComposition + D3D11 below a transparent WebView2, ADR-012); `pinhole_stub.cpp` on macOS.
 - **JS**: `@libanyar/api/pinhole` offers optional typed helpers (`onPinholeMounted`, `getPinholeMetrics`, …); the tracking itself needs no JS import.
 
 ### 3. CommandRegistry
@@ -691,13 +691,15 @@ Abstracted via `webview/webview` single-header C/C++ library.
 
 | API | Linux | Windows | macOS |
 |-----|-------|---------|-------|
-| File Dialog | GTK | COM/IFileDialog | NSOpenPanel |
-| System Tray | libappindicator3 | Shell_NotifyIconW | NSStatusItem |
-| Notifications | libnotify | WinToast | NSUserNotification |
-| Clipboard | X11/Wayland | Win32 | NSPasteboard |
-| Global Hotkeys | X11/XCB | RegisterHotKey | CGEvent |
+| File / message dialogs ✅ | GtkFileChooser, GtkMessageDialog | IFileOpenDialog / IFileSaveDialog, TaskDialogIndirect | planned (NSOpenPanel, NSAlert) |
+| Clipboard (text) ✅ | GtkClipboard | Win32 `CF_UNICODETEXT` | planned (NSPasteboard) |
+| Shell open / execute ✅ | xdg-open, fork/exec | ShellExecuteW, CreateProcessW | planned |
+| System Tray | planned (libappindicator3) | planned (Shell_NotifyIconW) | planned (NSStatusItem) |
+| Notifications | planned (libnotify) | planned (WinToast) | planned |
+| Global Hotkeys | planned | planned (RegisterHotKey) | planned |
 
-Each wrapped behind a platform-agnostic C++ interface in `anyar::native::`.
+Implemented APIs are built-in plugins (`core/src/plugins/<name>_<os>.cpp`) behind
+platform-neutral IPC commands (`dialog:*`, `clipboard:*`, `shell:*`).
 
 ---
 
@@ -770,13 +772,19 @@ libanyar/
 │       ├── ipc_router.cpp
 │       ├── command_registry.cpp
 │       ├── event_bus.cpp
-│       ├── window.cpp
+│       ├── window.cpp              # one Impl, #ifdef __linux__ / _WIN32 sections
 │       ├── window_manager.cpp
-│       ├── main_thread_linux.cpp
+│       ├── platform.h              # private per-OS hooks (ADR-010)
+│       ├── platform_{linux,win32}.cpp, main_thread_{linux,win32}.cpp
+│       ├── shared_buffer.cpp       # factory / registry / pool (all OSes)
 │       ├── shared_buffer_linux.cpp # POSIX shm + anyar-shm:// / anyar-file:// URI schemes
+│       ├── shared_buffer_win32.cpp # WebView2 shared buffers (zero-copy, ADR-011)
 │       ├── pinhole_linux.cpp       # GtkOverlay + GtkGLArea + canvas-2D fallback
-│       ├── pinhole_stub.cpp        # Non-Linux stub
-│       └── plugins/                # fs_plugin, db_plugin, {dialog,clipboard,shell}_linux
+│       ├── pinhole_win32.cpp       # DirectComposition + D3D11 below WebView2 (ADR-012)
+│       ├── pinhole_cpu.cpp, pinhole_tracking.cpp  # shared fallback converters + DOM tracking JS
+│       ├── pinhole_stub.cpp        # macOS stub
+│       ├── win32_util.h            # UTF-8↔UTF-16, ComPtr
+│       └── plugins/                # fs_plugin, db_plugin, {dialog,clipboard,shell}_{linux,win32}
 │
 ├── js-bridge/                      # NPM: @libanyar/api
 │   ├── package.json
@@ -797,7 +805,9 @@ libanyar/
 │       ├── cmd_init.cpp
 │       ├── cmd_dev.cpp
 │       ├── cmd_build.cpp
-│       ├── cmd_package.cpp         # DEB + AppImage packaging
+│       ├── cmd_package.cpp         # Linux: DEB + AppImage packaging
+│       ├── package_win32.cpp       # Windows: portable zip + NSIS installer
+│       ├── process_{posix,win32}.cpp  # spawning (fork/exec | CreateProcess + job objects)
 │       ├── templates.cpp           # svelte-ts / react-ts / vanilla project templates
 │       └── util.cpp
 │
@@ -810,8 +820,11 @@ libanyar/
 │
 ├── tests/
 │   ├── test_*.cpp                  # Catch2 unit/integration (incl. test_pinhole_linux.cpp)
-│   ├── webgl/                      # WebGL canvas E2E pixel verification
-│   └── window_close/               # Native window-close shutdown regression
+│   ├── webgl/                      # WebGL canvas E2E pixel verification (Linux)
+│   ├── window_close/               # Native window-close shutdown regression
+│   ├── early_close/                # window:close-all during main-window creation
+│   ├── native_ipc/                 # WebView2 IPC / events / zero-copy buffer E2E (Windows)
+│   └── pinhole_win32/              # DComp pinhole pixel checks via PrintWindow (Windows)
 │
 └── third_party/
     └── webview/

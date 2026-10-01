@@ -65,6 +65,13 @@ int main(int argc, char* argv[]) {
         return anyar_cli::cmd_build(argc - 1, argv + 1);
     }
 
+#ifdef _WIN32
+    // Internal: called by the NSIS !finalize hooks (see package_win32.cpp).
+    if (cmd == "sign-file") {
+        return anyar_cli::cmd_sign_file(argc - 1, argv + 1);
+    }
+#endif
+
     anyar_cli::print_error("Unknown command: " + cmd);
     print_usage();
     return 1;

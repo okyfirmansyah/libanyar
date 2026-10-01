@@ -17,7 +17,9 @@ add_executable(anyar
 if(WIN32)
     target_sources(anyar PRIVATE
         src/process_win32.cpp
-        src/package_win32.cpp     # portable zip
+        src/package_win32.cpp     # portable zip + NSIS installer
+        src/icon_win32.cpp        # icon.png → .ico (WIC)
+        src/sign_win32.cpp        # Authenticode signing + verification
     )
 else()
     target_sources(anyar PRIVATE

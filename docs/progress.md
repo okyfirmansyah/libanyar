@@ -1,8 +1,8 @@
 # LibAnyar — Progress Tracker
 
-> **Current Phase**: Phase 7 started — Windows core port (MSVC + WebView2, ADR-010); Linux hardening findings continue
-> **Phase Status**: 🟢 Phases 1–4g complete (Linux), Phases 5–6 partial, Phase 7 Windows core working (local: 12/12 ctest); Windows CI job added, first run pending
-> **Last Updated**: 2026-10-01 (ADR-010)
+> **Current Phase**: Phase 7 — Windows port feature-complete except MSI + wifi-analyzer (ADR-010..012); macOS not started
+> **Phase Status**: 🟢 Phases 1–4g complete (Linux), Phases 5–6 partial, Phase 7 Windows: core, zero-copy buffers, Pinhole, CLI, zip/NSIS packaging, code signing, app icon (local: 15/15 ctest); Windows CI job added, first run pending
+> **Last Updated**: 2026-10-01 (Windows code signing + app icon)
 
 > **Agents**: update this file (and the matching checkbox in [roadmap.md](roadmap.md)) at the end of every task that changes status, adds a feature, or discovers a risk. Keep "Next Priorities" and "Open Risks" current; append to the Session Log.
 
@@ -24,7 +24,7 @@
 | 4g | Pinhole (Native Overlay) Rendering | ✅ Complete (Linux) |
 | 5 | CLI Tool | 🟡 Partial (C++ watch mode open) |
 | 6 | Polish & Documentation | 🟡 Partial (benchmarks, extra examples open) |
-| 7 | Windows & macOS | 🟡 Windows core started (ADR-010); macOS not started |
+| 7 | Windows & macOS | 🟡 Windows done except MSI + wifi-analyzer (ADR-010..012); macOS not started |
 | 8 | Plugin System & Packaging | 🔲 Not started |
 
 See [roadmap.md](roadmap.md) for full per-task checklists and [roadmap.md — Next Steps](roadmap.md#next-steps-prioritized) for the prioritized list.
@@ -41,8 +41,8 @@ See [roadmap.md](roadmap.md) for full per-task checklists and [roadmap.md — Ne
 | WebGL E2E test | ✅ | SharedBuffer + WebGL render + readPixels, runs under xvfb (5 s watchdog) |
 | JS bridge typecheck | ✅ | Separate CI job, `tsc --noEmit` |
 | JS bridge unit tests (Vitest) | ✅ | 10+ files — config, invoke, events, modules, React hooks |
-| Windows build (local) | ✅ | Win 11, VS 2022 Build Tools (MSVC 19.4x), vcpkg Boost 1.90, LibAsyik 1.8.1; core + hello-world + pinhole-hello + tests |
-| Windows ctest (local) | ✅ | 12/12, 5 consecutive runs — incl. `window_close` (native WM_CLOSE) and `native_ipc` (WebView2 E2E) |
+| Windows build (local) | ✅ | Win 11, VS 2022 Build Tools (MSVC 19.4x), vcpkg Boost 1.90, LibAsyik 1.8.1; core + CLI + all examples except wifi-analyzer + tests |
+| Windows ctest (local) | ✅ | 15/15 (adds pinhole_win32, early_close, cli_init_smoke) — incl. `window_close` (native WM_CLOSE) and `native_ipc` (WebView2 E2E) |
 | Windows CI (`build-windows`) | ⏳ | CircleCI Server 2022 job added 2026-09-30, not yet run; runs `-LE display` |
 
 ---
@@ -50,14 +50,14 @@ See [roadmap.md](roadmap.md) for full per-task checklists and [roadmap.md — Ne
 ## Next Priorities
 
 1. **Land the Windows port safely** — the port touched shared code (`app.cpp` platform hooks, `window.cpp` Impl restructure, `shared_buffer.cpp` split, OS-chosen ports, LibAsyik 1.8.1 on Linux CI with a fresh `cpp-deps-v5` cache) that was only compiled on Windows. Confirm Linux CI (incl. xvfb display tests), get the first `build-windows` CircleCI run green, then enable `tests/native_ipc` on Linux.
-2. **Windows follow-ups (Phase 7.1)** — MSI (GPO deployment, if needed); code signing for setup.exe / app exe; app icon resource; wifi-analyzer WLAN backend; `anyar dev` HMR (all platforms).
+2. **Windows follow-ups (Phase 7.1)** — MSI (GPO deployment, if needed); wifi-analyzer WLAN backend; signing in CI (Azure Trusted Signing via `--sign-command`); `anyar dev` HMR (all platforms).
 3. **Productize the SharedBuffer WebProcess extension** — prototype in `benchmarks/shm_webext/` reads 1080p in ~0.4 ms vs ~21 ms via `anyar-shm://` (root cause: WebKit's 8 KB-chunked URI-scheme IPC). Needs packaging (DEB/AppImage), `App` wiring, `@libanyar/api/buffer` API + `FrameRenderer` use.
 4. **Pinhole created before `Window::show()`** — gets a null overlay forever; `create_gl_area()` re-queues itself every idle (never renders, busy main loop). Fix: wire overlay on show, or create the GL area lazily.
 5. **Migrate remaining plugin loops to `BackgroundTask`** — wifi-analyzer still uses a bare `execute()` loop + flag (no join); audit built-in plugins for blocking calls that should use `run_blocking()`.
 6. **`anyar dev` real HMR** (deferred — release builds embed frontend; DX-only) — CLI starts Vite but the webview never loads the Vite URL (roadmap 5.2 "HMR ✅" is not true end-to-end).
 7. **macOS spike** — LibAsyik Clang/macOS build before Phase 7.2 (Windows/MSVC verified 2026-09-30).
 8. **Tier 3 DX/ecosystem** — `anyar dev --watch`, Todo App (React), File Explorer, migration runner.
-9. **Tier 4** — Phase 7 macOS, Pinhole ports, Phase 8 plugins.
+9. **Tier 4** — Phase 7 macOS (incl. Pinhole), Phase 8 plugins.
 
 ---
 
@@ -74,7 +74,7 @@ See [roadmap.md](roadmap.md) for full per-task checklists and [roadmap.md — Ne
 | ~~`/__anyar__/file/` + `anyar-file://` never decoded URLs; string-prefix root check~~ | ✅ Fixed 2026-09-30 | Files with spaces/non-ASCII names were unreachable on every platform; root `/data` admitted `/database/…`. Now `percent_decode()` then `..` check, and component-wise `is_path_within()`. |
 | ~~Windows: SharedBuffer over HTTP~~ | ✅ Fixed 2026-10-01 | Zero-copy WebView2 shared buffers (ADR-011): 8 MiB read ~60 ms (HTTP) → ~0 (live view; ~2 ms only when revalidating). Buffers created before any window still use HTTP. `anyar-file://` unavailable (use `/__anyar__/file/`). |
 | Windows: first page load deferred to `run()` | Low | WebView2 only applies bind/init scripts to later navigations, so a window created before the main loop starts loads nothing until `run()` (child windows created at runtime load in `show()`). |
-| Windows: wifi-analyzer, MSI, signing | Medium | Not ported: wifi-analyzer (libnl). Installer is NSIS (no MSI); generated exe/installer are unsigned (SmartScreen warns) and the app has no icon resource. |
+| Windows: wifi-analyzer, MSI | Low | Not ported: wifi-analyzer (libnl → WLAN API). Installer is NSIS (no MSI). Signing works (`--sign*`) but SmartScreen reputation needs a public-CA / Azure Trusted Signing cert — only a self-signed test cert was exercised. |
 | ~~`window:close-all` before the main window exists was a no-op~~ | ✅ Fixed 2026-10-01 | IPC is live while WebView2 creates the window (~2 s); the command found no main window and the app never quit. Now sticky (`close_all_requested_`); regression `tests/early_close`. |
 | Windows `std::_Exit()` can hang | Low | Runs DLL detach, which can deadlock with WebView2/FFmpeg threads; use `TerminateProcess` for hard exits (video-player `test:quit`). |
 | ~~Random server ports hit reserved/in-use ports~~ | ✅ Fixed 2026-09-30 | `App` and tests now take an OS-chosen port (Windows reserves blocks of 49152–65535; a failed bind inside a test fiber hung `run()` ~13% of runs). |
@@ -263,3 +263,16 @@ See [roadmap.md](roadmap.md) for full per-task checklists and [roadmap.md — Ne
 - Uninstaller deletes exactly the installed files and non-recursive `RMDir`s — verified: a user file in a shared install dir survives
 - Package options refactored into `PackageOptions` (Linux deb/AppImage unchanged)
 - Verified on Windows 11: silent install → files/shortcuts/ARP entry → installed app serves its dist + clean exit → silent uninstall → everything gone; per-machine script compiles (admin needed to install, not run here); `2.0.0-beta.1` → `VIProductVersion 2.0.0.0`; missing makensis / unknown format give guidance. NSIS for testing came from electron-builder's bundle (SourceForge was down)
+
+### Windows code signing + app icon (2026-10-01)
+- App icon: `anyar build` finds `icon.ico` / `icon.png` (root, `assets/`, `frontend/public/`). A PNG becomes a multi-size `build/app-icon.ico` via WIC (`icon_win32.cpp`, 16–256 px PNG entries). `-DANYAR_APP_ICON` → generated CMake `anyar_app_icon()` (new `cmake/AnyarAppIcon.cmake`) embeds it as resource `32512`. That is IDI_APPLICATION, the id webview's window class loads, so the title bar, taskbar and Alt-Tab pick it up with no core change. The same icon is the installer/uninstaller `MUI_ICON`/`MUI_UNICON`
+- Signing (`sign_win32.cpp`): `--sign-cert PFX` (+ `ANYAR_SIGN_PASSWORD`), `--sign-thumbprint`, `--sign-command "… {file}"`, `--sign-timestamp URL|none` (default DigiCert), bare `--sign` with `ANYAR_SIGN_*` env (CI)
+  - Configuration lives only in the environment, so secrets never reach the .nsi
+  - Signed: the staged exe (zip + installer), plus the installer and uninstaller via NSIS `!finalize` / `!uninstfinalize` → hidden `anyar sign-file`, which uses plain ASCII output because makensis re-encodes it
+  - Every result is re-checked with WinVerifyTrust; signtool comes from the newest Windows SDK or `SIGNTOOL`
+- Verified with a self-signed cert:
+  - staged exe, zip, setup.exe, installed exe and installed Uninstall.exe are all signed by the test subject with a matching thumbprint and timestamp;
+  - the raw build output stays unsigned; the password appears in 0 generated files;
+  - `--sign` unconfigured → exit 1; a no-op `--sign-command` → "still unsigned", exit 1;
+  - icon visible in the exe, setup and uninstaller resources and in the title bar.
+- Docs: packaging.md Windows section (zip, installer, WebView2, signing, icons, troubleshooting); dialogs.md / shared-memory-webgl.md Windows notes

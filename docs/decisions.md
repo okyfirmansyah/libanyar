@@ -4,6 +4,29 @@
 
 ---
 
+## ADR-013: Windows Code Signing and App Icon in the CLI
+
+**Date**: 2026-10-01
+**Status**: Accepted
+
+**Context**: Unsigned executables and installers trigger SmartScreen warnings, and the app had no icon (webview/webview's window class shows the generic one). Signing needs secrets: a PFX password, or a certificate on a hardware token or in a cloud HSM. The NSIS installer embeds an uninstaller that only exists inside makensis, so it cannot be signed after the build.
+
+**Decision**:
+- **Secrets only in the environment:** signing is configured by `ANYAR_SIGN_COMMAND` > `ANYAR_SIGN_THUMBPRINT` > `ANYAR_SIGN_CERT` (+ `ANYAR_SIGN_PASSWORD`). `ANYAR_SIGN_TIMESTAMP` sets the timestamp server and `SIGNTOOL` the tool. The `--sign-*` flags only set these variables for the process. The generated `.nsi` references `anyar sign-file "%1"`, never a credential.
+- **NSIS hooks:** `!uninstfinalize` and `!finalize` (NSIS 3.08+) call back into the hidden `anyar sign-file` command. That signs the uninstaller before it is embedded, then the installer. `sign-file` prints plain ASCII, because makensis re-encodes child output.
+- **What gets signed:** the *staged* exe, which is shared by the zip and the installer. The raw build output stays unsigned, so incremental builds are not re-signed. Every signed file is re-checked with `WinVerifyTrust`, and a missing signature fails the build. Bare `--sign` with nothing configured is an error.
+- **Pluggable signer:** `--sign-command` with a `{file}` placeholder covers Azure Trusted Signing, jsign and HSM wrappers without CLI changes.
+- **Icon:** a PNG is converted with WIC into a multi-size `.ico` (16–256 px, PNG entries), so no extra tooling is needed. `anyar_app_icon()` (`cmake/AnyarAppIcon.cmake`) compiles it as resource **32512** (`IDI_APPLICATION`). webview/webview's window class already loads that id from the module, so the title bar, taskbar and Alt-Tab show it with no core change. The same `.ico` is the installer and uninstaller icon.
+
+**Rationale**: Environment-only secrets suit CI (masked variables) and keep build artefacts free of credentials. NSIS hooks are the only way to sign the embedded uninstaller. Using resource id 32512 gives the window icon without a new `Window` API.
+
+**Consequence**:
+- Projects created before this change need the `anyar_app_icon` snippet in their `CMakeLists.txt` (documented in packaging.md).
+- SmartScreen reputation depends on the certificate. A self-signed certificate verifies as "untrusted root" and only exercises the pipeline.
+- A runtime `Window::set_icon()` remains a possible future API. It is not needed for the app icon.
+
+---
+
 ## ADR-012: Pinhole on Windows — DirectComposition Below a Transparent Windowed WebView2
 
 **Date**: 2026-10-01
@@ -83,6 +106,14 @@
 - On Windows the first page load starts only when `run()` is entered, or at `show()` for windows created while the loop runs. A child window created before the main loop starts loads nothing until it is navigated.
 - `std::filesystem::path(std::string)` uses the ANSI code page on Windows. All core paths are therefore UTF-8 and converted through `<anyar/path.h>` (`path_from_utf8` / `path_to_utf8`), a contract that plugins must follow too (added 2026-09-30).
 - A zero-copy WebView2 path (`CreateSharedBuffer` / `PostSharedBufferToScript`, or a custom scheme) needs a hook into webview's environment creation.
+
+**Update (2026-10-01)**: Most of the deferred work is now done:
+- Zero-copy buffers landed without a hook (ADR-011).
+- Pinhole uses DirectComposition (ADR-012).
+- The `anyar` CLI and the key-storage / video-player examples are ported.
+- Packaging ships a zip and an NSIS installer, with Authenticode signing and an app icon (ADR-013).
+
+Still open: wifi-analyzer and MSI.
 
 ---
 

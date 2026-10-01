@@ -25,9 +25,6 @@
 #define NOMINMAX
 #endif
 #include <windows.h>
-#include <softpub.h>
-#include <wincrypt.h>
-#include <wintrust.h>
 
 #include <algorithm>
 #include <cstdlib>
@@ -37,8 +34,6 @@
 #include <set>
 #include <vector>
 
-#pragma comment(lib, "wintrust.lib")
-#pragma comment(lib, "crypt32.lib")
 
 namespace anyar_cli {
 
@@ -93,6 +88,9 @@ bool stage_app(const std::string& name, const fs::path& build_dir, const Package
     }
     print_success(binary.filename().string() + " + " + std::to_string(dlls) + " DLL(s)");
 
+    // Sign the staged copy (the build output stays as the compiler left it).
+    if (opts.sign && !sign_file(out.stage / binary.filename(), name)) return false;
+
     if (fs::exists(exe_dir / "dist")) {
         fs::copy(exe_dir / "dist", out.stage / "dist", fs::copy_options::recursive);
         print_success("dist/ (frontend)");
@@ -136,36 +134,10 @@ int package_zip(const std::string& name, const fs::path& build_dir, const Packag
 
 // ── WebView2 bootstrapper ────────────────────────────────────────────────────
 
-/// True if @p file carries a valid Authenticode signature by Microsoft.
+/// True if @p file carries a valid (trusted) Authenticode signature by Microsoft.
 bool signed_by_microsoft(const fs::path& file) {
-    std::wstring path = file.wstring();
-    WINTRUST_FILE_INFO fi{};
-    fi.cbStruct = sizeof(fi);
-    fi.pcwszFilePath = path.c_str();
-    GUID policy = WINTRUST_ACTION_GENERIC_VERIFY_V2;
-    WINTRUST_DATA wd{};
-    wd.cbStruct = sizeof(wd);
-    wd.dwUIChoice = WTD_UI_NONE;
-    wd.fdwRevocationChecks = WTD_REVOKE_NONE;
-    wd.dwUnionChoice = WTD_CHOICE_FILE;
-    wd.pFile = &fi;
-    wd.dwStateAction = WTD_STATEACTION_VERIFY;
-    LONG status = WinVerifyTrust(static_cast<HWND>(INVALID_HANDLE_VALUE), &policy, &wd);
-
-    bool ok = false;
-    if (status == ERROR_SUCCESS) {
-        CRYPT_PROVIDER_DATA* pd = WTHelperProvDataFromStateData(wd.hWVTStateData);
-        CRYPT_PROVIDER_SGNR* signer = pd ? WTHelperGetProvSignerFromChain(pd, 0, FALSE, 0) : nullptr;
-        if (signer && signer->csCertChain > 0 && signer->pasCertChain[0].pCert) {
-            wchar_t subject[256] = {};
-            CertGetNameStringW(signer->pasCertChain[0].pCert, CERT_NAME_SIMPLE_DISPLAY_TYPE, 0,
-                               nullptr, subject, 256);
-            ok = std::wstring(subject).rfind(L"Microsoft", 0) == 0;
-        }
-    }
-    wd.dwStateAction = WTD_STATEACTION_CLOSE;
-    WinVerifyTrust(static_cast<HWND>(INVALID_HANDLE_VALUE), &policy, &wd);
-    return ok;
+    const SignatureInfo s = verify_signature(file);
+    return s.trusted && s.signer.rfind("Microsoft", 0) == 0;
 }
 
 /// Cached, signature-checked bootstrapper; downloaded on first use.
@@ -309,6 +281,21 @@ std::string generate_nsi(const std::string& name, const PackageOptions& opts, co
     s += "VIAddVersionKey \"LegalCopyright\" \"(c) " + nsis_str(publisher) + "\"\n";
     s += "VIAddVersionKey \"FileDescription\" \"" + nsis_str(name) + " installer\"\n\n";
 
+    if (!opts.icon.empty()) {  // installer + uninstaller icon (the app exe embeds its own)
+        s += "!define MUI_ICON \"" + nsis_str(fs::absolute(opts.icon).string()) + "\"\n";
+        s += "!define MUI_UNICON \"" + nsis_str(fs::absolute(opts.icon).string()) + "\"\n";
+    }
+    if (opts.sign) {
+        // makensis signs both outputs itself (NSIS 3.08+): the uninstaller as
+        // it is generated, the installer once written.  The hooks call back
+        // into this CLI, which takes the secrets from ANYAR_SIGN_* — nothing
+        // sensitive is written into this script.
+        const std::string self = nsis_str(executable_path().string());
+        s += "!uninstfinalize '\"" + self + "\" sign-file \"%1\" \"" + nsis_str(name) +
+             " Uninstaller\"' = 0\n";
+        s += "!finalize '\"" + self + "\" sign-file \"%1\" \"" + nsis_str(name) +
+             " Setup\"' = 0\n";
+    }
     s += "!define MUI_FINISHPAGE_RUN \"$INSTDIR\\" + nsis_str(exe) + "\"\n";
     s += "!insertmacro MUI_PAGE_DIRECTORY\n!insertmacro MUI_PAGE_INSTFILES\n"
          "!insertmacro MUI_PAGE_FINISH\n";
@@ -432,6 +419,14 @@ int package_installer(const std::string& name, const fs::path& build_dir,
         return 1;
     }
     print_success("Installer: " + out_exe.string() + " (" + human_size(fs::file_size(out_exe)) + ")");
+    if (opts.sign) {
+        const SignatureInfo s = verify_signature(out_exe);
+        if (!s.signed_) {
+            print_error("The installer is not signed — check the !finalize output above");
+            return 1;
+        }
+        print_success("Installer " + describe(s));
+    }
     print_info("Silent install: " + out_exe.filename().string() + " /S   " +
                "(uninstall: \"<install dir>\\Uninstall.exe\" /S)");
     return 0;

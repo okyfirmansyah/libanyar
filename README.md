@@ -172,7 +172,10 @@ ffmpeg:x64-windows`). Not yet: the `anyar-shm://` / `anyar-file://` URI schemes 
 `/__anyar__/file/`), and the wifi-analyzer example.
 
 Ship with `anyar build --package installer` (NSIS `setup.exe`: per-user by default, bundles the
-WebView2 bootstrapper for machines without the runtime; needs NSIS 3) or `--package zip`.
+WebView2 bootstrapper for machines without the runtime; needs NSIS 3) or `--package zip`. Put an
+`icon.png` in the project root to brand the exe, window and installer. Add `--sign-cert app.pfx` (or
+`--sign-thumbprint` / `--sign-command`) to Authenticode-sign the app, installer and uninstaller. See
+[docs/packaging.md](docs/packaging.md#windows).
 
 ## Pinhole Native Rendering
 

@@ -59,6 +59,14 @@ add_executable()" + name + R"(
 
 target_link_libraries()" + name + R"( PRIVATE anyar_core)
 
+# App icon (Windows: embedded into the exe — window, taskbar, shortcuts).
+# `anyar build` converts icon.png / icon.ico (project root, assets/ or
+# frontend/public/) and passes it as ANYAR_APP_ICON.
+include(AnyarAppIcon)
+if(ANYAR_APP_ICON)
+    anyar_app_icon()" + name + R"( "${ANYAR_APP_ICON}")
+endif()
+
 # ── Frontend: embed into binary or copy to build dir ────────────────────────
 set(FRONTEND_DIST_DIR ${CMAKE_CURRENT_SOURCE_DIR}/frontend/dist)
 

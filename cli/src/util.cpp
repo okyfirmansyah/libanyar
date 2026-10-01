@@ -20,25 +20,27 @@ static const char* RED     = "\033[31m";
 static const char* CYAN    = "\033[36m";
 static const char* MAGENTA = "\033[35m";
 
+// Plain mode: ASCII markers, no colours — for output relayed by another tool
+// (e.g. `anyar sign-file` under makensis, which re-encodes child output).
+static bool g_plain = false;
+
+void set_plain_output(bool plain) { g_plain = plain; }
+
+static void emit(std::ostream& os, const char* colour, const char* glyph, const char* ascii,
+                 const std::string& text) {
+    if (g_plain) os << "  " << ascii << " " << text << std::endl;
+    else os << colour << "  " << glyph << " " << RESET << text << std::endl;
+}
+
 void print_header(const std::string& text) {
+    if (g_plain) { std::cout << "\n  " << text << "\n" << std::endl; return; }
     std::cout << "\n" << BOLD << MAGENTA << "  " << text << RESET << "\n" << std::endl;
 }
 
-void print_success(const std::string& text) {
-    std::cout << GREEN << "  ✓ " << RESET << text << std::endl;
-}
-
-void print_error(const std::string& text) {
-    std::cerr << RED << "  ✗ " << RESET << text << std::endl;
-}
-
-void print_info(const std::string& text) {
-    std::cout << CYAN << "  ℹ " << RESET << text << std::endl;
-}
-
-void print_step(const std::string& text) {
-    std::cout << YELLOW << "  → " << RESET << text << std::endl;
-}
+void print_success(const std::string& text) { emit(std::cout, GREEN, "✓", "[ok]", text); }
+void print_error(const std::string& text)   { emit(std::cerr, RED, "✗", "[error]", text); }
+void print_info(const std::string& text)    { emit(std::cout, CYAN, "ℹ", "[info]", text); }
+void print_step(const std::string& text)    { emit(std::cout, YELLOW, "→", "->", text); }
 
 // ── User prompts ────────────────────────────────────────────────────────────
 
@@ -165,6 +167,16 @@ std::string platform_configure_args(const fs::path& build_dir) {
     (void)build_dir;
     return {};
 #endif
+}
+
+fs::path find_app_icon(const fs::path& project_dir) {
+    for (const char* dir : {"", "assets", "frontend/public"}) {
+        for (const char* file : {"icon.ico", "icon.png"}) {
+            fs::path p = project_dir / dir / file;
+            if (fs::exists(p)) return p;
+        }
+    }
+    return {};
 }
 
 fs::path find_app_binary(const fs::path& build_dir, const std::string& name,
