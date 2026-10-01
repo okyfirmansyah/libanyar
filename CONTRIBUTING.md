@@ -6,10 +6,10 @@ Thank you for your interest in contributing to LibAnyar! This document covers th
 
 ### Prerequisites
 
-- GCC 11+ (C++17 required)
+- GCC 11+ (C++17 required) — or, on Windows, Visual Studio 2022 + vcpkg (`scripts\setup-windows.ps1`)
 - CMake ≥ 3.16
 - Node.js ≥ 18
-- [LibAsyik](https://github.com/okyfirmansyah/libasyik) 1.7.1+ installed
+- [LibAsyik](https://github.com/okyfirmansyah/libasyik) 1.7.1+ installed (1.8.1+ on Windows; the setup scripts pin 1.8.1)
 
 ### Build from Source
 
@@ -21,12 +21,28 @@ cmake .. -DCMAKE_BUILD_TYPE=Debug -DANYAR_BUILD_TESTS=ON
 make -j$(nproc)
 ```
 
+On Windows (after `scripts\setup-windows.ps1`):
+
+```powershell
+cmake -B build-win -G "Visual Studio 17 2022" -A x64 `
+  -DCMAKE_TOOLCHAIN_FILE=C:\vcpkg\scripts\buildsystems\vcpkg.cmake `
+  -DCMAKE_PREFIX_PATH=$PWD\build-deps\libasyik -DANYAR_BUILD_TESTS=ON
+cmake --build build-win --config Release
+```
+
 ### Run Tests
 
 ```bash
 cd build
 ctest --output-on-failure
+# Windows: ctest --test-dir build-win -C Release --output-on-failure
+# Tests labelled "display" open real windows (Linux CI runs them under xvfb;
+# Windows CI runs them as a non-blocking step).
 ```
+
+Platform code lives in `*_linux.cpp` / `*_win32.cpp`. If you change shared code
+(`app.cpp`, `window.cpp`, `shared_buffer.cpp`, …), make sure both platforms still
+build. CI covers Linux (GCC) and Windows (MSVC).
 
 ## Project Structure
 

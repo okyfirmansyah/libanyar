@@ -83,6 +83,12 @@ public:
     /// Callers must cast per-platform. Returns nullptr if window is destroyed.
     void* native_handle() const;
 
+    /// Returns the opaque browser-engine handle.
+    /// On Linux: WebKitWebView*. On Windows: ICoreWebView2Controller*.
+    /// On macOS: WKWebView*. Callers must cast per-platform. Returns nullptr
+    /// if the window is destroyed.  Use on the main thread only.
+    void* browser_controller() const;
+
     // ── Parent / Child / Modal ──────────────────────────────────────────
 
     /// Establish parent/child (transient) relationship.

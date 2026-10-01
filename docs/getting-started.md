@@ -23,9 +23,29 @@ sudo apt-get install -y \
     nlohmann-json3-dev
 ```
 
+### Windows 10 / 11
+
+Install Visual Studio 2022 (or its Build Tools) with *Desktop development with C++*,
+CMake, Git and [vcpkg](https://vcpkg.io). The Edge WebView2 runtime is preinstalled on
+Windows 11. Then, from the repo root:
+
+```powershell
+# vcpkg packages (Boost, OpenSSL, SOCI, nlohmann-json, WebView2 SDK) + LibAsyik 1.8.1
+powershell -ExecutionPolicy Bypass -File scripts\setup-windows.ps1 -VcpkgRoot C:\vcpkg
+
+cmake -B build-win -G "Visual Studio 17 2022" -A x64 `
+  -DCMAKE_TOOLCHAIN_FILE=C:\vcpkg\scripts\buildsystems\vcpkg.cmake `
+  -DCMAKE_PREFIX_PATH=$PWD\build-deps\libasyik
+cmake --build build-win --config Release
+```
+
+`anyar init/dev/build` work the same on Windows. On a fresh build directory the CLI adds
+the vcpkg toolchain (`VCPKG_ROOT` or `C:\vcpkg`) and the LibAsyik prefix itself. Ship with
+`anyar build --package installer`, which needs NSIS 3, or `--package zip`.
+
 ### LibAsyik
 
-LibAnyar depends on [LibAsyik](https://github.com/okyfirmansyah/libasyik) 1.7.1+ (needed for clean shutdown with open HTTP connections), which includes Boost 1.81+ and SOCI 4.0.3.
+LibAnyar depends on [LibAsyik](https://github.com/okyfirmansyah/libasyik) 1.7.1+ (needed for clean shutdown with open HTTP connections; 1.8.1+ on Windows), which includes Boost 1.81+ and SOCI 4.0.3.
 
 Install LibAsyik from source:
 

@@ -4,8 +4,9 @@
 /// @brief Native overlay ("pinhole") rendering API for LibAnyar.
 ///
 /// A Pinhole reserves a DOM rectangle as a transparent placeholder and renders
-/// a native GPU surface positioned exactly over that element, on top of the
-/// webview compositor output, inside the same OS window.  C++ draws directly
+/// a native GPU surface positioned exactly at that element, BELOW the
+/// (transparent) webview, inside the same OS window — HTML composites on top.
+/// C++ draws directly
 /// to the native GL/Metal/D3D surface — no JS in the hot path, no SharedBuffer
 /// copy, no texImage2D upload.
 ///
@@ -29,7 +30,8 @@
 ///
 /// @par Platform-specific implementation files
 ///   - Linux: core/src/pinhole_linux.cpp (GtkOverlay + GtkGLArea)
-///   - Windows (Phase 7): core/src/pinhole_win32.cpp (DComp + D3D11)
+///   - Windows: core/src/pinhole_win32.cpp (DComp + D3D11 below a transparent
+///              windowed WebView2, ADR-012)
 ///   - macOS  (Phase 7): core/src/pinhole_macos.mm  (CAMetalLayer)
 
 #include <anyar/types.h>
@@ -138,7 +140,8 @@ public:
     const std::string& id() const;
 
     /// Register the render callback.  Called once per requested/continuous frame.
-    /// The callback runs on the GTK main thread (Linux) with the GL context current.
+    /// The callback runs on the UI main thread (GTK / Win32 message loop) with
+    /// the GL context current (Linux) or a D3D11 render target bound (Windows).
     /// Thread-safe: safe to call from any thread before the first redraw.
     ///
     /// @par Fiber safety
@@ -184,7 +187,7 @@ public:
     /// Returns the self-contained JS bootstrap snippet that auto-discovers
     /// [data-anyar-pinhole] elements and tracks their rects via IPC.
     /// Injected once per window by Window::create_pinhole().
-    /// Returns an empty string on non-Linux platforms.
+    /// Platform-neutral (core/src/pinhole_tracking.cpp).
     static std::string tracking_js();
 
     /// Register a callback fired when the placeholder element is removed from
@@ -234,7 +237,8 @@ public:
     /// @internal
     /// Platform-specific initialisation — called by Window::create_pinhole()
     /// once after the Pinhole object has been constructed.
-    /// @param overlay  GtkOverlay* (Linux), nullptr on other platforms.
+    /// @param overlay  GtkOverlay* (Linux), std::shared_ptr<PinholeHost>*
+    ///                 (Windows), nullptr elsewhere.
     /// @param eval_fn  Webview JS eval function used by the canvas fallback
     ///                 path (4g.5) to inject and drive a 2D-canvas renderer
     ///                 when GL is unavailable.  May be empty on platforms
@@ -246,7 +250,7 @@ public:
     /// @internal  Test affordance: replace the eval function set by
     /// platform_init().  Production code should not need this.  Allows tests
     /// to capture JS injected by the fallback path without a real webview.
-    /// No-op on non-Linux platforms.
+    /// No-op on platforms without the canvas fallback (macOS stub).
     void override_eval_fn_for_test(std::function<void(const std::string&)> fn);
 
 private:

@@ -1,7 +1,16 @@
 cmake_minimum_required(VERSION 3.16)
 
 # ── Catch2 (bundled with LibAsyik) ───────────────────────────────────────────
-set(CATCH2_INCLUDE_DIR "/usr/local/include/libasyik/external/test/catch/single_include")
+# Installed under <libasyik prefix>/include/libasyik/external/test/catch/...
+# (/usr/local on Linux; CMAKE_PREFIX_PATH, e.g. build-deps/libasyik, on Windows).
+find_path(CATCH2_INCLUDE_DIR catch2/catch.hpp
+    PATHS /usr/local/include/libasyik/external/test/catch/single_include
+    PATH_SUFFIXES libasyik/external/test/catch/single_include
+)
+if(NOT CATCH2_INCLUDE_DIR)
+    message(FATAL_ERROR "Catch2 (catch2/catch.hpp) not found — it ships with "
+        "the LibAsyik install; set CATCH2_INCLUDE_DIR if it lives elsewhere.")
+endif()
 
 # ── Helper: create a test executable linked to anyar_core + Catch2 ───────────
 function(anyar_add_test TEST_NAME)
@@ -80,11 +89,25 @@ anyar_add_test(test_http_file
 )
 
 # ── WebGL E2E Tests (requires display) ───────────────────────────────────────
-add_subdirectory(webgl)
+# Fetches frames via anyar-shm://, which WebView2 does not serve yet.
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    add_subdirectory(webgl)
+endif()
 
 # ── Native window close regression (requires display) ───────────────────────
-if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux" OR WIN32)
     add_subdirectory(window_close)
+    # window:close-all arriving while the main window is still being created
+    add_subdirectory(early_close)
+endif()
+
+# ── Native IPC end-to-end through a real webview (requires display) ─────────
+# Platform-neutral; enabled on Windows first — turn on for Linux once it has
+# been verified under the CI xvfb job.
+if(WIN32)
+    add_subdirectory(native_ipc)
+    # Pinhole (DComp + D3D11) pixel test via PrintWindow
+    add_subdirectory(pinhole_win32)
 endif()
 
 # ── Pinhole: lifecycle + unit tests ─────────────────────────────────────────

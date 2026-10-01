@@ -8,6 +8,7 @@
 #include <anyar/event_bus.h>
 #include <anyar/ipc_router.h>
 #include <anyar/app_config.h>
+#include <anyar/path.h>
 #include <anyar/plugins/db_plugin.h>
 
 #include <libasyik/service.hpp>
@@ -21,15 +22,18 @@
 #include <chrono>
 #include <atomic>
 #include <random>
+#include "test_port.h"
+
+#ifdef _WIN32
+#include <windows.h>  // GetModuleFileNameW
+#endif
 
 using namespace anyar;
 using json = nlohmann::json;
 
-// Pick a random ephemeral port to reduce collision risk between test runs
+// OS-chosen free port (see test_port.h for why not a random one)
 static int pick_test_port() {
-    static std::mt19937 gen(std::random_device{}());
-    std::uniform_int_distribution<int> dist(49152, 60999);
-    return dist(gen);
+    return anyar_test::free_port();
 }
 
 // ─── IpcRouter integration tests ────────────────────────────────────────────
@@ -341,7 +345,13 @@ TEST_CASE("resolve_dist_path: cwd first, then next to the executable",
           "[app][dist]")
 {
     namespace fs = std::filesystem;
+#ifdef _WIN32
+    wchar_t exe_buf[MAX_PATH];
+    GetModuleFileNameW(nullptr, exe_buf, MAX_PATH);
+    const fs::path exe_dir = fs::path(exe_buf).parent_path();
+#else
     const fs::path exe_dir = fs::read_symlink("/proc/self/exe").parent_path();
+#endif
     const fs::path old_cwd = fs::current_path();
     const std::string name =
         "dist-resolve-" + std::to_string(std::random_device{}());
@@ -377,6 +387,13 @@ TEST_CASE("resolve_dist_path: cwd first, then next to the executable",
         auto r = anyar::resolve_dist_path("./" + name + "-missing");
         REQUIRE(r.path.empty());
         REQUIRE(r.tried.size() == 2);
+    }
+
+    SECTION("non-ASCII directory names round-trip as UTF-8") {
+        const std::string utf8_name = name + u8"-dïst-日本";  // dïst-日本
+        fs::create_directories(cwd / anyar::path_from_utf8(utf8_name));
+        auto r = anyar::resolve_dist_path(utf8_name);
+        REQUIRE(r.path == anyar::path_to_utf8((cwd / anyar::path_from_utf8(utf8_name)).lexically_normal()));
     }
 
     fs::current_path(old_cwd);

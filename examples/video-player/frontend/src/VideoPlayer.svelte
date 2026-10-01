@@ -6,7 +6,8 @@
    * Render paths:
    *   pinhole  C++ draws into a native GL surface under this placeholder div;
    *            JS only drives the clock.
-   *   webgl    buffer:ready → anyar-shm:// fetch → WebGL FrameRenderer.
+   *   webgl    buffer:ready → fetchBuffer (anyar-shm:// on Linux, zero-copy
+   *            WebView2 shared buffer on Windows) → WebGL FrameRenderer.
    *
    * Seek protocol (keeps audio and video from drifting apart):
    *   1. pause audio and stop clock sync
@@ -101,7 +102,8 @@
     const unlistenBuffer = listen('buffer:ready', async (event) => {
       if (!event?.pool?.startsWith('video-frames')) return;
       try {
-        const data = await fetchBuffer(event.url);
+        // Live view where supported (Windows): the slot is released in finally.
+        const data = await fetchBuffer(event.url, { copy: false, id: event.id });
         const meta = event.metadata || {};
         const f = meta.format || 'rgba';
         if (!r || f !== fmt || meta.width !== rw || meta.height !== rh) {

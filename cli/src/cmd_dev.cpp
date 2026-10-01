@@ -3,28 +3,17 @@
 
 #include "cli.h"
 #include <iostream>
-#include <csignal>
-#include <cstdlib>
-#include <sys/wait.h>
-#include <unistd.h>
-#include <fstream>
 #include <thread>
-#include <chrono>
 
 namespace anyar_cli {
 
-static pid_t vite_pid = 0;
-static pid_t app_pid = 0;
+static ChildProcess vite_proc;
+static ChildProcess app_proc;
 
-static void cleanup(int /*sig*/) {
-    if (vite_pid > 0) kill(vite_pid, SIGTERM);
-    if (app_pid > 0) kill(app_pid, SIGTERM);
-    // Wait for children
-    int status;
-    if (vite_pid > 0) waitpid(vite_pid, &status, WNOHANG);
-    if (app_pid > 0) waitpid(app_pid, &status, WNOHANG);
-    std::cout << std::endl;
-    _exit(0);
+/// Ctrl+C / SIGTERM: stop both children (Windows: their whole trees).
+static void stop_children() {
+    kill_child(vite_proc);
+    kill_child(app_proc);
 }
 
 static void print_dev_usage() {
@@ -62,37 +51,20 @@ int cmd_dev(int argc, char* argv[]) {
         return 1;
     }
 
-    // Detect project name from CMakeLists.txt
-    std::string project_name;
-    {
-        std::ifstream f(project_dir / "CMakeLists.txt");
-        std::string line;
-        while (std::getline(f, line)) {
-            auto pos = line.find("project(");
-            if (pos != std::string::npos) {
-                auto start = pos + 8;
-                auto end = line.find_first_of(" )", start);
-                if (end != std::string::npos) {
-                    project_name = line.substr(start, end - start);
-                }
-                break;
-            }
-        }
-    }
-    if (project_name.empty()) project_name = "app";
+    const std::string project_name = read_project_name(project_dir / "CMakeLists.txt");
+    const std::string build_type = "Debug";
 
     print_header("LibAnyar Development Server");
 
-    // Install signal handler for clean shutdown
-    signal(SIGINT, cleanup);
-    signal(SIGTERM, cleanup);
+    // Clean shutdown on Ctrl+C
+    on_interrupt(stop_children);
 
     // ── 1) Start Vite dev server ────────────────────────────────────────
     if (run_frontend) {
         print_step("Starting Vite dev server...");
-        vite_pid = run_bg("npm run dev", project_dir / "frontend");
-        if (vite_pid > 0) {
-            print_success("Vite dev server started (PID " + std::to_string(vite_pid) + ")");
+        vite_proc = run_bg("npm run dev", project_dir / "frontend");
+        if (vite_proc.valid()) {
+            print_success("Vite dev server started (PID " + std::to_string(vite_proc.pid) + ")");
         } else {
             print_error("Failed to start Vite dev server");
         }
@@ -104,10 +76,11 @@ int cmd_dev(int argc, char* argv[]) {
         fs::create_directories(build_dir);
 
         print_step("Configuring CMake...");
-        int rc = run("cmake .. -DCMAKE_BUILD_TYPE=Debug", build_dir);
+        int rc = run("cmake .. -DCMAKE_BUILD_TYPE=" + build_type +
+                     platform_configure_args(build_dir), build_dir);
         if (rc != 0) {
             print_error("CMake configuration failed");
-            cleanup(0);
+            stop_children();
             return 1;
         }
 
@@ -116,55 +89,54 @@ int cmd_dev(int argc, char* argv[]) {
         if (cores == 0) cores = 4;
 
         print_step("Building C++ backend...");
-        rc = run("make -j" + std::to_string(cores), build_dir);
+        rc = run("cmake --build . --config " + build_type + " --parallel " +
+                 std::to_string(cores), build_dir);
         if (rc != 0) {
             print_error("C++ build failed");
-            cleanup(0);
+            stop_children();
             return 1;
         }
         print_success("C++ backend built");
 
         // ── 3) Run the app ──────────────────────────────────────────────
-        // Check for run.sh in project or libanyar root
-        fs::path binary = build_dir / project_name;
-        if (!fs::exists(binary)) {
-            print_error("Binary not found: " + binary.string());
-            cleanup(0);
+        fs::path binary = find_app_binary(build_dir, project_name, build_type);
+        if (binary.empty()) {
+            print_error("Binary not found for project '" + project_name + "' in " +
+                        build_dir.string());
+            stop_children();
             return 1;
         }
 
         print_step("Starting " + project_name + "...");
         std::cout << std::endl;
 
+        std::string run_cmd = shell_quote(binary.string());
+#ifdef __linux__
         // Use run.sh if available (handles snap GTK env issues)
         fs::path run_script = find_libanyar_root(project_dir) / "run.sh";
-        std::string run_cmd;
         if (fs::exists(run_script)) {
-            run_cmd = "bash " + run_script.string() + " ./" + project_name;
-        } else {
-            run_cmd = "./" + project_name;
+            run_cmd = "bash " + shell_quote(run_script.string()) + " " + run_cmd;
         }
+#endif
 
-        app_pid = run_bg(run_cmd, build_dir);
-        if (app_pid > 0) {
-            print_success(project_name + " started (PID " + std::to_string(app_pid) + ")");
+        app_proc = run_bg(run_cmd, binary.parent_path());
+        if (app_proc.valid()) {
+            print_success(project_name + " started (PID " + std::to_string(app_proc.pid) + ")");
         }
 
         // Wait for the app to exit
-        int status;
-        waitpid(app_pid, &status, 0);
-        app_pid = 0;
-
+        wait_child(app_proc);
         print_info(project_name + " exited");
     }
 
-    // Clean up frontend server
-    if (vite_pid > 0) {
-        kill(vite_pid, SIGTERM);
-        int status;
-        waitpid(vite_pid, &status, 0);
-        vite_pid = 0;
+    if (!run_backend && vite_proc.valid()) {
+        // Frontend-only: keep serving until Ctrl+C (or Vite exits).
+        wait_child(vite_proc);
+        return 0;
     }
+
+    // Clean up frontend server
+    kill_child(vite_proc);
 
     return 0;
 }

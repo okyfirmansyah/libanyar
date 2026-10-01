@@ -155,8 +155,8 @@ await writeBuffer('my-frame', pixels);
 
 ---
 
-#### `fetchBuffer(nameOrUrl)`
-Fetch buffer contents via the `anyar-shm://` URI scheme. Returns raw binary data.
+#### `fetchBuffer(nameOrUrl, options?)`
+Fetches a buffer's contents and returns the raw binary data. The transport depends on the platform (see below).
 
 ```ts
 const data: ArrayBuffer = await fetchBuffer('my-frame');
@@ -169,7 +169,29 @@ const pixels = new Uint8Array(data);
 
 **Returns:** `Promise<ArrayBuffer>`
 
-This uses `fetch('anyar-shm://<name>')` internally — zero-copy on Linux (WebKitGTK reads the mmap'd region directly via `g_bytes_new_static()`).
+| Option | Default | Meaning |
+|---|---|---|
+| `copy` | `true` | `true` returns a snapshot. `false` returns the live memory where the platform supports it (Windows), for consumers that read immediately and then release a pool slot. |
+| `id` | — | Generation id from a `buffer:ready` payload. On Windows, it skips the attach round trip when the page already holds that generation. |
+
+Transport by platform:
+
+- **Linux:** `fetch('anyar-shm://<name>')`. WebKitGTK reads the mmap'd region through `g_bytes_new_static()`.
+- **Windows (WebView2):**
+  1. The page calls `buffer:attach {name, have}`.
+  2. C++ posts the buffer's own memory with `PostSharedBufferToScript`.
+  3. The page caches the `ArrayBuffer` per name and generation.
+
+  Steady-state frames therefore cost no IPC. `copy: false` returns that memory directly (~0.01 ms for 8 MiB), and the default does one in-renderer `slice`.
+- **Fallback (both platforms):** `GET /__anyar__/buffer/<name>` over loopback HTTP. On Windows it is used when a buffer was created before any window existed, the runtime is older than 1.0.1661, or the window uses a different WebView2 environment. See [ADR-011](decisions.md).
+
+```ts
+// per-frame, zero-copy where supported (pool slot released right after drawing)
+onBufferReady(async (e) => {
+  renderer.drawFrame(await fetchBuffer(e.url, { copy: false, id: e.id }));
+  await poolReleaseRead(e.pool!, e.name);
+});
+```
 
 ---
 
@@ -463,7 +485,7 @@ await invoke('video:start');
 | Platform | Backend | Status |
 |---|---|---|
 | Linux | POSIX `shm_open()` + WebKitGTK `anyar-shm://` | ✅ Implemented |
-| Windows | `CreateFileMapping` + WebView2 virtual host | 🔲 Planned |
+| Windows | WebView2 shared buffer (`CreateSharedBuffer` → `PostSharedBufferToScript`, pulled by `buffer:attach`); file mapping + HTTP fallback | ✅ Implemented ([ADR-011](decisions.md)) |
 | macOS | `shm_open()` + WKWebView URL scheme | 🔲 Planned |
 
 ---

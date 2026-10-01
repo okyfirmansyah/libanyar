@@ -2,7 +2,8 @@
 # LibAnyar — CircleCI Configuration
 # ─────────────────────────────────────────────────────────────────────────────
 # Builds the C++ core library + tests, and validates the JS bridge compiles.
-# Uses Ubuntu 22.04 (matches dev environment).
+# Linux only: Ubuntu 22.04 (matches dev environment). Windows CI runs on GitHub
+# Actions (.github/workflows/windows.yml), so each platform has its own badge.
 #
 # C++ dependencies (Boost 1.81, SOCI 4.0.3, LibAsyik) are built from source
 # and stored in a single /usr/local cache to avoid CircleCI glob limitations.
@@ -52,7 +53,7 @@ jobs:
       #    entire /usr/local/lib and /usr/local/include directories.
       - restore_cache:
           keys:
-            - cpp-deps-v4-{{ arch }}
+            - cpp-deps-v5-{{ arch }}
 
       # ── Boost 1.81 ────────────────────────────────────────────────────
       - run:
@@ -108,7 +109,7 @@ jobs:
               exit 0
             fi
             cd /tmp
-            git clone --branch 1.7.1 --depth=1 https://github.com/okyfirmansyah/libasyik libasyik-src
+            git clone --branch 1.8.1 --depth=1 https://github.com/okyfirmansyah/libasyik libasyik-src
             cd libasyik-src
             git submodule update --init --recursive
             mkdir build_ci && cd build_ci
@@ -122,7 +123,7 @@ jobs:
 
       # ── Save combined C++ dependency cache ────────────────────────────
       - save_cache:
-          key: cpp-deps-v4-{{ arch }}
+          key: cpp-deps-v5-{{ arch }}
           paths:
             - /usr/local/lib
             - /usr/local/include
@@ -164,7 +165,7 @@ jobs:
               -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE} \
               -DANYAR_BUILD_TESTS=ON \
               -DANYAR_BUILD_EXAMPLES=OFF \
-              -DANYAR_BUILD_CLI=OFF
+              -DANYAR_BUILD_CLI=ON
       - run:
           name: "C++: Build"
           command: |

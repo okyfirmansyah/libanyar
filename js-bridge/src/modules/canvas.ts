@@ -589,8 +589,9 @@ export function createBufferRenderer(
     if (event.pool !== options.pool) return;
 
     try {
-      // Fetch the buffer data via anyar-shm://
-      const data = await fetchBuffer(event.url);
+      // Fetch the frame — zero-copy where the platform maps it (the slot is
+      // released right after drawFrame(), so a live view is safe).
+      const data = await fetchBuffer(event.url, { copy: false, id: event.id });
 
       // Check if dimensions changed via metadata
       const meta = event.metadata;

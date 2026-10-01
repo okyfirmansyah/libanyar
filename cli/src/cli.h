@@ -15,27 +15,117 @@ int cmd_init(int argc, char* argv[]);
 int cmd_dev(int argc, char* argv[]);
 int cmd_build(int argc, char* argv[]);
 
-// ── Packaging (Linux) ───────────────────────────────────────────────────────
+// ── Packaging ───────────────────────────────────────────────────────────────
 
-/// Package a built application into the given format.
-/// @param format   "deb", "appimage", or "all"
+/// Options for package_app() (from `anyar build --package …`).
+struct PackageOptions {
+    /// Linux: "deb", "appimage", "all".  Windows: "zip", "installer"
+    /// (alias "nsis"), "msi", "all".
+    std::string format;
+    std::string version = "0.1.0";   ///< Semantic version, e.g. "1.2.3"
+    std::string build_type = "Release";  ///< multi-config subdir (VS)
+    std::string publisher;           ///< Installer publisher (default: app name)
+    std::string install_scope = "user";  ///< Windows installer: "user" | "machine"
+    std::string webview2 = "bootstrapper";  ///< Windows installers: "bootstrapper" | "skip"
+    std::string upgrade_code;        ///< Windows MSI UpgradeCode GUID (default: derived)
+    bool sign = false;               ///< Windows: Authenticode-sign app + installer
+    fs::path icon;                   ///< Windows: .ico for the installer (from prepare_icon)
+};
+
+/// Package a built application.
+/// @param opts          Format + metadata (see PackageOptions)
 /// @param project_name  CMake project name (binary name)
 /// @param project_dir   Root of the application project
 /// @param build_dir     Build directory containing the binary
-/// @param version       Semantic version string (e.g. "0.1.0")
-int package_linux(const std::string& format,
-                  const std::string& project_name,
-                  const fs::path& project_dir,
-                  const fs::path& build_dir,
-                  const std::string& version);
+int package_app(const PackageOptions& opts,
+                const std::string& project_name,
+                const fs::path& project_dir,
+                const fs::path& build_dir);
 
-// ── Utility functions ───────────────────────────────────────────────────────
+// ── Processes (process_posix.cpp / process_win32.cpp) ───────────────────────
 
-/// Run a shell command, return exit code.  Streams stdout/stderr to terminal.
+/// A background child started by run_bg().  On Windows the child and all its
+/// descendants live in a job object, so kill_child() stops the whole tree
+/// (cmd → npm → node).
+struct ChildProcess {
+    long long pid = 0;        ///< OS process id (0 = not running)
+    void* handle = nullptr;   ///< Windows process HANDLE
+    void* job = nullptr;      ///< Windows job object HANDLE
+    bool valid() const { return pid != 0; }
+};
+
+/// Run a shell command (sh -c / cmd.exe /c), return its exit code.
+/// Streams stdout/stderr to the terminal.
 int run(const std::string& cmd, const fs::path& cwd = "");
 
-/// Run a shell command in the background, return PID.
-pid_t run_bg(const std::string& cmd, const fs::path& cwd = "");
+/// Start a shell command in the background.  Returns an invalid handle on
+/// failure.
+ChildProcess run_bg(const std::string& cmd, const fs::path& cwd = "");
+
+/// Block until @p child exits; returns its exit code (-1 if unknown).
+int wait_child(ChildProcess& child);
+
+/// Terminate @p child (Windows: its whole process tree) and reap it.
+void kill_child(ChildProcess& child);
+
+/// Call @p fn on Ctrl+C / SIGINT / SIGTERM (then the process exits).
+void on_interrupt(void (*fn)());
+
+/// Prepare the terminal (Windows: UTF-8 output + ANSI colour sequences).
+void init_console();
+
+/// Absolute path of the running `anyar` executable, or empty.
+fs::path executable_path();
+
+/// Quote @p s as one shell argument for run()/run_bg() (sh or cmd.exe).
+std::string shell_quote(const std::string& s);
+
+/// Check if a command is available on PATH
+bool has_command(const std::string& cmd);
+
+// ── Build helpers (util.cpp) ────────────────────────────────────────────────
+
+/// Read `project(<name> ...)` from a CMakeLists.txt; "app" if not found.
+std::string read_project_name(const fs::path& cmakelists);
+
+/// Extra `cmake` configure arguments for this platform on a FRESH build dir
+/// (Windows: vcpkg toolchain + LibAsyik prefix when found).  Leading space.
+std::string platform_configure_args(const fs::path& build_dir);
+
+/// Locate the built app binary (single- or multi-config layout).  Empty if
+/// not found.
+fs::path find_app_binary(const fs::path& build_dir, const std::string& name,
+                         const std::string& build_type);
+
+/// The app icon for Windows builds: icon.ico / icon.png in the project root,
+/// assets/ or frontend/public/ (first match; .ico preferred).  Empty if none.
+fs::path find_app_icon(const fs::path& project_dir);
+
+// ── Windows: icons + code signing (icon_win32.cpp / sign_win32.cpp) ─────────
+#ifdef _WIN32
+/// Convert a PNG/JPEG/BMP (or copy an .ico) to a multi-size .ico (16–256 px).
+bool make_ico(const fs::path& src, const fs::path& dst);
+
+/// Result of an Authenticode check.
+struct SignatureInfo {
+    long status = 0;        ///< WinVerifyTrust result (0 = trusted)
+    bool signed_ = false;   ///< carries a signature at all
+    bool trusted = false;   ///< chain trusted on this machine
+    std::string signer;     ///< leaf certificate subject (simple display name)
+};
+SignatureInfo verify_signature(const fs::path& file);
+std::string describe(const SignatureInfo& s);
+
+/// True if ANYAR_SIGN_COMMAND / _THUMBPRINT / _CERT is set.
+bool signing_configured();
+
+/// Sign @p file with the ANYAR_SIGN_* configuration and verify a signature is
+/// present afterwards.
+bool sign_file(const fs::path& file, const std::string& description);
+
+/// `anyar sign-file <file> [description]` — used by the NSIS !finalize hooks.
+int cmd_sign_file(int argc, char* argv[]);
+#endif
 
 /// Prompt the user for text input (with a default value)
 std::string prompt(const std::string& question, const std::string& default_val = "");
@@ -50,8 +140,8 @@ void print_error(const std::string& text);
 void print_info(const std::string& text);
 void print_step(const std::string& text);
 
-/// Check if a command is available on PATH
-bool has_command(const std::string& cmd);
+/// ASCII-only, colourless output (for output relayed through other tools).
+void set_plain_output(bool plain);
 
 /// Find libanyar root by searching upward for ARCHITECTURE.md
 fs::path find_libanyar_root(const fs::path& start = fs::current_path());

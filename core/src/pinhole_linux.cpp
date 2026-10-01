@@ -17,6 +17,7 @@
 #include <anyar/frame_mailbox.h>
 #include <anyar/shared_buffer.h>
 #include <anyar/window.h>
+#include "pinhole_cpu.h"
 
 #include <epoxy/gl.h>
 #include <gtk/gtk.h>
@@ -33,6 +34,8 @@
 #include <utility>
 
 namespace anyar {
+
+using detail::cpu_draw_image;  // pinhole_cpu.cpp (shared with other platforms)
 
 // ── GLSL sources (GL 3.3 core) ───────────────────────────────────────────────
 
@@ -847,105 +850,6 @@ struct Pinhole::Impl {
     }
 };
 
-// ── CPU pixel-format → RGBA conversion (fallback render path, 4g.5) ──────────
-//
-// Converts all supported pixel_format values to packed RGBA bytes.
-// `dst` must be at least dst_w * dst_h * 4 bytes.
-// When src and dst dimensions differ, performs a cheap nearest-neighbor
-// resample so behaviour is consistent with the GL path (which stretches
-// via glViewport).
-
-static inline void yuv601_to_rgba(float y, float u, float v, uint8_t out[4]) {
-    out[0] = static_cast<uint8_t>(std::clamp(y + 1.40200f * v,                0.f, 1.f) * 255.f);
-    out[1] = static_cast<uint8_t>(std::clamp(y - 0.34414f * u - 0.71414f * v, 0.f, 1.f) * 255.f);
-    out[2] = static_cast<uint8_t>(std::clamp(y + 1.77200f * u,                0.f, 1.f) * 255.f);
-    out[3] = 255u;
-}
-
-// Sample one source pixel at integer (sx, sy) and convert to RGBA bytes in `out`.
-static inline void sample_pixel_rgba(uint8_t out[4],
-                                       const uint8_t* src, int src_w, int src_h,
-                                       int sx, int sy, pixel_format fmt)
-{
-    switch (fmt) {
-        case pixel_format::rgba: {
-            const uint8_t* p = src + (static_cast<std::size_t>(sy) * src_w + sx) * 4;
-            out[0] = p[0]; out[1] = p[1]; out[2] = p[2]; out[3] = p[3];
-            break;
-        }
-        case pixel_format::bgra: {
-            const uint8_t* p = src + (static_cast<std::size_t>(sy) * src_w + sx) * 4;
-            out[0] = p[2]; out[1] = p[1]; out[2] = p[0]; out[3] = p[3];
-            break;
-        }
-        case pixel_format::rgb: {
-            const uint8_t* p = src + (static_cast<std::size_t>(sy) * src_w + sx) * 3;
-            out[0] = p[0]; out[1] = p[1]; out[2] = p[2]; out[3] = 255u;
-            break;
-        }
-        case pixel_format::grayscale: {
-            const uint8_t g = src[static_cast<std::size_t>(sy) * src_w + sx];
-            out[0] = out[1] = out[2] = g; out[3] = 255u;
-            break;
-        }
-        case pixel_format::yuv420: {
-            const int      cw = (src_w + 1) / 2;
-            const int      ch = (src_h + 1) / 2;
-            const uint8_t* Y  = src;
-            const uint8_t* U  = Y + static_cast<std::size_t>(src_w) * src_h;
-            const uint8_t* V  = U + static_cast<std::size_t>(cw)    * ch;
-            const float    y  = Y[static_cast<std::size_t>(sy) * src_w + sx] * (1.f / 255.f);
-            const float    u  = U[static_cast<std::size_t>(sy / 2) * cw + (sx / 2)] * (1.f / 255.f) - 0.5f;
-            const float    v  = V[static_cast<std::size_t>(sy / 2) * cw + (sx / 2)] * (1.f / 255.f) - 0.5f;
-            yuv601_to_rgba(y, u, v, out);
-            break;
-        }
-        case pixel_format::nv12:
-        case pixel_format::nv21: {
-            const int      cw    = (src_w + 1) / 2;
-            const bool     nv21  = (fmt == pixel_format::nv21);
-            const uint8_t* Y     = src;
-            const uint8_t* UV    = Y + static_cast<std::size_t>(src_w) * src_h;
-            const float    y     = Y[static_cast<std::size_t>(sy) * src_w + sx] * (1.f / 255.f);
-            const std::size_t ix = (static_cast<std::size_t>(sy / 2) * cw + (sx / 2)) * 2;
-            const float    c0    = UV[ix]     * (1.f / 255.f) - 0.5f;
-            const float    c1    = UV[ix + 1] * (1.f / 255.f) - 0.5f;
-            const float    u     = nv21 ? c1 : c0;
-            const float    v     = nv21 ? c0 : c1;
-            yuv601_to_rgba(y, u, v, out);
-            break;
-        }
-    }
-}
-
-static void cpu_draw_image(uint8_t* dst, int dst_w, int dst_h,
-                            const uint8_t* src, int src_w, int src_h,
-                            pixel_format fmt)
-{
-    if (src_w <= 0 || src_h <= 0 || dst_w <= 0 || dst_h <= 0) return;
-
-    // Identity-size fast path for rgba (memcpy)
-    if (src_w == dst_w && src_h == dst_h && fmt == pixel_format::rgba) {
-        std::memcpy(dst, src, static_cast<std::size_t>(src_w) * src_h * 4);
-        return;
-    }
-
-    // General case (with optional nearest-neighbor resample).  Uses 64-bit
-    // intermediates so it stays correct for very large dst dims.
-    for (int y = 0; y < dst_h; ++y) {
-        const int sy = static_cast<int>(
-            (static_cast<std::int64_t>(y) * src_h) / dst_h);
-        const int sy_c = sy < src_h ? sy : src_h - 1;
-        for (int x = 0; x < dst_w; ++x) {
-            const int sx = static_cast<int>(
-                (static_cast<std::int64_t>(x) * src_w) / dst_w);
-            const int sx_c = sx < src_w ? sx : src_w - 1;
-            sample_pixel_rgba(&dst[(static_cast<std::size_t>(y) * dst_w + x) * 4],
-                               src, src_w, src_h, sx_c, sy_c, fmt);
-        }
-    }
-}
-
 // ── do_fallback_render() ───────────────────────────────────────────────────────
 //
 // Called from g_idle_add tasks queued by request_redraw() in fallback mode.
@@ -1438,182 +1342,6 @@ void Pinhole::set_window_active(bool active) {
         if (active && self.opts_.continuous) self.install_tick_cb_if_needed();
         else                                 self.remove_tick_cb();
     });
-}
-
-// ── tracking_js() ─────────────────────────────────────────────────────────────
-// Self-contained JS bootstrap injected via webview_init once per window.
-// Scans for [data-anyar-pinhole] elements, tracks their CSS-pixel rects via
-// ResizeObserver, hides during scroll, shows on idle after scrollend.
-// Sends IPC commands: pinhole:update_rect, pinhole:set_visible.
-// Deliberately avoids ES module syntax — must run in plain webview JS context.
-
-/* static */ std::string Pinhole::tracking_js() {
-    return R"js(
-(function () {
-  if (typeof window.__anyar_pinhole_init__ !== 'undefined') return;
-  window.__anyar_pinhole_init__ = true;
-
-  var _tracked = {};   // id → {ro, io, scrollTimer}
-  var _wlabel  = (window.__LIBANYAR_WINDOW_LABEL__ || 'main');
-
-  function _ipc(cmd, args) {
-    if (typeof window.__anyar_ipc__ !== 'function') return;
-    args.window_label = _wlabel;
-    window.__anyar_ipc__(JSON.stringify({
-      id: 'ph_' + cmd + '_' + Date.now(),
-      cmd: cmd,
-      args: args
-    })).catch(function(){});
-  }
-
-  function sendRect(id, el) {
-    var r = el.getBoundingClientRect();
-    _ipc('pinhole:update_rect', {
-      id: id,
-      x: Math.round(r.left),
-      y: Math.round(r.top),
-      width: Math.round(r.width),
-      height: Math.round(r.height),
-      dpr: window.devicePixelRatio || 1
-    });
-  }
-
-  function sendVisible(id, visible) {
-    _ipc('pinhole:set_visible', { id: id, visible: visible });
-  }
-
-  // Detach a tracked pinhole: clean up observers and signal C++.
-  function _detachTracked(id) {
-    if (!_tracked[id]) return;
-    _ipc('pinhole:dom_detached', { id: id });
-    _tracked[id].ro.disconnect();
-    _tracked[id].io.disconnect();
-    window.removeEventListener('scroll', _tracked[id].onScroll, { capture: true });
-    delete _tracked[id];
-  }
-
-  // Best-effort: if a pinhole is covered by a higher-z sibling, hide it.
-  // Only signals hide; the IntersectionObserver / scroll protocol re-shows.
-  function checkZSiblings() {
-    var ids = Object.keys(_tracked);
-    if (ids.length < 2) return;
-    var rects = {}, zidx = {};
-    ids.forEach(function(id) {
-      var el = document.querySelector('[data-anyar-pinhole="' + id + '"]');
-      if (!el) return;
-      rects[id] = el.getBoundingClientRect();
-      zidx[id]  = parseInt(window.getComputedStyle(el).zIndex) || 0;
-    });
-    ids.forEach(function(id_a) {
-      if (!rects[id_a]) return;
-      var covered = ids.some(function(id_b) {
-        if (id_a === id_b || !rects[id_b] || zidx[id_b] <= zidx[id_a]) return false;
-        var a = rects[id_a], b = rects[id_b];
-        return !(a.right <= b.left || b.right <= a.left ||
-                 a.bottom <= b.top || b.bottom <= a.top);
-      });
-      if (covered) sendVisible(id_a, false);
-    });
-  }
-
-  function setupElement(id, el) {
-    if (_tracked[id]) return;
-
-    var scrollTimer = null;
-    var isVisible   = true;
-
-    // ResizeObserver: position + size changes (including scroll reflow)
-    var ro = new ResizeObserver(function () {
-      if (isVisible) sendRect(id, el);
-    });
-    ro.observe(el);
-
-    // IntersectionObserver: handles display:none, scroll out-of-view, off-screen
-    var io = new IntersectionObserver(function (entries) {
-      entries.forEach(function (e) {
-        isVisible = e.isIntersecting;
-        sendVisible(id, isVisible);
-        if (isVisible) sendRect(id, el);
-      });
-    }, { threshold: 0 });
-    io.observe(el);
-
-    // Scroll-hide on any ancestor scroll
-    function onScroll() {
-      if (isVisible) sendVisible(id, false);
-      clearTimeout(scrollTimer);
-      scrollTimer = setTimeout(function () {
-        requestAnimationFrame(function () {
-          sendRect(id, el);
-          sendVisible(id, true);
-          isVisible = true;
-        });
-      }, 100);
-    }
-    window.addEventListener('scroll', onScroll, { passive: true, capture: true });
-
-    // Initial rect after first layout
-    requestAnimationFrame(function () { sendRect(id, el); });
-
-    _tracked[id] = { ro: ro, io: io, onScroll: onScroll };
-
-    // Check if a higher-z sibling already covers this newly registered element
-    checkZSiblings();
-  }
-
-  function scanDOM() {
-    var els = document.querySelectorAll('[data-anyar-pinhole]');
-    for (var i = 0; i < els.length; i++) {
-      var id = els[i].getAttribute('data-anyar-pinhole');
-      if (id) setupElement(id, els[i]);
-    }
-  }
-
-  // MutationObserver: track DOM additions and removals
-  var mo = new MutationObserver(function (mutations) {
-    mutations.forEach(function (m) {
-      // Removed nodes → signal dom_detached, clean up observers
-      m.removedNodes.forEach(function (n) {
-        if (n.nodeType !== 1) return;
-        var rid = n.getAttribute && n.getAttribute('data-anyar-pinhole');
-        if (rid) _detachTracked(rid);
-        var rnest = n.querySelectorAll && n.querySelectorAll('[data-anyar-pinhole]');
-        if (rnest) for (var i = 0; i < rnest.length; i++) {
-          var rnid = rnest[i].getAttribute('data-anyar-pinhole');
-          if (rnid) _detachTracked(rnid);
-        }
-      });
-      // Added nodes → set up tracking
-      m.addedNodes.forEach(function (n) {
-        if (n.nodeType !== 1) return;
-        var id = n.getAttribute && n.getAttribute('data-anyar-pinhole');
-        if (id) setupElement(id, n);
-        var nested = n.querySelectorAll && n.querySelectorAll('[data-anyar-pinhole]');
-        if (nested) {
-          for (var i = 0; i < nested.length; i++) {
-            var nid = nested[i].getAttribute('data-anyar-pinhole');
-            if (nid) setupElement(nid, nested[i]);
-          }
-        }
-      });
-    });
-  });
-
-  function boot() {
-    scanDOM();
-    mo.observe(document.documentElement, { childList: true, subtree: true });
-    // Re-scan on navigation (SPA hash/history changes)
-    window.addEventListener('popstate', scanDOM);
-    window.addEventListener('hashchange', scanDOM);
-  }
-
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', boot);
-  } else {
-    boot();
-  }
-})();
-)js";
 }
 
 // ── init_from_window (Bridge: Window → Pinhole::Impl) ─────────────────────────

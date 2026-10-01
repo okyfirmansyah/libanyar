@@ -3,6 +3,8 @@
 
 #ifdef __linux__
 #include <gtk/gtk.h>
+#elif defined(_WIN32)
+#include <windows.h>
 #endif
 
 #include <atomic>
@@ -22,10 +24,31 @@ long long elapsed_ms() {
     return std::chrono::duration_cast<std::chrono::milliseconds>(
         clock_type::now() - t_start).count();
 }
+
+// Ask the window manager to close the window ~200 ms from now, exactly as
+// the title-bar X button would.
+void schedule_native_close(void* native) {
+#ifdef __linux__
+    g_timeout_add(200, +[](gpointer data) -> gboolean {
+        close_issued_ms.store(elapsed_ms());
+        std::cerr << "[test] native close issued at " << close_issued_ms.load() << " ms\n";
+        gtk_window_close(GTK_WINDOW(data));
+        return G_SOURCE_REMOVE;
+    }, native);
+#elif defined(_WIN32)
+    HWND hwnd = static_cast<HWND>(native);
+    std::thread([hwnd]() {
+        std::this_thread::sleep_for(std::chrono::milliseconds(200));
+        close_issued_ms.store(elapsed_ms());
+        std::cerr << "[test] native close issued at " << close_issued_ms.load() << " ms\n";
+        PostMessageW(hwnd, WM_CLOSE, 0, 0);
+    }).detach();
+#endif
+}
 }  // namespace
 
 int main() {
-#ifndef __linux__
+#if !defined(__linux__) && !defined(_WIN32)
     return 0;
 #else
     anyar::AppConfig config;
@@ -46,18 +69,12 @@ int main() {
 
     app.on_window_ready([](anyar::Window& window) {
         std::cerr << "[test] window ready at " << elapsed_ms() << " ms\n";
-        auto* native = static_cast<GtkWidget*>(window.native_handle());
+        void* native = window.native_handle();
         if (!native) {
             std::cerr << "[FAIL] native_handle() returned null\n";
             std::_Exit(2);
         }
-
-        g_timeout_add(200, +[](gpointer data) -> gboolean {
-            close_issued_ms.store(elapsed_ms());
-            std::cerr << "[test] native close issued at " << close_issued_ms.load() << " ms\n";
-            gtk_window_close(GTK_WINDOW(data));
-            return G_SOURCE_REMOVE;
-        }, native);
+        schedule_native_close(native);
     });
 
     // Watchdog: fail if shutdown takes > 6 s after the close, or if the

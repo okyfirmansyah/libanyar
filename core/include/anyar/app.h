@@ -16,6 +16,7 @@
 #include <libasyik/service.hpp>
 #include <libasyik/http.hpp>
 
+#include <atomic>
 #include <map>
 #include <memory>
 #include <string>
@@ -161,6 +162,11 @@ private:
     WindowManager window_mgr_;
     WindowCreateOptions main_window_opts_;
     bool has_window_ = false;
+
+    /// Set by `window:close-all`; honoured even when it arrives before the
+    /// main window exists (WebView2 creation takes ~2 s, requests are served
+    /// meanwhile).
+    std::atomic<bool> close_all_requested_{false};
 
     /// Per-window native event sink IDs (label → sink id)
     std::map<std::string, uint64_t> native_event_sinks_;

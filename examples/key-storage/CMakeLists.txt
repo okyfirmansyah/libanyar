@@ -1,9 +1,10 @@
 cmake_minimum_required(VERSION 3.16)
 project(key_storage LANGUAGES CXX)
 
-# ── Find SQLite3 via pkg-config ──────────────────────────────────────────────
-find_package(PkgConfig REQUIRED)
-pkg_check_modules(SQLITE3 REQUIRED sqlite3)
+# ── SQLite3 ──────────────────────────────────────────────────────────────────
+# CMake's FindSQLite3 (3.14+) finds libsqlite3-dev on Linux and the vcpkg
+# `sqlite3` port on Windows.  OpenSSL comes in through anyar_core.
+find_package(SQLite3 REQUIRED)
 
 add_executable(key_storage
     src-cpp/main.cpp
@@ -12,12 +13,11 @@ add_executable(key_storage
 
 target_include_directories(key_storage PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/src-cpp
-    ${SQLITE3_INCLUDE_DIRS}
 )
 
 target_link_libraries(key_storage PRIVATE
     anyar_core
-    ${SQLITE3_LIBRARIES}
+    SQLite::SQLite3
 )
 
 # Copy the frontend dist to the build output directory

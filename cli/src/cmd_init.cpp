@@ -14,6 +14,7 @@ static void print_init_usage() {
 
   Options:
     --template, -t <name>   Template: svelte-ts, react-ts, vanilla (default: svelte-ts)
+    --no-install            Skip `npm install` in frontend/
     --help, -h              Show this help
 
   Examples:
@@ -26,6 +27,7 @@ static void print_init_usage() {
 int cmd_init(int argc, char* argv[]) {
     std::string project_name;
     std::string template_name;
+    bool install_deps = true;
 
     // Parse arguments
     for (int i = 1; i < argc; i++) {
@@ -36,6 +38,10 @@ int cmd_init(int argc, char* argv[]) {
         }
         if ((arg == "--template" || arg == "-t") && i + 1 < argc) {
             template_name = argv[++i];
+            continue;
+        }
+        if (arg == "--no-install") {
+            install_deps = false;
             continue;
         }
         if (arg[0] != '-' && project_name.empty()) {
@@ -112,12 +118,14 @@ int cmd_init(int argc, char* argv[]) {
     generate_template(template_name, project_name, dest, libanyar_root);
 
     // ── Install frontend dependencies ───────────────────────────────────
-    print_step("Installing frontend dependencies...");
-    int rc = run("npm install", dest / "frontend");
-    if (rc != 0) {
-        print_error("npm install failed. You can run it manually later.");
-    } else {
-        print_success("Frontend dependencies installed");
+    if (install_deps) {
+        print_step("Installing frontend dependencies...");
+        int rc = run("npm install", dest / "frontend");
+        if (rc != 0) {
+            print_error("npm install failed. You can run it manually later.");
+        } else {
+            print_success("Frontend dependencies installed");
+        }
     }
 
     // ── Done ────────────────────────────────────────────────────────────

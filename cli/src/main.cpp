@@ -34,6 +34,8 @@ static void print_usage() {
 }
 
 int main(int argc, char* argv[]) {
+    anyar_cli::init_console();  // Windows: UTF-8 + ANSI colours
+
     if (argc < 2) {
         print_usage();
         return 0;
@@ -62,6 +64,13 @@ int main(int argc, char* argv[]) {
     if (cmd == "build") {
         return anyar_cli::cmd_build(argc - 1, argv + 1);
     }
+
+#ifdef _WIN32
+    // Internal: called by the NSIS !finalize hooks (see package_win32.cpp).
+    if (cmd == "sign-file") {
+        return anyar_cli::cmd_sign_file(argc - 1, argv + 1);
+    }
+#endif
 
     anyar_cli::print_error("Unknown command: " + cmd);
     print_usage();

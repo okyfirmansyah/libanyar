@@ -1,8 +1,8 @@
 # LibAnyar — Progress Tracker
 
-> **Current Phase**: Post Phase 4g — Tier 1 complete (benchmarks baselined); hardening findings next
-> **Phase Status**: 🟢 Phases 1–4g complete (Linux), Phases 5–6 partial, CI green
-> **Last Updated**: 2026-09-24 (ADR-009)
+> **Current Phase**: Phase 7 — Windows port complete (ADR-010..014; wifi-analyzer deferred to Phase 8); macOS not started
+> **Phase Status**: 🟢 Phases 1–4g complete (Linux), Phases 5–6 partial, Phase 7 Windows: core, zero-copy buffers, Pinhole, CLI, zip/NSIS/MSI packaging, code signing, app icon (local: 15/15 ctest); Windows CI moved to GitHub Actions, first run pending
+> **Last Updated**: 2026-10-01 (MSI packaging, Windows CI on GitHub Actions)
 
 > **Agents**: update this file (and the matching checkbox in [roadmap.md](roadmap.md)) at the end of every task that changes status, adds a feature, or discovers a risk. Keep "Next Priorities" and "Open Risks" current; append to the Session Log.
 
@@ -24,7 +24,7 @@
 | 4g | Pinhole (Native Overlay) Rendering | ✅ Complete (Linux) |
 | 5 | CLI Tool | 🟡 Partial (C++ watch mode open) |
 | 6 | Polish & Documentation | 🟡 Partial (benchmarks, extra examples open) |
-| 7 | Windows & macOS | 🔲 Not started |
+| 7 | Windows & macOS | 🟡 Windows done (ADR-010..014; wifi-analyzer → Phase 8); macOS not started |
 | 8 | Plugin System & Packaging | 🔲 Not started |
 
 See [roadmap.md](roadmap.md) for full per-task checklists and [roadmap.md — Next Steps](roadmap.md#next-steps-prioritized) for the prioritized list.
@@ -35,24 +35,29 @@ See [roadmap.md](roadmap.md) for full per-task checklists and [roadmap.md — Ne
 
 | Item | Status | Notes |
 |------|--------|-------|
-| CircleCI pipeline | ✅ | Ubuntu 22.04, CMake 3.28.6, GCC 11 |
+| CircleCI pipeline (Linux CI badge) | ✅ | Ubuntu 22.04, CMake 3.28.6, GCC 11; Linux + JS only since 2026-10-01 |
 | C++ build | ✅ | Core lib + all examples + test binaries |
 | C++ unit tests | ✅ | command_registry, event_bus, types, fs_plugin, shell_plugin, shared_buffer, integration, pinhole_linux, window_close |
 | WebGL E2E test | ✅ | SharedBuffer + WebGL render + readPixels, runs under xvfb (5 s watchdog) |
 | JS bridge typecheck | ✅ | Separate CI job, `tsc --noEmit` |
 | JS bridge unit tests (Vitest) | ✅ | 10+ files — config, invoke, events, modules, React hooks |
+| Windows build (local) | ✅ | Win 11, VS 2022 Build Tools (MSVC 19.4x), vcpkg Boost 1.90, LibAsyik 1.8.1; core + CLI + all examples except wifi-analyzer + tests |
+| Windows ctest (local) | ✅ | 15/15 (adds pinhole_win32, early_close, cli_init_smoke) — incl. `window_close` (native WM_CLOSE) and `native_ipc` (WebView2 E2E) |
+| Windows CI (GitHub Actions, Windows CI badge) | ⏳ | `.github/workflows/windows.yml` added 2026-10-01 (replaces the never-run CircleCI job): build + unit tests gate, display tests non-blocking, package job = real MSI install/upgrade/uninstall + NSIS install/uninstall (`scripts/ci/windows-package-e2e.ps1`). First run pending — needs a push |
 
 ---
 
 ## Next Priorities
 
-1. **Productize the SharedBuffer WebProcess extension** — prototype in `benchmarks/shm_webext/` reads 1080p in ~0.4 ms vs ~21 ms via `anyar-shm://` (root cause: WebKit's 8 KB-chunked URI-scheme IPC). Needs packaging (DEB/AppImage), `App` wiring, `@libanyar/api/buffer` API + `FrameRenderer` use.
-2. **Pinhole created before `Window::show()`** — gets a null overlay forever; `create_gl_area()` re-queues itself every idle (never renders, busy main loop). Fix: wire overlay on show, or create the GL area lazily.
-3. **Migrate remaining plugin loops to `BackgroundTask`** — wifi-analyzer still uses a bare `execute()` loop + flag (no join); audit built-in plugins for blocking calls that should use `run_blocking()`.
-4. **`anyar dev` real HMR** (deferred — release builds embed frontend; DX-only) — CLI starts Vite but the webview never loads the Vite URL (roadmap 5.2 "HMR ✅" is not true end-to-end).
-5. **LibAsyik portability spike** — MSVC + macOS Clang build before committing to Phase 7.
-6. **Tier 3 DX/ecosystem** — `anyar dev --watch`, Todo App (React), File Explorer, migration runner.
-7. **Tier 4** — Phase 7 Windows/macOS (incl. Pinhole ports), multi-platform CI, Phase 8 plugins.
+1. **Land the Windows port safely** — the port touched shared code (`app.cpp` platform hooks, `window.cpp` Impl restructure, `shared_buffer.cpp` split, OS-chosen ports, LibAsyik 1.8.1 on Linux CI with a fresh `cpp-deps-v5` cache) that was only compiled on Windows. Confirm Linux CI (incl. xvfb display tests), get the first GitHub Actions `Windows CI` run green (promote display tests to blocking once stable), then enable `tests/native_ipc` on Linux.
+2. **Windows follow-ups** — signing in CI (Azure Trusted Signing via `--sign-command`); `anyar dev` HMR (all platforms). wifi-analyzer WLAN backend deferred to Phase 8.5.
+3. **Productize the SharedBuffer WebProcess extension** — prototype in `benchmarks/shm_webext/` reads 1080p in ~0.4 ms vs ~21 ms via `anyar-shm://` (root cause: WebKit's 8 KB-chunked URI-scheme IPC). Needs packaging (DEB/AppImage), `App` wiring, `@libanyar/api/buffer` API + `FrameRenderer` use.
+4. **Pinhole created before `Window::show()`** — gets a null overlay forever; `create_gl_area()` re-queues itself every idle (never renders, busy main loop). Fix: wire overlay on show, or create the GL area lazily.
+5. **Migrate remaining plugin loops to `BackgroundTask`** — wifi-analyzer still uses a bare `execute()` loop + flag (no join); audit built-in plugins for blocking calls that should use `run_blocking()`.
+6. **`anyar dev` real HMR** (deferred — release builds embed frontend; DX-only) — CLI starts Vite but the webview never loads the Vite URL (roadmap 5.2 "HMR ✅" is not true end-to-end).
+7. **macOS spike** — LibAsyik Clang/macOS build before Phase 7.2 (Windows/MSVC verified 2026-09-30).
+8. **Tier 3 DX/ecosystem** — `anyar dev --watch`, Todo App (React), File Explorer, migration runner.
+9. **Tier 4** — Phase 7 macOS (incl. Pinhole), Phase 8 plugins.
 
 ---
 
@@ -63,11 +68,22 @@ See [roadmap.md](roadmap.md) for full per-task checklists and [roadmap.md — Ne
 | Shutdown fragility | High | Fixed repeatedly (ADR-007, 2026-03-15; plugin-shutdown reorder, 2026-05-01). Plugins must stop their own `execute()` loops and unblock back-pressure waits in `shutdown()` — contract, not enforced. See [graceful-shutdown.md](graceful-shutdown.md). |
 | WebGL test hangs without watchdog | Medium | ⚠️ Mitigated by 5 s `_exit()` watchdog — can mask real teardown hangs in CI. |
 | `post_to_main_thread` deadlock | Medium | ⚠️ Documented only — never call from a fiber during shutdown (ADR-007). |
-| LibAsyik Windows/macOS portability | High (for Phase 7) | Assumed, never verified (roadmap 4e.8). |
-| Pinhole Windows port is a breaking change | Medium | Requires WebView2 visual hosting → major version bump (ADR-008). |
+| LibAsyik Windows/macOS portability | Medium (macOS) | Windows ✅ verified 2026-09-30 with LibAsyik 1.8.1 + MSVC (ADR-010). macOS still assumed. |
+| Windows port changes unverified on Linux | High (until CI runs) | `app.cpp`/`window.cpp`/`shared_buffer` refactors, port probing and the LibAsyik 1.8.1 bump were built and tested only on Windows. Linux CI must confirm before relying on them. |
+| ~~Windows: non-ASCII paths~~ | ✅ Fixed 2026-09-30 | `<anyar/path.h>` (`path_from_utf8`/`path_to_utf8`/`is_path_within`) used by `fs:*`, `resolve_dist_path`, `allow_file_access`, `serve_file`. Third-party plugins must use it too (`fs::path(std::string)` is ANSI on Windows). |
+| ~~`/__anyar__/file/` + `anyar-file://` never decoded URLs; string-prefix root check~~ | ✅ Fixed 2026-09-30 | Files with spaces/non-ASCII names were unreachable on every platform; root `/data` admitted `/database/…`. Now `percent_decode()` then `..` check, and component-wise `is_path_within()`. |
+| ~~Windows: SharedBuffer over HTTP~~ | ✅ Fixed 2026-10-01 | Zero-copy WebView2 shared buffers (ADR-011): 8 MiB read ~60 ms (HTTP) → ~0 (live view; ~2 ms only when revalidating). Buffers created before any window still use HTTP. `anyar-file://` unavailable (use `/__anyar__/file/`). |
+| Windows: first page load deferred to `run()` | Low | WebView2 only applies bind/init scripts to later navigations, so a window created before the main loop starts loads nothing until `run()` (child windows created at runtime load in `show()`). |
+| Windows: wifi-analyzer, signing reputation | Low | wifi-analyzer not ported (libnl → WLAN API; Phase 8.5). Signing works (`--sign*`) but SmartScreen reputation needs a public-CA / Azure Trusted Signing cert — only a self-signed test cert was exercised. |
+| Windows: MSI install path only tested in CI | Medium (until CI runs) | The dev box is not elevated: locally the MSI was built, ICE-validated, decompiled, admin-extracted and its app run, but the per-machine install/upgrade/uninstall is exercised only by the GitHub Actions package job. |
+| ~~`window:close-all` before the main window exists was a no-op~~ | ✅ Fixed 2026-10-01 | IPC is live while WebView2 creates the window (~2 s); the command found no main window and the app never quit. Now sticky (`close_all_requested_`); regression `tests/early_close`. |
+| Windows `std::_Exit()` can hang | Low | Runs DLL detach, which can deadlock with WebView2/FFmpeg threads; use `TerminateProcess` for hard exits (video-player `test:quit`). |
+| ~~Random server ports hit reserved/in-use ports~~ | ✅ Fixed 2026-09-30 | `App` and tests now take an OS-chosen port (Windows reserves blocks of 49152–65535; a failed bind inside a test fiber hung `run()` ~13% of runs). |
+| ~~Pinhole Windows port is a breaking change~~ | ✅ Resolved 2026-10-01 | ADR-012: DComp below a transparent *windowed* WebView2 — no visual-hosting migration, no version bump. |
+| Windows Pinhole: webview background becomes transparent | Low | Once a window has a pinhole, pages must paint their own background (same contract as Linux). |
 | Pinhole native path in CI | Medium | Unverified whether CI (xvfb/mesa) exercises native GL or only the canvas fallback. |
 | Pinhole CSS/scroll limitations | Low (by design) | Flat rect; hides during scroll; z-sibling detection best-effort (ADR-008). |
-| CLI has no unit tests | Low–Medium | Exercised only indirectly via examples. |
+| CLI has few tests | Low | `cli_init_smoke` (both CI jobs) covers init + generated paths; build/dev/package are verified manually (they need Node and a full C++ build). |
 | SharedBuffer `anyar-shm://` far slower than documented | High | ~21 ms per 1080p fetch (≈370 MB/s): WebKit streams custom-scheme responses in 8 KB IPC chunks (not fixable from our side); JSC Gigacage forbids true zero-copy. Webext prototype: ~0.4 ms (one memcpy). |
 | ~~Pinhole idle callbacks hold raw pointers~~ | ✅ Fixed 2026-09-24 | All `g_idle_add` tasks + GTK signal handlers go through an `ImplGuard` liveness token; ASAN regression test in `test_pinhole_linux`. |
 | Pinhole created before `Window::show()` never renders | Medium | Null overlay captured at create; `create_gl_area()` spins on idle re-queue. `App::on_window_ready` path is safe (runs after show). |
@@ -200,3 +216,86 @@ See [roadmap.md](roadmap.md) for full per-task checklists and [roadmap.md — Ne
 - `test_pinhole_linux` and `test_window_close` create webviews but ran in the headless unit step (failing since 4g/shutdown-fix landed). Display tests now carry ctest label `display`; CI runs `-LE display` headless and `-L display` under xvfb. Two window-creating pinhole cases mis-tagged `[headless]` are now display-gated
 - `test_window_close` then failed in CI only: `app.run()` never returned after a native close, with "1 fiber(s) still active after 1s drain". CI built LibAsyik **1.6.1**; dev machines had **1.7.1** (scheduler cancellation #32 + HTTP connection tracking #33, which terminate open keep-alive connection fibers on stop). Not reproducible locally even with CPU starvation + 1 ms close. CI and `setup-ubuntu.sh` now pin LibAsyik 1.7.1 (cache key `cpp-deps-v4`); documented minimum raised to 1.7.1. `test_window_close` watchdog now times shutdown only (6 s after close) and logs phase timestamps
 
+
+### Windows Port — Phase 7 Kick-off (2026-09-30)
+- Toolchain: LibAsyik **1.8.1** (first MSVC release) + vcpkg (Boost 1.90, OpenSSL 3, SOCI, nlohmann-json, `webview2` header); new `scripts/setup-windows.ps1` builds/installs LibAsyik (Release + Debug `d` postfix) into `build-deps/libasyik`. Linux CI + `setup-ubuntu.sh` also pinned to 1.8.1 (cache key `cpp-deps-v5`)
+- Core (ADR-010): private `core/src/platform.h` hooks (`platform_{linux,win32}.cpp`, `main_thread_{linux,win32}.cpp`) replace the Linux `#ifdef`s in `app.cpp`; `shared_buffer.cpp` split out (factory/registry/pool) from the per-OS mapping; Win32 `Window::Impl` (HWND subclass, owned/modal windows, centering, close confirmation); `main_thread_win32.cpp` (message-only dispatch window, thread-safe sticky quit); `shared_buffer_win32.cpp` (file mapping); `plugins/{dialog,clipboard,shell}_win32.cpp`
+- Three WebView2 behaviour differences found and handled: `webview_terminate()` only quits the calling thread; webview's nested loops swallow `WM_QUIT`; bind/init scripts miss navigations issued before them (`window.__anyar_ipc__` was undefined — first navigation now deferred until setup completes)
+- JS: `window.__LIBANYAR_SHM_SCHEME__` (false on Windows) → `fetchBuffer()` uses the HTTP fallback; Vitest cases added (not run locally — no Node on the Windows box)
+- Ports: `App::find_available_port()` + tests (`tests/test_port.h`) take an OS-chosen port — random picks landed in Windows' excluded ranges (`netsh int ipv4 show excludedportrange`) or on RPC listeners; bind threw inside the test fiber and `run()` hung
+- Tests: shell tests use `cmd.exe` builtins on Windows; `window_close` ported (WM_CLOSE); new `tests/native_ipc` E2E (generated page: IPC round-trip, event push, buffer fetch, UI-thread hop, cross-thread `window:close-all`). Local: 12/12 ctest × 5 runs; shutdown 71 ms after native close
+- CI: new CircleCI `build-windows` job (Server 2022, pinned vcpkg commit, `-LE display`) — not yet run
+- Not ported: Pinhole (stub), `anyar` CLI, key-storage / video-player / wifi-analyzer, packaging, zero-copy buffers
+
+### Windows: UTF-8 Paths, close-all Race, Examples (2026-09-30 → 10-01)
+- Branch `feat/windows-port`: (1) Windows port, (2) UTF-8 paths, (3) close-all race, (4) examples
+- UTF-8 paths: new `<anyar/path.h>` (`path_from_utf8`, `path_to_utf8`, `is_path_within`) used by `fs:*`, `resolve_dist_path`, `allow_file_access`, `serve_file`; `percent_decode()` in `<anyar/http_file.h>`. `/__anyar__/file/` and `anyar-file://` never decoded URLs (spaces/non-ASCII unreachable on every platform) and checked roots by string prefix (`/data` admitted `/database/…`) — both fixed. Tests: non-ASCII fs round trip, `serve_file`, `percent_decode`, `is_path_within`, non-ASCII `resolve_dist_path`
+- `window:close-all` arriving during main-window creation (WebView2 ≈ 2 s) was silently dropped (found by driving key-storage over HTTP right after launch; located with stderr traces) → sticky flag in `App`; Win32 also re-posts a pending quit after every webview call that pumps a nested loop. New `tests/early_close` (Linux + Windows) fails without the fix, passes in ~4 s
+- key-storage: `find_package(SQLite3)`, UTF-8 paths, random temp DB name (no `getpid`), `col_text()` replaces GCC `a ?: b`. Smoke (HTTP IPC while the WebView2 UI runs, vault `ключи_日本.anyarks`): new/save/close/wrong-password/open/entries round trip, temp DB wiped, clean exit
+- video-player: vcpkg FFmpeg 8.0.1 (optional on Windows — skipped if absent), FFmpeg ≥5.1 `AVChannelLayout` path (4.4 path kept for Ubuntu), UTF-8 paths, webgl default off Linux, `TerminateProcess` in `test:quit`. Smoke via injected driver on a generated MPEG-4/AAC file named `vidéo_日本.mp4`: metadata + chart, AAC-in-Matroska `<audio>` plays in WebView2, ~90 frames over `/__anyar__/buffer/`, 0 `anyar-shm://` fetches, frames after seek — 3/3 runs
+- JS: Vitest 139/139 and `tsc` build run for the first time on Windows (portable Node 22)
+- Local: 13/13 ctest (Release)
+
+### Zero-Copy SharedBuffers on WebView2 (2026-10-01)
+- ADR-011: Windows SharedBuffers are WebView2 shared buffers (environment reached through the controller handle — no webview hook); pages pull them with `buffer:attach {name, have}` → `PostSharedBufferToScript` (read-only) → cached per name + generation `id`. Fallback: file mapping + HTTP (no window yet / old runtime / UI busy)
+- JS: `fetchBuffer(nameOrUrl, {copy?, id?})` — snapshot by default, live zero-copy view with `copy:false`; `id` from `buffer:ready` skips the round trip. `createBufferRenderer` and video-player use the live path. 5 new Vitest cases (144/144)
+- `native_ipc` E2E extended: buffer created from a fiber after the window exists, attached, then mutated by C++ → visible in the SAME ArrayBuffer; same-generation re-attach not re-posted. Per 8 MiB: HTTP ~60 ms, attach IPC ~2 ms, slice ~4–6 ms, live ~0.01 ms
+- video-player smoke (3/3): ~90 frames, 4 `buffer:attach` (one per pool slot), 0 HTTP fetches
+
+### `anyar` CLI on Windows (2026-10-01)
+- Process layer split: `process_posix.cpp` (existing fork/exec, signals) / `process_win32.cpp` (`cmd.exe /d /s /c`, suspended → job object (kill-on-close) → resume so `kill_child()` ends cmd → npm → node; Ctrl+C handler; UTF-8 + VT console). `cli.h`: `ChildProcess`, `run_bg/wait_child/kill_child/on_interrupt/shell_quote/executable_path`
+- Builds: `cmake --build . --config <type> --parallel`, `find_app_binary()` (multi-config layout), `platform_configure_args()` (vcpkg toolchain + LibAsyik prefix on a fresh build dir); `--embed` now also forces `OFF` when absent
+- Packaging: `package_app()` per OS; Windows `--package zip` (exe + DLLs + dist + README)
+- Templates: generated `LIBANYAR_DIR` and vite alias used native paths — `D:\Works\…` broke the vite build (backslashes eaten as escapes) → `generic_string()`
+- Fixed: `anyar dev --no-backend` killed Vite immediately; now waits
+- Tests: `cli_init_smoke` CTest; Linux CI now builds the CLI (`-DANYAR_BUILD_CLI=ON`). Manual E2E on Windows 11: `init demoapp` (svelte-ts) → `build` → `build --package zip` (4 MB; unzipped copy runs and serves its dist) → `dev` (Vite + Debug app; close-all → dev exits 0, no Vite node left). ctest 14/14
+
+### Pinhole on Windows (2026-10-01)
+- ADR-012 (supersedes ADR-008's Windows plan): no CompositionController migration. A standalone prototype proved DWM shows a non-topmost DComp target on webview's host HWND beneath a transparent windowed WebView2, with HTML on top → same layering as Linux, non-breaking
+- `pinhole_win32.cpp/.h`: per-window `PinholeHost` (transparent `DefaultBackgroundColor`, D3D11 device + WARP fallback, DComp target/root), per-pinhole composition swap chain visual (CSS × DPI, z restack), runtime-compiled HLSL (rgba/bgra premultiplied, gray, yuv420, nv12, nv21; rgb CPU-expanded), `Present(0,0)`, continuous = 16 ms UI timer, weak_ptr-guarded posted work, canvas-2D fallback over HTTP
+- Shared code extracted from `pinhole_linux.cpp`: `pinhole_cpu.cpp` (CPU converters), `pinhole_tracking.cpp` (`tracking_js()`)
+- Bugs found while testing: quad winding was culled by D3D's default rasterizer (draw_image showed nothing) → CW strip + CULL_NONE; `AddVisual(v, TRUE, nullptr)` inserts at the BOTTOM → FALSE; pinhole-hello's info query used a non-existent `window.__anyar` global (all platforms) → native IPC
+- `tests/pinhole_win32` (display): PrintWindow(PW_RENDERFULLCONTENT) pixel checks — position × DPI (125%), z-order + set_z_index, set_visible, set_rect move from a non-UI thread, force_fallback canvas at the DOM-tracked rect, shutdown with live pinholes. 3/3; ctest 15/15
+- video-player defaults to `--mode=pinhole` on Windows: generated MPEG-4 plays letterboxed with HTML controls over it; smoke PASS (audio, seek)
+
+### Windows installer + WebView2 bootstrapper (2026-10-01)
+- `anyar build --package installer` (alias `nsis`; `all` = zip + installer): generated NSIS script → `build/<name>-<ver>-setup.exe`. Per-user by default (no UAC, `%LOCALAPPDATA%\Programs`), `--install-scope machine` for Program Files; Start Menu + desktop shortcuts, Add/Remove Programs (`--publisher`, version, size, quiet uninstall string), MUI2 finish page with "Run"
+- WebView2: Evergreen bootstrapper downloaded once into `%LOCALAPPDATA%\anyar\cache`, verified with WinVerifyTrust + Microsoft signer, embedded, and run only when `EdgeUpdate\Clients\{F3017226-…}\pv` is absent (HKLM 32-bit view, then HKCU); `--webview2 skip`
+- Uninstaller deletes exactly the installed files and non-recursive `RMDir`s — verified: a user file in a shared install dir survives
+- Package options refactored into `PackageOptions` (Linux deb/AppImage unchanged)
+- Verified on Windows 11: silent install → files/shortcuts/ARP entry → installed app serves its dist + clean exit → silent uninstall → everything gone; per-machine script compiles (admin needed to install, not run here); `2.0.0-beta.1` → `VIProductVersion 2.0.0.0`; missing makensis / unknown format give guidance. NSIS for testing came from electron-builder's bundle (SourceForge was down)
+
+### Windows code signing + app icon (2026-10-01)
+- App icon: `anyar build` finds `icon.ico` / `icon.png` (root, `assets/`, `frontend/public/`). A PNG becomes a multi-size `build/app-icon.ico` via WIC (`icon_win32.cpp`, 16–256 px PNG entries). `-DANYAR_APP_ICON` → generated CMake `anyar_app_icon()` (new `cmake/AnyarAppIcon.cmake`) embeds it as resource `32512`. That is IDI_APPLICATION, the id webview's window class loads, so the title bar, taskbar and Alt-Tab pick it up with no core change. The same icon is the installer/uninstaller `MUI_ICON`/`MUI_UNICON`
+- Signing (`sign_win32.cpp`): `--sign-cert PFX` (+ `ANYAR_SIGN_PASSWORD`), `--sign-thumbprint`, `--sign-command "… {file}"`, `--sign-timestamp URL|none` (default DigiCert), bare `--sign` with `ANYAR_SIGN_*` env (CI)
+  - Configuration lives only in the environment, so secrets never reach the .nsi
+  - Signed: the staged exe (zip + installer), plus the installer and uninstaller via NSIS `!finalize` / `!uninstfinalize` → hidden `anyar sign-file`, which uses plain ASCII output because makensis re-encodes it
+  - Every result is re-checked with WinVerifyTrust; signtool comes from the newest Windows SDK or `SIGNTOOL`
+- Verified with a self-signed cert:
+  - staged exe, zip, setup.exe, installed exe and installed Uninstall.exe are all signed by the test subject with a matching thumbprint and timestamp;
+  - the raw build output stays unsigned; the password appears in 0 generated files;
+  - `--sign` unconfigured → exit 1; a no-op `--sign-command` → "still unsigned", exit 1;
+  - icon visible in the exe, setup and uninstaller resources and in the title bar.
+- Docs: packaging.md Windows section (zip, installer, WebView2, signing, icons, troubleshooting); dialogs.md / shared-memory-webgl.md Windows notes
+
+### MSI packaging + Windows CI on GitHub Actions (2026-10-01)
+- `anyar build --package msi`: a generated WiX v4+ `.wxs` → `wix build -arch x64` → `build/<name>-<ver>-win64.msi`. The package:
+  - is per-machine (GPO / Intune / SCCM) and puts a Start Menu shortcut on the main exe;
+  - harvests the staged tree with `<Files Include="<stage>\**">`;
+  - sets `ARPPRODUCTICON` from the app icon;
+  - supports MajorUpgrade, and a downgrade is refused;
+  - converts the version to `major.minor.build` (≤255.255.65535; pre-release suffix dropped, out of range = error).
+- UpgradeCode: a name-based UUID v5 (SHA-1 via BCrypt) of `publisher/name`, so it is stable across builds and machines. `--upgrade-code GUID` pins it, and the CLI prints the code it used.
+- WebView2: the same Microsoft-signed bootstrapper, run as a deferred, non-impersonated custom action only when no runtime `pv` is found (HKLM 32-bit view / HKCU). It uses `Return="ignore"`, so offline machines still install the app.
+- `--sign*` signs the staged exe and the `.msi`. `--package all` = zip + NSIS + MSI; the MSI is skipped with a note when WiX is missing, while `--package msi` fails with install guidance.
+- Verified locally (WiX 5.0.2, non-elevated):
+  - the `.wxs` passes ICE validation; `wix msi decompile` shows the expected tables;
+  - `msiexec /a` extracts files byte-identical to the staged tree, and the extracted app serves its dist and exits cleanly;
+  - signed MSI + exe; a pinned upgrade code is normalised; `--webview2 skip` drops the custom action;
+  - bad version / GUID → exit 1;
+  - a real install fails here with Error 1925 (needs admin) → covered by CI.
+- CI split for per-platform badges: CircleCI = Linux (+ JS); new GitHub Actions `Windows CI` workflow:
+  - **build-test:** pinned vcpkg + cached binary cache and LibAsyik; unit tests gate, display tests run non-blocking.
+  - **packages:** the CLI artifact plus Node/NSIS/WiX run `scripts/ci/windows-package-e2e.ps1`: scaffold → `--package all` → MSI install, then checks (files, shortcut, ARP, app serves), upgrade 1.0.0→1.0.1 (one ARP entry), downgrade refused, uninstall (everything gone) → NSIS per-user install/uninstall.
+  - The CircleCI `build-windows` job (never run) and the windows orb were removed. README now has separate Linux CI / Windows CI badges.
+- wifi-analyzer Windows port moved to roadmap Phase 8.5

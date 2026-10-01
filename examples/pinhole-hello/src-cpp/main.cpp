@@ -48,7 +48,7 @@ int main() {
     constexpr int PX = 200, PY = 150, PW = 400, PH = 300;
 
     // ── Build a small static 8×8 RGBA checkerboard for draw_image demo ──
-    constexpr int CHECKER_SIZE = 8;
+    static constexpr int CHECKER_SIZE = 8;
     std::vector<uint8_t> checker(CHECKER_SIZE * CHECKER_SIZE * 4);
     for (int y = 0; y < CHECKER_SIZE; ++y) {
         for (int x = 0; x < CHECKER_SIZE; ++x) {

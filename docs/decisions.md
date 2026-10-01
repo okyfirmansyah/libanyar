@@ -4,6 +4,144 @@
 
 ---
 
+## ADR-014: Windows MSI via WiX v4+, and Windows CI on GitHub Actions
+
+**Date**: 2026-10-01
+**Status**: Accepted
+
+**Context**: Enterprises deploy software through GPO, Intune or SCCM, all of which expect an MSI. The NSIS `setup.exe` does not fit that path. On CI: the project's single CircleCI badge summarises the whole pipeline, so Linux and Windows status cannot be shown separately. In addition, the CircleCI `build-windows` job had never run. A per-machine MSI also can only be truly tested by installing it as admin, which the dev box cannot do.
+
+**Decision**:
+- **WiX v4+** (`wix build`, a .NET tool) generates the MSI from a `.wxs`, the same way NSIS generates the installer from a `.nsi`. WiX 3 (`candle`/`light`) is end-of-life and not supported. No WiX extensions are used: no UI dialogs, just the basic progress UI. This matches managed deployment, and NSIS remains the interactive installer.
+- **Always per-machine.** Per-user MSIs need HKCU key paths for every component (ICE38/ICE64), and deployment tools target machines. `--install-scope` stays NSIS-only.
+- **UpgradeCode:** a name-based UUID v5 of `publisher/name` under a fixed LibAnyar namespace, overridable with `--upgrade-code`. Builds on any machine produce the same code without storing state in the project. The namespace bytes are now a compatibility contract.
+- **Upgrades and versions:** `MajorUpgrade` with a downgrade error. Versions are trimmed to `major.minor.build`, since Windows Installer ignores the fourth field.
+- **WebView2:** the bootstrapper the NSIS installer uses runs as a deferred, non-impersonated custom action, gated on the runtime's `pv` registry value, with `Return="ignore"` so offline installs still succeed.
+- **CI split:** Linux stays on CircleCI; Windows moves to GitHub Actions (`.github/workflows/windows.yml`). Each workflow has its own README badge. Hosted runners are admin, so the `packages` job installs, upgrades, downgrades and uninstalls the MSI for real (`scripts/ci/windows-package-e2e.ps1`).
+
+**Rationale**: Generating `.wxs` mirrors the NSIS design, so there is one staged tree and one signing path. The v5 UUID avoids a "remember to commit the GUID" step while staying overridable. GitHub Actions gives per-platform badges and admin Windows runners at no extra setup.
+
+**Consequence**:
+- `--package all` = zip + NSIS + MSI. The MSI is skipped with a note when WiX is missing.
+- Renaming the app or changing `--publisher` changes the derived UpgradeCode. The docs say to pin it before the first release.
+- Display tests run non-blocking on Windows CI until the hosted desktop proves reliable.
+- Two CI systems to maintain. They share no config, but the vcpkg commit pin must move in step with LibAsyik's.
+
+---
+
+## ADR-013: Windows Code Signing and App Icon in the CLI
+
+**Date**: 2026-10-01
+**Status**: Accepted
+
+**Context**: Unsigned executables and installers trigger SmartScreen warnings, and the app had no icon (webview/webview's window class shows the generic one). Signing needs secrets: a PFX password, or a certificate on a hardware token or in a cloud HSM. The NSIS installer embeds an uninstaller that only exists inside makensis, so it cannot be signed after the build.
+
+**Decision**:
+- **Secrets only in the environment:** signing is configured by `ANYAR_SIGN_COMMAND` > `ANYAR_SIGN_THUMBPRINT` > `ANYAR_SIGN_CERT` (+ `ANYAR_SIGN_PASSWORD`). `ANYAR_SIGN_TIMESTAMP` sets the timestamp server and `SIGNTOOL` the tool. The `--sign-*` flags only set these variables for the process. The generated `.nsi` references `anyar sign-file "%1"`, never a credential.
+- **NSIS hooks:** `!uninstfinalize` and `!finalize` (NSIS 3.08+) call back into the hidden `anyar sign-file` command. That signs the uninstaller before it is embedded, then the installer. `sign-file` prints plain ASCII, because makensis re-encodes child output.
+- **What gets signed:** the *staged* exe, which is shared by the zip and the installer. The raw build output stays unsigned, so incremental builds are not re-signed. Every signed file is re-checked with `WinVerifyTrust`, and a missing signature fails the build. Bare `--sign` with nothing configured is an error.
+- **Pluggable signer:** `--sign-command` with a `{file}` placeholder covers Azure Trusted Signing, jsign and HSM wrappers without CLI changes.
+- **Icon:** a PNG is converted with WIC into a multi-size `.ico` (16–256 px, PNG entries), so no extra tooling is needed. `anyar_app_icon()` (`cmake/AnyarAppIcon.cmake`) compiles it as resource **32512** (`IDI_APPLICATION`). webview/webview's window class already loads that id from the module, so the title bar, taskbar and Alt-Tab show it with no core change. The same `.ico` is the installer and uninstaller icon.
+
+**Rationale**: Environment-only secrets suit CI (masked variables) and keep build artefacts free of credentials. NSIS hooks are the only way to sign the embedded uninstaller. Using resource id 32512 gives the window icon without a new `Window` API.
+
+**Consequence**:
+- Projects created before this change need the `anyar_app_icon` snippet in their `CMakeLists.txt` (documented in packaging.md).
+- SmartScreen reputation depends on the certificate. A self-signed certificate verifies as "untrusted root" and only exercises the pipeline.
+- A runtime `Window::set_icon()` remains a possible future API. It is not needed for the app icon.
+
+---
+
+## ADR-012: Pinhole on Windows — DirectComposition Below a Transparent Windowed WebView2
+
+**Date**: 2026-10-01
+**Status**: Accepted (supersedes the Windows part of ADR-008)
+
+**Context**: ADR-008 planned the Windows Pinhole port as a switch to `CoreWebView2CompositionController` (visual hosting), with a DComp tree holding both the webview visual and the swap-chain visuals. That is a major-version breaking change: webview/webview creates a windowed controller, and visual hosting would mean taking over its input routing and accessibility. The Linux implementation actually layers the native surfaces **below** a transparent webview (HTML on top), not above it.
+
+**Decision**: Keep webview/webview's windowed WebView2 and reproduce the Linux layering:
+- **Transparency:** on the first `create_pinhole()`, set `ICoreWebView2Controller2::put_DefaultBackgroundColor` to fully transparent.
+- **Composition:** one DirectComposition target per window, `CreateTargetForHwnd(widget_hwnd, topmost = FALSE)` on webview's host ("widget") HWND, which places its visuals **below** that HWND's child windows, i.e. below the WebView2 window. Each pinhole is a visual whose content is a `CreateSwapChainForComposition` swap chain (BGRA, premultiplied, flip-sequential), offset to the CSS rect × window DPI and re-stacked by `z_index`. (`AddVisual(v, FALSE, nullptr)` adds on top.)
+- **Rendering:** one D3D11 device per window (hardware, then WARP). The YUV/gray/RGBA conversion is a runtime-compiled HLSL shader mirroring the GLSL; `rgb` is CPU-expanded. `Present(0, 0)` never blocks the UI thread on vsync; continuous mode is a 16 ms UI timer.
+- **Threading:** every D3D/DComp call runs on the UI thread. Posted work captures a `weak_ptr<PinholeState>` — the Win32 equivalent of Linux's `ImplGuard`.
+- **Fallback:** the canvas-2D fallback (no D3D11/DComp, or `force_fallback`) is shared logic, fetching over HTTP. `pinhole_cpu.cpp` (CPU converters) and `pinhole_tracking.cpp` (DOM tracking JS) are now platform-neutral.
+
+**Rationale**: A standalone prototype proved DWM composes non-topmost DComp content of the host window underneath a transparent windowed WebView2, with HTML on top. That gives the full feature with no API, hosting, input or accessibility change, and no major version bump.
+
+**Consequence**:
+- Once a window has a pinhole, its webview background is transparent. Pages must paint their own background, except over pinholes — as on Linux.
+- `tests/pinhole_win32` checks composed pixels via `PrintWindow(PW_RENDERFULLCONTENT)`: position × DPI, z-order and re-stack, visibility, move, canvas fallback, shutdown with live pinholes. It needs a desktop (`display` label).
+- `Window` holds every pinhole until the window closes. There is still no remove API (same as Linux).
+- video-player defaults to `--mode=pinhole` on Windows too.
+
+---
+
+## ADR-011: Zero-Copy SharedBuffers on WebView2
+
+**Date**: 2026-10-01
+**Status**: Accepted
+
+**Context**: ADR-010 shipped Windows SharedBuffers as file mappings read over HTTP, which costs ~60 ms per 8 MiB (1080p RGBA) frame. `anyar-shm://` is not an option on WebView2, because custom schemes must be registered when webview/webview creates the environment. A `WebResourceRequested` handler would still copy every byte across processes, as WebKitGTK's URI-scheme path does on Linux.
+
+**Decision**:
+- **Memory:** on Windows, a SharedBuffer's memory *is* a WebView2 shared buffer (`ICoreWebView2Environment12::CreateSharedBuffer`), so `data()` points into memory the page can map. The environment comes from the first window's controller (`webview_get_native_handle(…BROWSER_CONTROLLER)` → `ICoreWebView2_2::get_Environment`), so webview needs no hook. Buffers created before any window exists, runtimes older than 1.0.1661, and a UI thread that doesn't answer within 2 s all fall back to a file mapping and HTTP.
+- **Delivery:** the page pulls a buffer lazily with `buffer:attach {name, have}`. C++ posts it into the caller's page, read-only, via `ICoreWebView2_17::PostSharedBufferToScript`, tagged `{name, id}` — unless `have` already equals the buffer's generation `id()`. The page caches the `ArrayBuffer` from `sharedbufferreceived` per name and generation, and releases the previous one when a name is recreated. Pulling instead of pushing covers reloads, late-joining windows and recreated names without C++ tracking page state.
+- **JS API:** `fetchBuffer(nameOrUrl, { copy?, id? })`:
+  - `copy` defaults to `true`: a snapshot (one in-renderer `slice`), keeping the old semantics.
+  - `copy: false` returns the live memory, for consumers that read immediately and then release the pool slot (`createBufferRenderer`, video-player).
+  - `id` from a `buffer:ready` payload skips the attach round trip, so steady-state frames cost no IPC at all.
+- **COM threading:** STA rules apply. Buffers are created, posted and released on the UI thread; callers on fibers or other threads hop there with `post_to_main_thread` and a bounded boost-fiber future.
+- `Window::browser_controller()` (opaque) and `SharedBuffer::id()`, `is_webview_shared()`, `native_handle()` are added. Every core buffer payload now carries `id`.
+
+**Rationale**: This is the only path where the producer's memory is what the page reads, with no per-frame copy on either side. Measured on WebView2 per 8 MiB: HTTP ~60 ms; attach round trip ~2 ms; `slice` ~4–6 ms; live view ~0.01 ms. In video-player, ~90 frames took 4 `buffer:attach` calls (one per pool slot) and 0 HTTP fetches.
+
+**Consequence**:
+- A live view changes when the producer writes again. The pool protocol (READY → consumer → `release_read`) is what makes `copy:false` safe, so standalone buffers should stay on the default snapshot.
+- A buffer is attachable only by windows that share the allocating environment. Other windows get `attached:false` and use HTTP.
+- Linux is unchanged (`anyar-shm://`). The WebKitGTK zero-copy work (the webext prototype) is separate.
+
+---
+
+## ADR-010: Windows Port — Win32 Platform Layer on webview/WebView2
+
+**Date**: 2026-09-30
+**Status**: Accepted
+
+**Context**: Phase 7 begins with Windows. LibAsyik 1.8.1 is the first release that builds with MSVC (vcpkg Boost 1.90, OpenSSL 3, SOCI 4.0.3). It exports `_WIN32_WINNT=0x0A00 WIN32_LEAN_AND_MEAN NOMINMAX NOGDI` and `/bigobj /Zc:__cplusplus /utf-8` to every target that links it. The vendored webview/webview 0.12 already has a WebView2 backend with a built-in loader. Four behaviours of that backend differ from GTK in ways the core relied on:
+1. `webview_terminate()` is a bare `PostQuitMessage(0)`, which quits the *calling* thread's loop. `window:close-all` calls it from a service-thread fiber.
+2. webview's nested loops (`deplete_run_loop_event_queue()` inside `webview_destroy()`, script registration) exit on `WM_QUIT` and consume it, so a pending quit can be lost.
+3. Bindings and init scripts use `AddScriptToExecuteOnDocumentCreated`, which only affects navigations issued after the call. webview pumps the message loop while adding each script. A navigation issued in `Window`'s constructor therefore commits before `window.__anyar_ipc__` exists.
+4. WebView2 custom schemes must be registered when the environment is created, which webview/webview does internally, so `anyar-shm://` / `anyar-file://` cannot be served yet.
+
+**Decision**:
+- **Private platform hooks** (`core/src/platform.h`): `init_process`, `executable_path`, `attach_main_thread`, `drain_main_thread`, `has_shm_uri_scheme`, plus Win32 `request_quit` / `repost_quit_if_requested` / `clear_quit_request`. Implemented in `platform_<os>.cpp` and `main_thread_<os>.cpp`, so `app.cpp` has no platform `#ifdef`s. The public headers are unchanged.
+- **Main-thread dispatch**: a message-only window created by `App::run()` on the UI thread. `post_to_main_thread()` posts to it (modal loops dispatch it too, like `g_idle_add`), and posts made before attach are queued.
+- **Quit** is sticky: `request_quit()` sets a flag and posts `WM_QUIT` to the UI thread. Every `webview_destroy()` we call re-posts it, and `Window::run()` clears it once the loop has returned.
+- **Window**: the engine HWND is subclassed (`Impl*` kept in a window property, because webview owns `GWLP_USERDATA`). The mapping to the GTK signals: `WM_ACTIVATE`→focus, `WM_CLOSE`→closable/close-requested, `WM_SIZE`→pinhole pause, `WM_DESTROY`→destroy handler. Owned windows (`GWLP_HWNDPARENT`) replace transient-for, and `EnableWindow(parent, FALSE)` provides modality. A natively destroyed window keeps its engine until `~Impl` calls `webview_destroy()`, which releases the WebView2 COM objects. The run-loop owner never posts `on_close`: posted messages come before `WM_QUIT` and would delete the main `Window` inside `run()`. `App::run()` tears it down instead.
+- **Initial navigation is deferred** on Win32 until setup is done: in `show()` if the UI loop is running (child windows), otherwise at the start of `Window::run()`, which also covers `on_window_ready` scripts.
+- **SharedBuffer** uses a pagefile-backed file mapping. The C++ side injects `window.__LIBANYAR_SHM_SCHEME__ = false`, and `fetchBuffer()` then uses `GET /__anyar__/buffer/<name>`. Other buffer IPC is unchanged.
+- **Plugins**: `IFileOpenDialog`/`IFileSaveDialog`, `TaskDialogIndirect` (Common Controls v6 via a `#pragma` manifest dependency, `MessageBoxW` fallback), `CF_UNICODETEXT` clipboard, `CreateProcessW` + pipes for `shell:execute` (code 127 when the program cannot start), `ShellExecuteW` for `openUrl`/`openPath`.
+- **Ports**: `App` (and the tests) ask the OS for a free ephemeral port instead of picking one at random. Windows reserves blocks of 49152–65535 for Hyper-V/WSL, and system RPC services listen there. A failed `bind()` inside a test fiber skipped `svc->stop()`, and `run()` hung (~13% of runs).
+- **Deferred**: Pinhole stays a stub (DComp port per ADR-008); `anyar` CLI and the key-storage / video-player / wifi-analyzer examples are Linux-only.
+
+**Rationale**: The public API stays platform-neutral, as the Phase 4e principle requires. Each Win32 divergence is handled where it originates: thread affinity in dispatch/quit, script timing in navigation. Callers need no per-platform code. HTTP for buffers costs one copy and loopback TCP, but it works today and the JS fallback already existed.
+
+**Consequence**:
+- `Window::terminate()` is thread-safe on both platforms.
+- On Windows the first page load starts only when `run()` is entered, or at `show()` for windows created while the loop runs. A child window created before the main loop starts loads nothing until it is navigated.
+- `std::filesystem::path(std::string)` uses the ANSI code page on Windows. All core paths are therefore UTF-8 and converted through `<anyar/path.h>` (`path_from_utf8` / `path_to_utf8`), a contract that plugins must follow too (added 2026-09-30).
+- A zero-copy WebView2 path (`CreateSharedBuffer` / `PostSharedBufferToScript`, or a custom scheme) needs a hook into webview's environment creation.
+
+**Update (2026-10-01)**: Most of the deferred work is now done:
+- Zero-copy buffers landed without a hook (ADR-011).
+- Pinhole uses DirectComposition (ADR-012).
+- The `anyar` CLI and the key-storage / video-player examples are ported.
+- Packaging ships a zip and an NSIS installer, with Authenticode signing and an app icon (ADR-013), plus an MSI (ADR-014).
+
+Still open: the wifi-analyzer example, deferred to roadmap Phase 8.5.
+
+---
+
 ## ADR-009: Background Work, Async Commands and Cross-Thread Frame Handoff
 
 **Date**: 2026-09-24
@@ -39,7 +177,7 @@ Plus: `anyar::serve_file()` (`<anyar/http_file.h>`), with Range/206/416 support.
 ## ADR-008: Pinhole (Native Overlay) Rendering Architecture
 
 **Date**: 2026-04-28
-**Status**: Accepted
+**Status**: Accepted — Windows hosting superseded by [ADR-012](#adr-012-pinhole-on-windows--directcomposition-below-a-transparent-windowed-webview2) (no visual-hosting migration, not breaking)
 
 **Context**: Phase 4f delivers zero-copy shared memory (SharedBuffer) + WebGL frame rendering (~1ms / 1080p). The remaining bottleneck is two steps: (a) JS must `fetch("anyar-shm://")` which still involves a WebKit URI scheme handler callback and an IPC event, and (b) `texImage2D` requires a GPU upload from the CPU-mapped memory. For 4K/8K at 60fps or camera-class latency budgets, a more direct path is needed.
 

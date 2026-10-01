@@ -14,8 +14,12 @@ option(ANYAR_BUILD_BENCHMARKS "Build performance benchmark harness" OFF)
 option(ANYAR_ASAN           "Build with AddressSanitizer (debug lifetime bugs)" OFF)
 
 if(ANYAR_ASAN)
-    add_compile_options(-fsanitize=address -fno-omit-frame-pointer)
-    add_link_options(-fsanitize=address)
+    if(MSVC)
+        add_compile_options(/fsanitize=address)
+    else()
+        add_compile_options(-fsanitize=address -fno-omit-frame-pointer)
+        add_link_options(-fsanitize=address)
+    endif()
 endif()
 option(ANYAR_EMBED_FRONTEND "Embed frontend assets into binaries (requires built frontend)" OFF)
 
@@ -33,9 +37,17 @@ add_subdirectory(core)
 if(ANYAR_BUILD_EXAMPLES)
     add_subdirectory(examples/hello-world)
     add_subdirectory(examples/pinhole-hello)
-    add_subdirectory(examples/video-player)
+    add_subdirectory(examples/video-player)   # skips itself on Windows without FFmpeg
     add_subdirectory(examples/key-storage)
-    add_subdirectory(examples/wifi-analyzer)
+    if(NOT WIN32)
+        # Linux-only: wifi-analyzer (libnl / nl80211).
+        add_subdirectory(examples/wifi-analyzer)
+    endif()
+endif()
+
+# Enable CTest before any subdirectory registers tests (cli/ has one).
+if(ANYAR_BUILD_TESTS)
+    enable_testing()
 endif()
 
 # ── CLI Tool ─────────────────────────────────────────────────────────────────
@@ -45,7 +57,6 @@ endif()
 
 # ── Tests ────────────────────────────────────────────────────────────────────
 if(ANYAR_BUILD_TESTS)
-    enable_testing()
     add_subdirectory(tests)
 endif()
 

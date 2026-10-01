@@ -4,6 +4,7 @@
 #include <catch2/catch.hpp>
 
 #include <anyar/http_file.h>
+#include <anyar/path.h>
 
 #include <libasyik/service.hpp>
 #include <libasyik/http.hpp>
@@ -16,6 +17,7 @@
 #include <thread>
 
 #include <boost/fiber/operations.hpp>
+#include "test_port.h"
 
 using namespace anyar;
 
@@ -88,8 +90,7 @@ struct TempFile {
 };
 
 int pick_port() {
-    static std::mt19937 gen(std::random_device{}());
-    return std::uniform_int_distribution<int>(49152, 60999)(gen);
+    return anyar_test::free_port();
 }
 
 struct Resp { int status; std::string body; std::string content_range; };
@@ -205,4 +206,50 @@ TEST_CASE("serve_file (streaming): client abort mid-body does not wedge the serv
     });
     svc->run();
     CHECK(after_status == 206);
+}
+
+TEST_CASE("percent_decode", "[http_file]") {
+    CHECK(percent_decode("plain.txt") == "plain.txt");
+    CHECK(percent_decode("my%20video.mp4") == "my video.mp4");
+    CHECK(percent_decode("%E6%97%A5%E6%9C%AC.txt") == "\xE6\x97\xA5\xE6\x9C\xAC.txt");  // 日本
+    CHECK(percent_decode("a%2Fb") == "a/b");
+    CHECK(percent_decode("a+b") == "a+b");        // '+' is literal in paths
+    CHECK(percent_decode("bad%zzx") == "bad%zzx"); // malformed kept verbatim
+    CHECK(percent_decode("trail%4") == "trail%4");
+    CHECK(percent_decode("%2e%2e/x") == "../x");   // callers check ".." AFTER decoding
+}
+
+// Non-ASCII file names must round-trip as UTF-8 (on Windows,
+// std::string → path would otherwise go through the ANSI code page).
+TEST_CASE("serve_file: non-ASCII (UTF-8) path", "[http_file][integration]") {
+    const std::string name = u8"anyar_ünïcødé_日本_"
+                             + std::to_string(std::random_device{}()) + ".txt";
+    const auto dir = std::filesystem::temp_directory_path();
+    const std::string utf8_path = path_to_utf8(dir) + "/" + name;
+    const std::string content = "hello from a non-ASCII file";
+    std::ofstream(path_from_utf8(utf8_path), std::ios::binary) << content;
+
+    auto svc = asyik::make_service();
+    int port = pick_port();
+    Resp buffered{}, streamed{};
+    svc->execute([&] {
+        auto server = asyik::make_http_server(svc, "127.0.0.1", port);
+        server->on_http_request("/b", "GET", [&](asyik::http_request_ptr req, asyik::http_route_args) {
+            serve_file(req, utf8_path);
+        });
+        server->on_http_request("/s", "GET", [&, server](asyik::http_request_ptr req, asyik::http_route_args) {
+            serve_file(server, req, utf8_path);
+        });
+        buffered = get(svc, port, "/b", "");
+        streamed = get(svc, port, "/s", "");
+        svc->stop();
+    });
+    svc->run();
+
+    std::error_code ec;
+    std::filesystem::remove(path_from_utf8(utf8_path), ec);
+    CHECK(buffered.status == 200);
+    CHECK(buffered.body == content);
+    CHECK(streamed.status == 200);
+    CHECK(streamed.body == content);
 }

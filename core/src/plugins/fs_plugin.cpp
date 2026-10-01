@@ -1,4 +1,5 @@
 #include <anyar/plugins/fs_plugin.h>
+#include <anyar/path.h>
 
 #include <filesystem>
 #include <fstream>
@@ -22,7 +23,9 @@ static void validate_path(const std::string& path) {
 
 static fs::path resolve(const std::string& raw) {
     validate_path(raw);
-    return fs::absolute(raw);
+    // Paths arrive as UTF-8 (JSON); never let std::string → path use the
+    // ANSI code page (Windows).
+    return fs::absolute(path_from_utf8(raw));
 }
 
 // ── Plugin registration ─────────────────────────────────────────────────────
@@ -36,15 +39,15 @@ void FsPlugin::initialize(PluginContext& ctx) {
         std::string encoding = args.value("encoding", "utf-8");
 
         if (!fs::exists(p)) {
-            throw std::runtime_error("File not found: " + p.string());
+            throw std::runtime_error("File not found: " + path_to_utf8(p));
         }
         if (fs::is_directory(p)) {
-            throw std::runtime_error("Path is a directory: " + p.string());
+            throw std::runtime_error("Path is a directory: " + path_to_utf8(p));
         }
 
         std::ifstream ifs(p, std::ios::binary);
         if (!ifs) {
-            throw std::runtime_error("Cannot open file: " + p.string());
+            throw std::runtime_error("Cannot open file: " + path_to_utf8(p));
         }
 
         std::ostringstream ss;
@@ -88,7 +91,7 @@ void FsPlugin::initialize(PluginContext& ctx) {
 
         std::ofstream ofs(p, std::ios::binary | std::ios::trunc);
         if (!ofs) {
-            throw std::runtime_error("Cannot write to file: " + p.string());
+            throw std::runtime_error("Cannot write to file: " + path_to_utf8(p));
         }
         ofs << content;
         ofs.close();
@@ -101,16 +104,16 @@ void FsPlugin::initialize(PluginContext& ctx) {
         auto p = resolve(args.at("path").get<std::string>());
 
         if (!fs::exists(p)) {
-            throw std::runtime_error("Directory not found: " + p.string());
+            throw std::runtime_error("Directory not found: " + path_to_utf8(p));
         }
         if (!fs::is_directory(p)) {
-            throw std::runtime_error("Path is not a directory: " + p.string());
+            throw std::runtime_error("Path is not a directory: " + path_to_utf8(p));
         }
 
         json entries = json::array();
         for (const auto& entry : fs::directory_iterator(p)) {
             entries.push_back({
-                {"name", entry.path().filename().string()},
+                {"name", path_to_utf8(entry.path().filename())},
                 {"isDirectory", entry.is_directory()},
                 {"isFile", entry.is_regular_file()},
             });
@@ -137,7 +140,7 @@ void FsPlugin::initialize(PluginContext& ctx) {
         bool recursive = args.value("recursive", false);
 
         if (!fs::exists(p)) {
-            throw std::runtime_error("Path not found: " + p.string());
+            throw std::runtime_error("Path not found: " + path_to_utf8(p));
         }
 
         if (recursive) {
@@ -145,7 +148,7 @@ void FsPlugin::initialize(PluginContext& ctx) {
         } else {
             if (fs::is_directory(p) && !fs::is_empty(p)) {
                 throw std::runtime_error(
-                    "Directory is not empty. Use recursive=true to remove: " + p.string());
+                    "Directory is not empty. Use recursive=true to remove: " + path_to_utf8(p));
             }
             fs::remove(p);
         }
@@ -158,7 +161,7 @@ void FsPlugin::initialize(PluginContext& ctx) {
         auto p = resolve(args.at("path").get<std::string>());
 
         if (!fs::exists(p)) {
-            throw std::runtime_error("Path not found: " + p.string());
+            throw std::runtime_error("Path not found: " + path_to_utf8(p));
         }
 
         auto status = fs::status(p);

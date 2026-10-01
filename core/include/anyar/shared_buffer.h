@@ -6,9 +6,12 @@
 /// Provides zero-copy (or near-zero-copy) binary data transfer between
 /// the C++ backend and the webview frontend.
 ///
-/// On Linux:  POSIX shared memory (shm_open + mmap)
-/// On Windows (Phase 7): WebView2 CreateSharedBuffer
-/// On macOS (Phase 7):   POSIX shared memory + WKURLSchemeHandler
+/// On Linux:   POSIX shared memory (shm_open + mmap), served via `anyar-shm://`
+/// On Windows: a WebView2 shared buffer (zero-copy: the page reads the same
+///             memory via `buffer:attach` + `sharedbufferreceived`) once a
+///             window exists; otherwise a pagefile-backed file mapping
+///             served over HTTP (`/__anyar__/buffer/<name>`)
+/// On macOS (Phase 7): POSIX shared memory + WKURLSchemeHandler
 
 #include <atomic>
 #include <cstddef>
@@ -60,6 +63,18 @@ public:
     /// The buffer's name (used for URI scheme lookup and IPC notifications).
     const std::string& name() const { return name_; }
 
+    /// Process-unique generation id (never reused).  Distinguishes a buffer
+    /// from a later one created under the same name.
+    uint64_t id() const { return id_; }
+
+    /// True when the webview can read this memory directly (Windows:
+    /// allocated as a WebView2 shared buffer — see `buffer:attach`).
+    bool is_webview_shared() const { return native_ != nullptr; }
+
+    /// Opaque platform object behind the memory (Windows:
+    /// ICoreWebView2SharedBuffer*), or nullptr.  Callers must cast per-platform.
+    void* native_handle() const { return native_; }
+
 private:
     SharedBuffer(const std::string& name, size_t size);
 
@@ -67,7 +82,10 @@ private:
     std::string shm_path_;  // platform-specific path (e.g. /anyar_<pid>_<name>)
     size_t size_ = 0;
     uint8_t* data_ = nullptr;
-    int fd_ = -1;  // file descriptor (POSIX)
+    uint64_t id_ = 0;
+    int fd_ = -1;             // file descriptor (POSIX)
+    void* mapping_ = nullptr; // file-mapping HANDLE (Windows)
+    void* native_ = nullptr;  // ICoreWebView2SharedBuffer* (Windows)
 };
 
 // ── SharedBufferRegistry ────────────────────────────────────────────────────
@@ -187,15 +205,17 @@ private:
     std::atomic<bool> closed_{false};
 };
 
-// ── URI Scheme Registration (Linux) ─────────────────────────────────────────
+// ── URI Scheme Registration ─────────────────────────────────────────────────
 
 /// Register the `anyar-shm://` URI scheme handler.
 /// Must be called from the main thread BEFORE any webview is created.
 /// On Linux, this uses webkit_web_context_register_uri_scheme().
+/// No-op on Windows (HTTP fallback is used).
 void register_shm_uri_scheme();
 
 /// Register the `anyar-file://` URI scheme handler for local file access.
 /// Must be called from the main thread BEFORE any webview is created.
+/// No-op on Windows — use `/__anyar__/file/<path>` there.
 /// @param allowed_roots Canonical directory paths that may be accessed.
 void register_file_uri_scheme(const std::vector<std::string>& allowed_roots);
 

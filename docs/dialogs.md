@@ -1,6 +1,6 @@
 # Dialog Guide
 
-> LibAnyar provides native OS dialog commands modeled after the [Tauri v2 dialog plugin](https://v2.tauri.app/plugin/dialog/) API. All dialogs run on the GTK main thread and block the calling fiber until the user responds.
+> LibAnyar provides native OS dialog commands modeled after the [Tauri v2 dialog plugin](https://v2.tauri.app/plugin/dialog/) API. All dialogs run on the UI thread (GTK on Linux, Win32 on Windows) and block the calling fiber until the user responds.
 
 ## Overview
 
@@ -395,14 +395,14 @@ When `buttons` is an **object**:
 
 ### `kind` parameter
 
-Maps to GTK message types:
+Maps to native message types:
 
-| Value | GTK Type | Icon |
-|-------|----------|------|
-| `"info"` | `GTK_MESSAGE_INFO` | Information (ℹ) |
-| `"warning"` | `GTK_MESSAGE_WARNING` | Warning (⚠) |
-| `"error"` | `GTK_MESSAGE_ERROR` | Error (✖) |
-| _(auto)_ | `GTK_MESSAGE_QUESTION` | Question (?) — used for Yes/No buttons |
+| Value | Linux (GTK) | Windows (TaskDialog) | Icon |
+|-------|-------------|----------------------|------|
+| `"info"` | `GTK_MESSAGE_INFO` | `TD_INFORMATION_ICON` | Information (ℹ) |
+| `"warning"` | `GTK_MESSAGE_WARNING` | `TD_WARNING_ICON` | Warning (⚠) |
+| `"error"` | `GTK_MESSAGE_ERROR` | `TD_ERROR_ICON` | Error (✖) |
+| _(auto)_ | `GTK_MESSAGE_QUESTION` | no icon (`MB_ICONQUESTION` in the fallback) | Question (?) — used for Yes/No buttons |
 
 ---
 
@@ -423,13 +423,16 @@ LibAnyar's dialog API is intentionally modeled after Tauri v2.4 to make it easy 
 
 ### Key difference
 
-Tauri uses Rust's `rfd` crate for cross-platform dialogs. LibAnyar uses **native GTK3 dialogs** directly via `gtk_message_dialog_new()` and `gtk_file_chooser_dialog_new()`, running on the GTK main thread via `run_on_main_thread()`.
+Tauri uses Rust's `rfd` crate for cross-platform dialogs. LibAnyar calls the native APIs directly, on the UI thread via `run_on_main_thread()`:
+
+- **Linux:** GTK3, through `gtk_message_dialog_new()` and `gtk_file_chooser_dialog_new()`.
+- **Windows:** `IFileOpenDialog` / `IFileSaveDialog` for file pickers. Message boxes use `TaskDialogIndirect`, which allows custom button labels, with a `MessageBoxW` fallback when Common Controls v6 is unavailable.
 
 ---
 
 ## C++ Backend Reference
 
-The dialog plugin is implemented in `core/src/plugins/dialog_linux.cpp` and registered automatically by the framework. The header is at `core/include/anyar/plugins/dialog_plugin.h`.
+The dialog plugin is implemented in `core/src/plugins/dialog_linux.cpp` / `dialog_win32.cpp` and registered automatically by the framework. The header is at `core/include/anyar/plugins/dialog_plugin.h`.
 
 ```cpp
 #include <anyar/plugins/dialog_plugin.h>
@@ -445,4 +448,4 @@ public:
 } // namespace anyar
 ```
 
-All dialog commands run on the GTK main thread via `run_on_main_thread()` (fiber-blocking call) to satisfy GTK's single-threaded requirement.
+All dialog commands run on the UI thread via `run_on_main_thread()`, a fiber-blocking call. This satisfies GTK's single-threaded requirement and the STA COM rules on Windows. On Windows, dialogs are owned by the active app window, so they are modal to it.

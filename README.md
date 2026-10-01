@@ -2,7 +2,8 @@
 
 # LibAnyar
 
-[![CircleCI](https://dl.circleci.com/status-badge/img/gh/okyfirmansyah/libanyar/tree/main.svg?style=shield)](https://dl.circleci.com/status-badge/redirect/gh/okyfirmansyah/libanyar/tree/main)
+[![Linux CI](https://img.shields.io/circleci/build/github/okyfirmansyah/libanyar/main?label=Linux%20CI)](https://dl.circleci.com/status-badge/redirect/gh/okyfirmansyah/libanyar/tree/main)
+[![Windows CI](https://img.shields.io/github/actions/workflow/status/okyfirmansyah/libanyar/windows.yml?branch=main&label=Windows%20CI)](https://github.com/okyfirmansyah/libanyar/actions/workflows/windows.yml)
 
 > **Anyar** (Indonesian/Javanese) — "new", "fresh", "modern"
 
@@ -125,7 +126,7 @@ const result = await invoke('greet', { name: 'World' });
 
 - C++17 compiler (GCC 11+, Clang 10+, MSVC 2019+)
 - CMake >= 3.16
-- LibAsyik 1.7.1+ (with Boost >= 1.81, SOCI 4.0.3)
+- LibAsyik 1.7.1+ on Linux, 1.8.1+ on Windows (with Boost >= 1.81, SOCI 4.0.3)
 - WebKitGTK 4.0 (Linux) / WebView2 (Windows) / WebKit (macOS)
 - nlohmann/json >= 3.11
 - Node.js >= 18 (for frontend build, optional for pre-built dist)
@@ -148,6 +149,35 @@ make -j$(nproc)
 cd examples/hello-world
 ./hello_world
 ```
+
+#### Windows 10/11 (early support — MSVC + vcpkg)
+
+Needs Visual Studio 2022 (Desktop C++), CMake, Git, [vcpkg](https://vcpkg.io) and the
+Edge WebView2 runtime (preinstalled on Windows 11).
+
+```powershell
+# vcpkg packages + LibAsyik 1.8.1 → build-deps\libasyik
+powershell -ExecutionPolicy Bypass -File scripts\setup-windows.ps1 -VcpkgRoot C:\vcpkg
+
+cmake -B build-win -G "Visual Studio 17 2022" -A x64 `
+  -DCMAKE_TOOLCHAIN_FILE=C:\vcpkg\scripts\buildsystems\vcpkg.cmake `
+  -DCMAKE_PREFIX_PATH=$PWD\build-deps\libasyik -DANYAR_BUILD_TESTS=ON
+cmake --build build-win --config Release
+ctest --test-dir build-win -C Release --output-on-failure
+```
+
+Works on Windows: windows/multi-window, native IPC, events, dialogs, clipboard, shell, fs, db,
+SharedBuffer (zero-copy WebView2 shared memory), Pinhole (DirectComposition + D3D11), UTF-8 paths;
+examples hello-world, key-storage, pinhole-hello and video-player (needs `vcpkg install
+ffmpeg:x64-windows`). Not yet: the `anyar-shm://` / `anyar-file://` URI schemes (use `fetchBuffer()` /
+`/__anyar__/file/`), and the wifi-analyzer example (planned).
+
+Ship with `anyar build --package installer` (NSIS `setup.exe`: per-user by default, bundles the
+WebView2 bootstrapper for machines without the runtime; needs NSIS 3), `--package msi`
+(per-machine MSI for GPO/Intune with major upgrades; needs WiX v4+) or `--package zip`. Put an
+`icon.png` in the project root to brand the exe, window and installer. Add `--sign-cert app.pfx` (or
+`--sign-thumbprint` / `--sign-command`) to Authenticode-sign the app, installer and uninstaller. See
+[docs/packaging.md](docs/packaging.md#windows).
 
 ## Pinhole Native Rendering
 
