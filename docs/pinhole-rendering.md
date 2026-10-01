@@ -1,8 +1,9 @@
 # LibAnyar — Pinhole Native Overlay Rendering
 
-> **Status (Phase 4g, complete on Linux):** native GtkGLArea overlay,
+> **Status:** complete on **Linux** (Phase 4g: GtkGLArea) and **Windows**
+> (Phase 7: DirectComposition + D3D11 below a transparent WebView2, ADR-012):
 > JS-driven DOM rect tracking, full pixel-format matrix, multi-pinhole
-> lifecycle, transparent canvas-2D fallback. Windows / macOS land in Phase 7.
+> lifecycle, transparent canvas-2D fallback. macOS lands in Phase 7.2.
 
 A **Pinhole** reserves a DOM rectangle as a transparent placeholder and renders
 a native GPU surface positioned to match that element, below the transparent
@@ -28,11 +29,11 @@ constraints:
 | 4K real-time | OK | GPU-bound |
 | `border-radius`, `transform`, `filter`, `opacity` | Not honored | Full DOM styling |
 | Scroll / swim | Hides during scroll (configurable) | Always smooth |
-| Platforms | Linux today; Win / macOS Phase 7 | All platforms |
+| Platforms | Linux, Windows; macOS Phase 7.2 | All platforms |
 
 Rule of thumb: pinhole for video / camera / chart streams where every ms
 matters; SharedBuffer + FrameRenderer when the surface needs DOM CSS
-or you target Windows / macOS today.
+or you target macOS today.
 
 ## Architecture
 
@@ -48,6 +49,29 @@ GtkWindow
 
 The `GtkGLArea` uses OpenGL 3.3 core via **libepoxy** (a transitive
 dependency of WebKitGTK — no extra packages required).
+
+### Windows
+
+```
+top-level HWND
+  └── webview widget HWND        ← DComp target, topmost = FALSE → root visual
+        │                              ├── pinhole visual (composition swap chain)
+        │                              └── …  (ascending z_index)
+        └── WebView2 child HWND  ← transparent DefaultBackgroundColor, drawn on top
+```
+
+No visual-hosting migration was needed: webview/webview's windowed WebView2
+is kept, its background made transparent (only once a pinhole exists), and
+the pinhole visuals live in a DirectComposition tree attached *below* child
+windows — the same layering as Linux. One D3D11 device per window renders
+every pinhole (WARP if no GPU); `draw_image` uploads to dynamic textures and
+converts YUV in an HLSL pixel shader (BT.601 full range, same constants as
+the GLSL path); `rgb` is expanded on the CPU (D3D11 has no 24-bit format).
+Rects are CSS px × the window DPI (`GetDpiForWindow`), re-applied when the
+window moves to a monitor with a different DPI. `set_continuous(true)` uses a
+16 ms UI-thread timer. Presents never wait for vsync (DComp composites the
+latest buffer), so `on_render` never blocks the message loop on vsync.
+Covered by `tests/pinhole_win32` (PrintWindow pixel checks).
 
 See [ADR-008](decisions.md#adr-008-pinhole-native-overlay-rendering-architecture)
 for the full decision record, and
@@ -119,14 +143,15 @@ mode the planes are CPU-converted to RGBA before being copied to a
 
 ## Fallback mode
 
-`create_pinhole()` never throws. If the platform cannot bring up a GL
+`create_pinhole()` never throws. If the platform cannot bring up a GL / D3D11
 context (headless, sandboxed, missing libepoxy) `Pinhole::is_native()`
 returns `false` and the framework activates a canvas-2D fallback:
 
 1. A `SharedBuffer` is allocated for the surface, sized to CSS px × DPR.
 2. A tiny JS IIFE is injected into the placeholder div — it creates a
    `<canvas id="__anyar_fb_<id>">` and a `window.__anyar_pb_frame(id)`
-   callback that re-fetches `anyar-shm://…` and `putImageData`s it.
+   callback that re-fetches the buffer (`anyar-shm://…` on Linux,
+   `GET /__anyar__/buffer/…` on Windows) and `putImageData`s it.
 3. `request_redraw()` runs the user's `on_render` against a CPU
    `PinholeRenderContext` (whose `clear`/`draw_image` write into the
    SharedBuffer), then evals `__anyar_pb_frame('<id>')`.
@@ -152,7 +177,8 @@ If your design requires those, use SharedBuffer + FrameRenderer instead.
 
 ## Threading & lifetime invariants
 
-- `on_render` is invoked **on the GTK main thread**, not in a LibAsyik
+- `on_render` is invoked **on the UI main thread** (GTK main loop / Win32
+  message loop) with the GL context current / a D3D11 render target bound — not in a LibAsyik
   fiber. If you spawn fibers from inside the callback you must cancel /
   join them before `App::stop()`. Exceptions thrown from the callback
   are caught + logged + the frame is skipped.
@@ -217,4 +243,5 @@ pin->request_redraw();
 | 4g.5 | ✅ | Transparent canvas-2D fallback |
 | 4g.6 | ✅ | ADR-007 shutdown integration, ASAN-clean destroy |
 | 4g.7 | ✅ | video-player integration + this guide |
-| Phase 7 | ⏳ | Windows (DComp / D3D11), macOS (CAMetalLayer) |
+| Phase 7.1 | ✅ | Windows: DirectComposition + D3D11 below a transparent windowed WebView2 (ADR-012) |
+| Phase 7.2 | ⏳ | macOS (CAMetalLayer) |

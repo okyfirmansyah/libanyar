@@ -18,6 +18,7 @@
 #include <anyar/main_thread.h>
 #include "platform.h"
 #include "win32_util.h"
+#include "pinhole_win32.h"
 #include <iostream>
 #endif
 
@@ -71,6 +72,20 @@ struct Window::Impl {
     bool is_modal = false;
     bool minimized = false;
     bool center_pending = false;    // center once the size is known (show)
+
+    // Pinholes: DComp host below the webview (created on first pinhole) and
+    // a liveness token for work queued by the fallback canvas.
+    std::shared_ptr<PinholeHost> pinhole_host;
+    bool pinhole_js_injected = false;
+    std::shared_ptr<std::atomic<bool>> alive_token =
+        std::make_shared<std::atomic<bool>>(true);
+
+    // Window teardown (UI thread): pinholes and their composition host.
+    void pinholes_window_destroyed() {
+        alive_token->store(false);
+        for (auto& [pid, pin] : pinholes) pin->notify_window_destroyed();
+        if (pinhole_host) pinhole_host_window_destroyed(*pinhole_host);
+    }
 #endif
 
     Impl(const WindowCreateOptions& opts, int port)
@@ -274,9 +289,13 @@ struct Window::Impl {
 #endif
 
     ~Impl() {
+#ifdef _WIN32
+        pinholes_window_destroyed();
+#else
         for (auto& [id, pin] : pinholes) {
             pin->notify_window_destroyed();
         }
+#endif
         pinholes.clear();
 
         // Re-enable parent if this was a modal child
@@ -630,9 +649,7 @@ struct Window::Impl {
 
     // Mirrors the GTK "destroy" handler.
     void on_native_destroy() {
-        for (auto& [pid, pin] : pinholes) {
-            pin->notify_window_destroyed();
-        }
+        pinholes_window_destroyed();
         if (owns_run_loop) {
             platform::request_quit();
         }
@@ -885,9 +902,13 @@ void Window::terminate() {
 
 void Window::destroy() {
     if (impl_->wv && !impl_->destroyed) {
+#ifdef _WIN32
+        impl_->pinholes_window_destroyed();
+#else
         for (auto& [id, pin] : impl_->pinholes) {
             pin->notify_window_destroyed();
         }
+#endif
         if (impl_->owns_run_loop) {
             terminate();
         }
@@ -1159,6 +1180,42 @@ std::shared_ptr<Pinhole> Window::create_pinhole(const std::string& id,
         const std::string& js = Pinhole::tracking_js();
         if (!js.empty() && impl_->wv) {
             webview_init(impl_->wv, js.c_str());
+        }
+    }
+#elif defined(_WIN32)
+    // Per-window DirectComposition host below the (now transparent) webview,
+    // created on first use; nullptr if D3D11/DComp are unavailable → the
+    // pinhole uses the canvas fallback.
+    if (!impl_->pinhole_host && impl_->wv && !impl_->destroyed) {
+        impl_->pinhole_host = create_pinhole_host(
+            webview_get_native_handle(impl_->wv, WEBVIEW_NATIVE_HANDLE_KIND_UI_WIDGET),
+            impl_->browser_controller());
+    }
+    // Fallback canvas JS may be produced off the UI thread (set_rect from an
+    // IPC fiber); webview_eval must run on it.  The token stops evals queued
+    // after the window died.
+    Impl* impl_ptr = impl_.get();
+    std::shared_ptr<std::atomic<bool>> alive = impl_->alive_token;
+    auto eval_fn = [impl_ptr, alive](const std::string& js) {
+        auto run = [impl_ptr, alive, js] {
+            if (alive->load() && impl_ptr->wv && !impl_ptr->destroyed) {
+                webview_eval(impl_ptr->wv, js.c_str());
+            }
+        };
+        if (platform::is_main_thread()) run();
+        else post_to_main_thread(run);
+    };
+    pin->platform_init(id, opts, &impl_->pinhole_host, std::move(eval_fn));
+    impl_->pinholes.emplace(id, pin);
+    Pinhole* raw = pin.get();  // callback is owned by the pinhole itself
+    pin->set_reorder_callback([raw]() { raw->reorder_in_overlay(); });
+
+    // Inject the JS tracking bootstrap once per window
+    if (!impl_->pinhole_js_injected) {
+        impl_->pinhole_js_injected = true;
+        if (impl_->wv) {
+            webview_init(impl_->wv, Pinhole::tracking_js().c_str());
+            impl_->after_nested_pump();
         }
     }
 #else

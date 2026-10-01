@@ -25,7 +25,7 @@ examples/<name>/
 - Frontend default: **Svelte 5 + TS + Tailwind CSS 4** (preferred); React or vanilla acceptable
 - Dark theme via CSS custom properties — keep visual consistency across examples
 - C++ entry uses `#ifdef ANYAR_EMBED_FRONTEND` to switch between cmrc resolver and `dist/` filesystem
-- All examples build green via root `cmake --build build`. On Windows everything but wifi-analyzer (libnl) builds; video-player needs `vcpkg install ffmpeg:x64-windows` and skips itself otherwise, and defaults to `--mode=webgl` there (Pinhole is a stub). Keep new examples portable: no GCC `a ?: b`, no `getpid()`/`unistd.h`, UTF-8 paths via `<anyar/path.h>`, `find_package(SQLite3)` not pkg-config. MSVC: a local `constexpr` used inside a lambda must be `static constexpr` (C3493)
+- All examples build green via root `cmake --build build`. On Windows everything but wifi-analyzer (libnl) builds; video-player needs `vcpkg install ffmpeg:x64-windows` and skips itself otherwise (default `--mode=pinhole` on Linux + Windows). Keep new examples portable: no GCC `a ?: b`, no `getpid()`/`unistd.h`, UTF-8 paths via `<anyar/path.h>`, `find_package(SQLite3)` not pkg-config. MSVC: a local `constexpr` used inside a lambda must be `static constexpr` (C3493)
 
 ## Build
 ```bash

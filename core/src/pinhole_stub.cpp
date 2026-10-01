@@ -4,7 +4,7 @@
 /// On these platforms, Pinhole::is_native() returns false and renders are silently
 /// dropped until the full platform implementation is added (Phase 7).
 
-#ifndef __linux__
+#if !defined(__linux__) && !defined(_WIN32)
 
 #include <anyar/pinhole.h>
 
@@ -55,7 +55,6 @@ int  Pinhole::z_index() const                 { return 0; }
 void Pinhole::set_window_active(bool)         {}
 void Pinhole::set_reorder_callback(std::function<void()>) {}
 void Pinhole::reorder_in_overlay()            {}
-std::string Pinhole::tracking_js()            { return {}; }
 
 void Pinhole::platform_init(const std::string& id,
                              const PinholeOptions& opts,
@@ -70,4 +69,4 @@ void Pinhole::override_eval_fn_for_test(std::function<void(const std::string&)>)
 
 } // namespace anyar
 
-#endif // !__linux__
+#endif // !__linux__ && !_WIN32

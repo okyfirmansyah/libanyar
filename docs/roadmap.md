@@ -1348,12 +1348,12 @@ If any of these are needed, use `@libanyar/api/canvas` (Phase 4f path) instead.
 - [x] Add `core/src/plugins/shell_win32.cpp` — `CreateProcessW` + pipes, `ShellExecuteW` (2026-09-30)
 - [x] Add `core/src/shared_buffer_win32.cpp` — file mapping; JS fetches over HTTP (2026-09-30)
 - [x] Zero-copy buffers in WebView2 — `CreateSharedBuffer` + `PostSharedBufferToScript` via `buffer:attach`, environment reached through the controller handle (no hook needed) — ADR-011 (2026-10-01)
-- [ ] **Pinhole (Phase 4g) Windows port** — major-version migration:
-  - [ ] Switch WebView2 hosting to `CoreWebView2CompositionController` (visual hosting) — **breaking change**, gated by major version bump
-  - [ ] Add `core/src/pinhole_win32.cpp` — DComp tree with WebView visual + custom D3D11 swap-chain visual
-  - [ ] HLSL shader port from GL/MSL counterparts
-  - [ ] Validate WebView2 SDK ≥ matching version requirement
-- [ ] WebView2 integration (webview/webview handles most of this; visual hosting requires bypass)
+- [x] **Pinhole (Phase 4g) Windows port** — ADR-012, NOT breaking (2026-10-01):
+  - [x] ~~Switch WebView2 hosting to `CoreWebView2CompositionController`~~ — not needed: DComp target with `topmost=FALSE` on webview’s host HWND renders below a transparent windowed WebView2
+  - [x] Add `core/src/pinhole_win32.cpp` — per-window DComp tree + per-pinhole composition swap chains (D3D11, WARP fallback)
+  - [x] HLSL shader port (rgba/bgra/gray/yuv420/nv12/nv21, BT.601) + canvas-2D fallback over HTTP
+  - [x] `tests/pinhole_win32` — PrintWindow pixel checks (position×DPI, z-order, visibility, move, fallback)
+- [x] WebView2 integration (webview/webview windowed hosting kept)
 - [x] CMake + MSVC build support — vcpkg deps, `scripts/setup-windows.ps1`, LibAsyik 1.8.1 (2026-09-30)
 - [x] Test on Windows 11 — 12/12 ctest incl. `window_close` + `native_ipc` E2E through WebView2 (2026-09-30); Windows 10 untested
 - [ ] Bundle WebView2 bootstrapper for systems without Edge

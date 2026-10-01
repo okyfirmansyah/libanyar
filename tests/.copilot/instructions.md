@@ -25,6 +25,7 @@ tests/
 │   ├── main.cpp                 # 5s _exit() watchdog safety net
 │   ├── dist/index.html
 │   └── CMakeLists.txt
+├── pinhole_win32/               # Windows only; DComp/D3D11 pinholes checked via PrintWindow(PW_RENDERFULLCONTENT) pixels: position×DPI, z-order/set_z_index, set_visible, set_rect move, force_fallback canvas; LABELS display;pinhole;e2e
 ├── native_ipc/                  # Windows only for now (platform-neutral code); generated page drives __anyar_ipc__ round-trip, event push, buffer fetch, UI-thread hop, window:close-all; LABELS display;ipc;e2e
 ├── early_close/                 # Linux + Windows; window:close-all posted (from an on_ready fiber) while the main window is still being created → app.run() must return (20 s watchdog)
 └── window_close/                # Linux + Windows; plain exe (no Catch2): native close (gtk_window_close / WM_CLOSE) → app.run() must return

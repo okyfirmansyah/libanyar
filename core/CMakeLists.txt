@@ -8,6 +8,8 @@ add_library(anyar_core STATIC
     src/event_bus.cpp
     src/frame_mailbox.cpp
     src/http_file.cpp
+    src/pinhole_cpu.cpp       # CPU pixel conversion (canvas fallback, all OSes)
+    src/pinhole_tracking.cpp  # DOM tracking JS (all OSes)
     src/shared_buffer.cpp
     src/window.cpp
     src/window_manager.cpp
@@ -31,7 +33,7 @@ elseif(WIN32)
         src/platform_win32.cpp
         src/main_thread_win32.cpp
         src/shared_buffer_win32.cpp
-        src/pinhole_stub.cpp              # Pinhole Win32 port: ADR-008 (DComp)
+        src/pinhole_win32.cpp             # DComp + D3D11 below a transparent WebView2
         src/plugins/dialog_win32.cpp
         src/plugins/clipboard_win32.cpp
         src/plugins/shell_win32.cpp
@@ -167,7 +169,8 @@ elseif(WIN32)
     # Win32 system libraries (window mgmt, COM dialogs, ShellExecute, version
     # probing done by the WebView2 loader).
     target_link_libraries(anyar_core PUBLIC
-        user32 ole32 shell32 shlwapi advapi32 version)
+        user32 ole32 shell32 shlwapi advapi32 version
+        d3d11 dxgi dcomp d3dcompiler)    # Pinhole (pinhole_win32.cpp)
 elseif(APPLE)
     # Phase 7: WKWebView — webview/webview auto-detects via macros.h
     # target_link_libraries(anyar_core PUBLIC "-framework WebKit")

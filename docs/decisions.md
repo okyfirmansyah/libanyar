@@ -4,6 +4,30 @@
 
 ---
 
+## ADR-012: Pinhole on Windows — DirectComposition Below a Transparent Windowed WebView2
+
+**Date**: 2026-10-01
+**Status**: Accepted (supersedes the Windows part of ADR-008)
+
+**Context**: ADR-008 planned the Windows Pinhole port as a switch to `CoreWebView2CompositionController` (visual hosting), with a DComp tree holding both the webview visual and the swap-chain visuals. That is a major-version breaking change: webview/webview creates a windowed controller, and visual hosting would mean taking over its input routing and accessibility. The Linux implementation actually layers the native surfaces **below** a transparent webview (HTML on top), not above it.
+
+**Decision**: Keep webview/webview's windowed WebView2 and reproduce the Linux layering:
+- **Transparency:** on the first `create_pinhole()`, set `ICoreWebView2Controller2::put_DefaultBackgroundColor` to fully transparent.
+- **Composition:** one DirectComposition target per window, `CreateTargetForHwnd(widget_hwnd, topmost = FALSE)` on webview's host ("widget") HWND, which places its visuals **below** that HWND's child windows, i.e. below the WebView2 window. Each pinhole is a visual whose content is a `CreateSwapChainForComposition` swap chain (BGRA, premultiplied, flip-sequential), offset to the CSS rect × window DPI and re-stacked by `z_index`. (`AddVisual(v, FALSE, nullptr)` adds on top.)
+- **Rendering:** one D3D11 device per window (hardware, then WARP). The YUV/gray/RGBA conversion is a runtime-compiled HLSL shader mirroring the GLSL; `rgb` is CPU-expanded. `Present(0, 0)` never blocks the UI thread on vsync; continuous mode is a 16 ms UI timer.
+- **Threading:** every D3D/DComp call runs on the UI thread. Posted work captures a `weak_ptr<PinholeState>` — the Win32 equivalent of Linux's `ImplGuard`.
+- **Fallback:** the canvas-2D fallback (no D3D11/DComp, or `force_fallback`) is shared logic, fetching over HTTP. `pinhole_cpu.cpp` (CPU converters) and `pinhole_tracking.cpp` (DOM tracking JS) are now platform-neutral.
+
+**Rationale**: A standalone prototype proved DWM composes non-topmost DComp content of the host window underneath a transparent windowed WebView2, with HTML on top. That gives the full feature with no API, hosting, input or accessibility change, and no major version bump.
+
+**Consequence**:
+- Once a window has a pinhole, its webview background is transparent. Pages must paint their own background, except over pinholes — as on Linux.
+- `tests/pinhole_win32` checks composed pixels via `PrintWindow(PW_RENDERFULLCONTENT)`: position × DPI, z-order and re-stack, visibility, move, canvas fallback, shutdown with live pinholes. It needs a desktop (`display` label).
+- `Window` holds every pinhole until the window closes. There is still no remove API (same as Linux).
+- video-player defaults to `--mode=pinhole` on Windows too.
+
+---
+
 ## ADR-011: Zero-Copy SharedBuffers on WebView2
 
 **Date**: 2026-10-01
@@ -97,7 +121,7 @@ Plus: `anyar::serve_file()` (`<anyar/http_file.h>`), with Range/206/416 support.
 ## ADR-008: Pinhole (Native Overlay) Rendering Architecture
 
 **Date**: 2026-04-28
-**Status**: Accepted
+**Status**: Accepted — Windows hosting superseded by [ADR-012](#adr-012-pinhole-on-windows--directcomposition-below-a-transparent-windowed-webview2) (no visual-hosting migration, not breaking)
 
 **Context**: Phase 4f delivers zero-copy shared memory (SharedBuffer) + WebGL frame rendering (~1ms / 1080p). The remaining bottleneck is two steps: (a) JS must `fetch("anyar-shm://")` which still involves a WebKit URI scheme handler callback and an IPC event, and (b) `texImage2D` requires a GPU upload from the CPU-mapped memory. For 4K/8K at 60fps or camera-class latency budgets, a more direct path is needed.
 

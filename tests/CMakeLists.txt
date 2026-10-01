@@ -106,6 +106,8 @@ endif()
 # been verified under the CI xvfb job.
 if(WIN32)
     add_subdirectory(native_ipc)
+    # Pinhole (DComp + D3D11) pixel test via PrintWindow
+    add_subdirectory(pinhole_win32)
 endif()
 
 # ── Pinhole: lifecycle + unit tests ─────────────────────────────────────────

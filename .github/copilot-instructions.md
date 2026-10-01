@@ -32,7 +32,7 @@ C++17 (GCC 11+/Clang 10+/MSVC 2019+), CMake ≥ 3.16. Deps: LibAsyik 1.8.1 (pinn
 Each module has `<module>/.copilot/instructions.md`; `<module>/CLAUDE.md` imports it via `@.copilot/instructions.md` (Claude Code import syntax — never `#import`). Modules: `core/`, `js-bridge/`, `cli/`, `tests/`, `examples/`.
 
 ## References
-[ARCHITECTURE.md](../ARCHITECTURE.md) · [CONTRIBUTING.md](../CONTRIBUTING.md) · [docs/decisions.md](../docs/decisions.md) (ADR-001..011) · [docs/roadmap.md](../docs/roadmap.md)
+[ARCHITECTURE.md](../ARCHITECTURE.md) · [CONTRIBUTING.md](../CONTRIBUTING.md) · [docs/decisions.md](../docs/decisions.md) (ADR-001..012) · [docs/roadmap.md](../docs/roadmap.md)
 
 ## Status & Docs Hygiene (MUST)
 - Current state, next priorities, open risks: [docs/progress.md](../docs/progress.md) — read before planning work.

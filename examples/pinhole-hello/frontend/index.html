@@ -105,7 +105,11 @@
     // Query C++ for pinhole metadata
     async function queryInfo() {
       try {
-        const info = await window.__anyar?.invoke('pinhole:info', {});
+        // Plain page (no bundled @libanyar/api): call the native IPC
+        // binding the runtime injects into every LibAnyar window.
+        const reply = await window.__anyar_ipc__(
+          JSON.stringify({ id: 'info', cmd: 'pinhole:info', args: {} }));
+        const info = reply && reply.data;
         if (info) {
           document.getElementById('info').textContent =
             `Pinhole "${info.id}" — native=${info.is_native}`;

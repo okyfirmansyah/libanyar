@@ -50,7 +50,7 @@ See [roadmap.md](roadmap.md) for full per-task checklists and [roadmap.md — Ne
 ## Next Priorities
 
 1. **Land the Windows port safely** — the port touched shared code (`app.cpp` platform hooks, `window.cpp` Impl restructure, `shared_buffer.cpp` split, OS-chosen ports, LibAsyik 1.8.1 on Linux CI with a fresh `cpp-deps-v5` cache) that was only compiled on Windows. Confirm Linux CI (incl. xvfb display tests), get the first `build-windows` CircleCI run green, then enable `tests/native_ipc` on Linux.
-2. **Windows follow-ups (Phase 7.1)** — MSI/NSIS installer + WebView2 bootstrapper (7.4); Pinhole DComp port (ADR-008, breaking).
+2. **Windows follow-ups (Phase 7.1)** — MSI/NSIS installer + WebView2 bootstrapper (7.4); wifi-analyzer WLAN backend; `anyar dev` HMR (all platforms).
 3. **Productize the SharedBuffer WebProcess extension** — prototype in `benchmarks/shm_webext/` reads 1080p in ~0.4 ms vs ~21 ms via `anyar-shm://` (root cause: WebKit's 8 KB-chunked URI-scheme IPC). Needs packaging (DEB/AppImage), `App` wiring, `@libanyar/api/buffer` API + `FrameRenderer` use.
 4. **Pinhole created before `Window::show()`** — gets a null overlay forever; `create_gl_area()` re-queues itself every idle (never renders, busy main loop). Fix: wire overlay on show, or create the GL area lazily.
 5. **Migrate remaining plugin loops to `BackgroundTask`** — wifi-analyzer still uses a bare `execute()` loop + flag (no join); audit built-in plugins for blocking calls that should use `run_blocking()`.
@@ -74,11 +74,12 @@ See [roadmap.md](roadmap.md) for full per-task checklists and [roadmap.md — Ne
 | ~~`/__anyar__/file/` + `anyar-file://` never decoded URLs; string-prefix root check~~ | ✅ Fixed 2026-09-30 | Files with spaces/non-ASCII names were unreachable on every platform; root `/data` admitted `/database/…`. Now `percent_decode()` then `..` check, and component-wise `is_path_within()`. |
 | ~~Windows: SharedBuffer over HTTP~~ | ✅ Fixed 2026-10-01 | Zero-copy WebView2 shared buffers (ADR-011): 8 MiB read ~60 ms (HTTP) → ~0 (live view; ~2 ms only when revalidating). Buffers created before any window still use HTTP. `anyar-file://` unavailable (use `/__anyar__/file/`). |
 | Windows: first page load deferred to `run()` | Low | WebView2 only applies bind/init scripts to later navigations, so a window created before the main loop starts loads nothing until `run()` (child windows created at runtime load in `show()`). |
-| Windows: wifi-analyzer, Pinhole, installers | Medium | Not ported: wifi-analyzer (libnl), Pinhole (stub — video-player defaults to webgl on Windows), MSI/NSIS (portable zip exists). |
+| Windows: wifi-analyzer, installers | Medium | Not ported: wifi-analyzer (libnl), MSI/NSIS (portable zip exists). |
 | ~~`window:close-all` before the main window exists was a no-op~~ | ✅ Fixed 2026-10-01 | IPC is live while WebView2 creates the window (~2 s); the command found no main window and the app never quit. Now sticky (`close_all_requested_`); regression `tests/early_close`. |
 | Windows `std::_Exit()` can hang | Low | Runs DLL detach, which can deadlock with WebView2/FFmpeg threads; use `TerminateProcess` for hard exits (video-player `test:quit`). |
 | ~~Random server ports hit reserved/in-use ports~~ | ✅ Fixed 2026-09-30 | `App` and tests now take an OS-chosen port (Windows reserves blocks of 49152–65535; a failed bind inside a test fiber hung `run()` ~13% of runs). |
-| Pinhole Windows port is a breaking change | Medium | Requires WebView2 visual hosting → major version bump (ADR-008). |
+| ~~Pinhole Windows port is a breaking change~~ | ✅ Resolved 2026-10-01 | ADR-012: DComp below a transparent *windowed* WebView2 — no visual-hosting migration, no version bump. |
+| Windows Pinhole: webview background becomes transparent | Low | Once a window has a pinhole, pages must paint their own background (same contract as Linux). |
 | Pinhole native path in CI | Medium | Unverified whether CI (xvfb/mesa) exercises native GL or only the canvas fallback. |
 | Pinhole CSS/scroll limitations | Low (by design) | Flat rect; hides during scroll; z-sibling detection best-effort (ADR-008). |
 | CLI has few tests | Low | `cli_init_smoke` (both CI jobs) covers init + generated paths; build/dev/package are verified manually (they need Node and a full C++ build). |
@@ -247,3 +248,11 @@ See [roadmap.md](roadmap.md) for full per-task checklists and [roadmap.md — Ne
 - Templates: generated `LIBANYAR_DIR` and vite alias used native paths — `D:\Works\…` broke the vite build (backslashes eaten as escapes) → `generic_string()`
 - Fixed: `anyar dev --no-backend` killed Vite immediately; now waits
 - Tests: `cli_init_smoke` CTest; Linux CI now builds the CLI (`-DANYAR_BUILD_CLI=ON`). Manual E2E on Windows 11: `init demoapp` (svelte-ts) → `build` → `build --package zip` (4 MB; unzipped copy runs and serves its dist) → `dev` (Vite + Debug app; close-all → dev exits 0, no Vite node left). ctest 14/14
+
+### Pinhole on Windows (2026-10-01)
+- ADR-012 (supersedes ADR-008's Windows plan): no CompositionController migration. A standalone prototype proved DWM shows a non-topmost DComp target on webview's host HWND beneath a transparent windowed WebView2, with HTML on top → same layering as Linux, non-breaking
+- `pinhole_win32.cpp/.h`: per-window `PinholeHost` (transparent `DefaultBackgroundColor`, D3D11 device + WARP fallback, DComp target/root), per-pinhole composition swap chain visual (CSS × DPI, z restack), runtime-compiled HLSL (rgba/bgra premultiplied, gray, yuv420, nv12, nv21; rgb CPU-expanded), `Present(0,0)`, continuous = 16 ms UI timer, weak_ptr-guarded posted work, canvas-2D fallback over HTTP
+- Shared code extracted from `pinhole_linux.cpp`: `pinhole_cpu.cpp` (CPU converters), `pinhole_tracking.cpp` (`tracking_js()`)
+- Bugs found while testing: quad winding was culled by D3D's default rasterizer (draw_image showed nothing) → CW strip + CULL_NONE; `AddVisual(v, TRUE, nullptr)` inserts at the BOTTOM → FALSE; pinhole-hello's info query used a non-existent `window.__anyar` global (all platforms) → native IPC
+- `tests/pinhole_win32` (display): PrintWindow(PW_RENDERFULLCONTENT) pixel checks — position × DPI (125%), z-order + set_z_index, set_visible, set_rect move from a non-UI thread, force_fallback canvas at the DOM-tracked rect, shutdown with live pinholes. 3/3; ctest 15/15
+- video-player defaults to `--mode=pinhole` on Windows: generated MPEG-4 plays letterboxed with HTML controls over it; smoke PASS (audio, seek)

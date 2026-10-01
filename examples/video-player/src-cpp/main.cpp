@@ -2,12 +2,13 @@
 //
 // Demonstrates two parallel rendering paths for raw decoded video frames:
 //
-//   --mode=pinhole   (Linux default) Native GtkGLArea layered BELOW a
-//                              transparent WebKitWebView. HTML controls
-//                              (timeline, panels) composite freely on top.
-//   --mode=webgl     (default elsewhere) SharedBufferPool + buffer:ready
-//                              event + JS WebGL renderer (on Windows the
-//                              frames are fetched over HTTP).
+//   --mode=pinhole   (default on Linux + Windows) Native surface layered BELOW
+//                              the transparent webview (Linux: GtkGLArea;
+//                              Windows: DirectComposition + D3D11). HTML
+//                              controls (timeline, panels) composite on top.
+//   --mode=webgl     SharedBufferPool + buffer:ready event + JS WebGL
+//                              renderer (zero-copy WebView2 shared buffers
+//                              on Windows).
 //
 // If `Pinhole::is_native()` returns false (headless, sandbox, missing GL),
 // the framework's built-in canvas-2D fallback transparently takes over.
@@ -43,11 +44,11 @@ namespace {
 
 videoplayer::RenderMode parse_mode(int argc, char** argv) {
     using videoplayer::RenderMode;
-#ifdef __linux__
+#if defined(__linux__) || defined(_WIN32)
     constexpr RenderMode kDefault = RenderMode::Pinhole;
 #else
-    // Pinhole is Linux-only for now (a stub elsewhere, with no canvas
-    // fallback), so frames would never reach the screen.
+    // Pinhole is still a stub here (no native overlay, no canvas fallback),
+    // so frames would never reach the screen.
     constexpr RenderMode kDefault = RenderMode::WebGL;
 #endif
     for (int i = 1; i < argc; ++i) {
@@ -55,15 +56,8 @@ videoplayer::RenderMode parse_mode(int argc, char** argv) {
         if (std::strncmp(a, "--mode=", 7) == 0) {
             std::string v(a + 7);
             if (v == "webgl")   return RenderMode::WebGL;
-#ifdef __linux__
-            if (v == "pinhole") return RenderMode::Pinhole;
-#else
-            if (v == "pinhole") {
-                std::cerr << "[video-player] --mode=pinhole is not available on this "
-                             "platform yet; using webgl.\n";
-                return RenderMode::WebGL;
-            }
-#endif
+            if (v == "pinhole") return kDefault == RenderMode::Pinhole ? RenderMode::Pinhole
+                                                                      : RenderMode::WebGL;
             std::cerr << "[video-player] Unknown --mode=" << v
                       << " (expected pinhole|webgl); using the default.\n";
             return kDefault;
