@@ -579,12 +579,13 @@ int package_appimage(const std::string& project_name,
 
 // ── Public Entry Point ──────────────────────────────────────────────────────
 
-int package_app(const std::string& format,
+int package_app(const PackageOptions& opts,
                 const std::string& project_name,
                 const fs::path& project_dir,
-                const fs::path& build_dir,
-                const std::string& version,
-                const std::string& /*build_type*/) {  // single-config (make)
+                const fs::path& build_dir) {
+    // Single-config (make) build: the binary is build_dir/<name>.
+    const std::string& format = opts.format;
+    const std::string& version = opts.version;
     if (format == "deb") {
         return package_deb(project_name, project_dir, build_dir, version);
     } else if (format == "appimage") {

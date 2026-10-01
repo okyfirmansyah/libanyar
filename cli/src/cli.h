@@ -17,21 +17,27 @@ int cmd_build(int argc, char* argv[]);
 
 // ── Packaging ───────────────────────────────────────────────────────────────
 
-/// Package a built application into the given format.
-/// Linux: "deb", "appimage", or "all".  Windows: "zip" (or "all").
-/// @param format   Package format (see above)
+/// Options for package_app() (from `anyar build --package …`).
+struct PackageOptions {
+    /// Linux: "deb", "appimage", "all".  Windows: "zip", "installer"
+    /// (alias "nsis"), "all".
+    std::string format;
+    std::string version = "0.1.0";   ///< Semantic version, e.g. "1.2.3"
+    std::string build_type = "Release";  ///< multi-config subdir (VS)
+    std::string publisher;           ///< Installer publisher (default: app name)
+    std::string install_scope = "user";  ///< Windows installer: "user" | "machine"
+    std::string webview2 = "bootstrapper";  ///< Windows installer: "bootstrapper" | "skip"
+};
+
+/// Package a built application.
+/// @param opts          Format + metadata (see PackageOptions)
 /// @param project_name  CMake project name (binary name)
 /// @param project_dir   Root of the application project
 /// @param build_dir     Build directory containing the binary
-/// @param version       Semantic version string (e.g. "0.1.0")
-/// @param build_type    CMake configuration (multi-config generators put the
-///                      binary in build_dir/<build_type>/)
-int package_app(const std::string& format,
+int package_app(const PackageOptions& opts,
                 const std::string& project_name,
                 const fs::path& project_dir,
-                const fs::path& build_dir,
-                const std::string& version,
-                const std::string& build_type);
+                const fs::path& build_dir);
 
 // ── Processes (process_posix.cpp / process_win32.cpp) ───────────────────────
 

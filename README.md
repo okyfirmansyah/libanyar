@@ -169,7 +169,10 @@ Works on Windows: windows/multi-window, native IPC, events, dialogs, clipboard, 
 SharedBuffer (zero-copy WebView2 shared memory), Pinhole (DirectComposition + D3D11), UTF-8 paths;
 examples hello-world, key-storage, pinhole-hello and video-player (needs `vcpkg install
 ffmpeg:x64-windows`). Not yet: the `anyar-shm://` / `anyar-file://` URI schemes (use `fetchBuffer()` /
-`/__anyar__/file/`), installers (the CLI makes a portable zip), and the wifi-analyzer example.
+`/__anyar__/file/`), and the wifi-analyzer example.
+
+Ship with `anyar build --package installer` (NSIS `setup.exe`: per-user by default, bundles the
+WebView2 bootstrapper for machines without the runtime; needs NSIS 3) or `--package zip`.
 
 ## Pinhole Native Rendering
 

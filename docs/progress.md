@@ -50,7 +50,7 @@ See [roadmap.md](roadmap.md) for full per-task checklists and [roadmap.md — Ne
 ## Next Priorities
 
 1. **Land the Windows port safely** — the port touched shared code (`app.cpp` platform hooks, `window.cpp` Impl restructure, `shared_buffer.cpp` split, OS-chosen ports, LibAsyik 1.8.1 on Linux CI with a fresh `cpp-deps-v5` cache) that was only compiled on Windows. Confirm Linux CI (incl. xvfb display tests), get the first `build-windows` CircleCI run green, then enable `tests/native_ipc` on Linux.
-2. **Windows follow-ups (Phase 7.1)** — MSI/NSIS installer + WebView2 bootstrapper (7.4); wifi-analyzer WLAN backend; `anyar dev` HMR (all platforms).
+2. **Windows follow-ups (Phase 7.1)** — MSI (GPO deployment, if needed); code signing for setup.exe / app exe; app icon resource; wifi-analyzer WLAN backend; `anyar dev` HMR (all platforms).
 3. **Productize the SharedBuffer WebProcess extension** — prototype in `benchmarks/shm_webext/` reads 1080p in ~0.4 ms vs ~21 ms via `anyar-shm://` (root cause: WebKit's 8 KB-chunked URI-scheme IPC). Needs packaging (DEB/AppImage), `App` wiring, `@libanyar/api/buffer` API + `FrameRenderer` use.
 4. **Pinhole created before `Window::show()`** — gets a null overlay forever; `create_gl_area()` re-queues itself every idle (never renders, busy main loop). Fix: wire overlay on show, or create the GL area lazily.
 5. **Migrate remaining plugin loops to `BackgroundTask`** — wifi-analyzer still uses a bare `execute()` loop + flag (no join); audit built-in plugins for blocking calls that should use `run_blocking()`.
@@ -74,7 +74,7 @@ See [roadmap.md](roadmap.md) for full per-task checklists and [roadmap.md — Ne
 | ~~`/__anyar__/file/` + `anyar-file://` never decoded URLs; string-prefix root check~~ | ✅ Fixed 2026-09-30 | Files with spaces/non-ASCII names were unreachable on every platform; root `/data` admitted `/database/…`. Now `percent_decode()` then `..` check, and component-wise `is_path_within()`. |
 | ~~Windows: SharedBuffer over HTTP~~ | ✅ Fixed 2026-10-01 | Zero-copy WebView2 shared buffers (ADR-011): 8 MiB read ~60 ms (HTTP) → ~0 (live view; ~2 ms only when revalidating). Buffers created before any window still use HTTP. `anyar-file://` unavailable (use `/__anyar__/file/`). |
 | Windows: first page load deferred to `run()` | Low | WebView2 only applies bind/init scripts to later navigations, so a window created before the main loop starts loads nothing until `run()` (child windows created at runtime load in `show()`). |
-| Windows: wifi-analyzer, installers | Medium | Not ported: wifi-analyzer (libnl), MSI/NSIS (portable zip exists). |
+| Windows: wifi-analyzer, MSI, signing | Medium | Not ported: wifi-analyzer (libnl). Installer is NSIS (no MSI); generated exe/installer are unsigned (SmartScreen warns) and the app has no icon resource. |
 | ~~`window:close-all` before the main window exists was a no-op~~ | ✅ Fixed 2026-10-01 | IPC is live while WebView2 creates the window (~2 s); the command found no main window and the app never quit. Now sticky (`close_all_requested_`); regression `tests/early_close`. |
 | Windows `std::_Exit()` can hang | Low | Runs DLL detach, which can deadlock with WebView2/FFmpeg threads; use `TerminateProcess` for hard exits (video-player `test:quit`). |
 | ~~Random server ports hit reserved/in-use ports~~ | ✅ Fixed 2026-09-30 | `App` and tests now take an OS-chosen port (Windows reserves blocks of 49152–65535; a failed bind inside a test fiber hung `run()` ~13% of runs). |
@@ -256,3 +256,10 @@ See [roadmap.md](roadmap.md) for full per-task checklists and [roadmap.md — Ne
 - Bugs found while testing: quad winding was culled by D3D's default rasterizer (draw_image showed nothing) → CW strip + CULL_NONE; `AddVisual(v, TRUE, nullptr)` inserts at the BOTTOM → FALSE; pinhole-hello's info query used a non-existent `window.__anyar` global (all platforms) → native IPC
 - `tests/pinhole_win32` (display): PrintWindow(PW_RENDERFULLCONTENT) pixel checks — position × DPI (125%), z-order + set_z_index, set_visible, set_rect move from a non-UI thread, force_fallback canvas at the DOM-tracked rect, shutdown with live pinholes. 3/3; ctest 15/15
 - video-player defaults to `--mode=pinhole` on Windows: generated MPEG-4 plays letterboxed with HTML controls over it; smoke PASS (audio, seek)
+
+### Windows installer + WebView2 bootstrapper (2026-10-01)
+- `anyar build --package installer` (alias `nsis`; `all` = zip + installer): generated NSIS script → `build/<name>-<ver>-setup.exe`. Per-user by default (no UAC, `%LOCALAPPDATA%\Programs`), `--install-scope machine` for Program Files; Start Menu + desktop shortcuts, Add/Remove Programs (`--publisher`, version, size, quiet uninstall string), MUI2 finish page with "Run"
+- WebView2: Evergreen bootstrapper downloaded once into `%LOCALAPPDATA%\anyar\cache`, verified with WinVerifyTrust + Microsoft signer, embedded, and run only when `EdgeUpdate\Clients\{F3017226-…}\pv` is absent (HKLM 32-bit view, then HKCU); `--webview2 skip`
+- Uninstaller deletes exactly the installed files and non-recursive `RMDir`s — verified: a user file in a shared install dir survives
+- Package options refactored into `PackageOptions` (Linux deb/AppImage unchanged)
+- Verified on Windows 11: silent install → files/shortcuts/ARP entry → installed app serves its dist + clean exit → silent uninstall → everything gone; per-machine script compiles (admin needed to install, not run here); `2.0.0-beta.1` → `VIProductVersion 2.0.0.0`; missing makensis / unknown format give guidance. NSIS for testing came from electron-builder's bundle (SourceForge was down)

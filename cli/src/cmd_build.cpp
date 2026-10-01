@@ -20,8 +20,13 @@ static void print_build_usage() {
     --clean           Clean build directory before building
     --embed           Embed frontend into binary (single-file deployment)
     --package FORMAT  Package after build (Linux: deb, appimage, all;
-                      Windows: zip, all)
+                      Windows: zip, installer, all)
     --version VER     Application version for packaging (default: 0.1.0)
+    --publisher NAME  Installer publisher (Windows; default: app name)
+    --install-scope S Windows installer: user (default, no admin prompt) or
+                      machine (Program Files, needs admin)
+    --webview2 MODE   Windows installer: bootstrapper (default: installs the
+                      WebView2 runtime if missing) or skip
     --help, -h        Show this help
 
   Must be run from a LibAnyar project directory.
@@ -34,8 +39,9 @@ int cmd_build(int argc, char* argv[]) {
     bool clean = false;
     bool embed = false;
     std::string build_type = "Release";
-    std::string package_format;
-    std::string app_version = "0.1.0";
+    PackageOptions pkg;
+    std::string& package_format = pkg.format;
+    std::string& app_version = pkg.version;
 
     for (int i = 1; i < argc; i++) {
         std::string arg = argv[i];
@@ -48,6 +54,17 @@ int cmd_build(int argc, char* argv[]) {
         if (arg == "--embed") { embed = true; continue; }
         if (arg == "--package" && i + 1 < argc) { package_format = argv[++i]; continue; }
         if (arg == "--version" && i + 1 < argc) { app_version = argv[++i]; continue; }
+        if (arg == "--publisher" && i + 1 < argc) { pkg.publisher = argv[++i]; continue; }
+        if (arg == "--install-scope" && i + 1 < argc) { pkg.install_scope = argv[++i]; continue; }
+        if (arg == "--webview2" && i + 1 < argc) { pkg.webview2 = argv[++i]; continue; }
+    }
+    if (pkg.install_scope != "user" && pkg.install_scope != "machine") {
+        print_error("--install-scope must be 'user' or 'machine'");
+        return 1;
+    }
+    if (pkg.webview2 != "bootstrapper" && pkg.webview2 != "skip") {
+        print_error("--webview2 must be 'bootstrapper' or 'skip'");
+        return 1;
     }
 
     // Verify project directory
@@ -138,8 +155,8 @@ int cmd_build(int argc, char* argv[]) {
     if (!package_format.empty()) {
         std::cout << std::endl;
         fs::path build_dir = project_dir / "build";
-        int rc = package_app(package_format, project_name, project_dir,
-                             build_dir, app_version, build_type);
+        pkg.build_type = build_type;
+        int rc = package_app(pkg, project_name, project_dir, build_dir);
         if (rc != 0) return rc;
     }
 

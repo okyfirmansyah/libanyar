@@ -1356,7 +1356,7 @@ If any of these are needed, use `@libanyar/api/canvas` (Phase 4f path) instead.
 - [x] WebView2 integration (webview/webview windowed hosting kept)
 - [x] CMake + MSVC build support — vcpkg deps, `scripts/setup-windows.ps1`, LibAsyik 1.8.1 (2026-09-30)
 - [x] Test on Windows 11 — 12/12 ctest incl. `window_close` + `native_ipc` E2E through WebView2 (2026-09-30); Windows 10 untested
-- [ ] Bundle WebView2 bootstrapper for systems without Edge
+- [x] Bundle WebView2 bootstrapper — `anyar build --package installer` embeds the signature-checked Evergreen bootstrapper, run only when no runtime is registered (2026-10-01)
 - [x] UTF-8 paths in `fs:*` / `resolve_dist_path` / `allow_file_access` / `serve_file` — `<anyar/path.h>`; file routes percent-decode + component-wise root check (2026-09-30)
 - [x] Port the `anyar` CLI — `process_win32.cpp` (`CreateProcess` via cmd.exe + kill-on-close job objects, Ctrl+C), `cmake --build --config`, auto vcpkg/LibAsyik configure args; init/build/dev verified on Windows 11 (2026-10-01)
 - [x] Port examples: key-storage (FindSQLite3, UTF-8 paths, no GCC `?:`) and video-player (vcpkg FFmpeg, FFmpeg 5.1+ channel-layout API, webgl default) — smoke-tested in WebView2 (2026-09-30)
@@ -1392,7 +1392,8 @@ If any of these are needed, use `@libanyar/api/canvas` (Phase 4f path) instead.
 
 ### 7.4 Cross-Platform Packaging
 - [x] Portable zip (Windows) — `anyar build --package zip` (exe + DLLs + dist + README) (2026-10-01)
-- [ ] MSI/NSIS (Windows), DMG (macOS) — extends Phase 5 Linux packaging
+- [x] NSIS installer (Windows) — `anyar build --package installer`: per-user/per-machine, shortcuts, Add/Remove Programs, exact-file uninstaller (2026-10-01)
+- [ ] MSI (Windows; GPO deployment), DMG (macOS)
 
 ### Phase 7 Deliverable
 > LibAnyar apps compile and run on Linux, Windows, and macOS.
