@@ -47,7 +47,7 @@ my-app/
 ├── src-cpp/main.cpp     # lifecycle comment + app.command / app.http_get / (commented) allow_file_access / app.on_ready
 ├── frontend/            # Vite project (alias '@libanyar/api' → <libanyar>/js-bridge/src)
 ├── .github/copilot-instructions.md  # shutdown rules for app/plugin authors (gen_agent_instructions)
-├── CLAUDE.md            # #import .github/copilot-instructions.md
+├── CLAUDE.md            # @.github/copilot-instructions.md (Claude Code import; never #import)
 ├── .gitignore
 └── README.md
 ```

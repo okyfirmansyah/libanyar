@@ -173,8 +173,8 @@ R"(# LibAnyar App Notes
 )");
 
   write_file(dest / "CLAUDE.md",
-R"(#import .github/copilot-instructions.md
-)");
+R"(@.github/copilot-instructions.md
+)");   // Claude Code import syntax (`#import` is not recognised)
 }
 
 static void gen_gitignore(const fs::path& dest) {
