@@ -1,0 +1,4 @@
+schema_version: "1.1"
+name: csv-import-progress
+expected_outcome: |
+  A notes:import command that converts the UTF-8 path with anyar::path_from_utf8, does the file reading/parsing/inserting off the service thread (run_blocking or a BackgroundTask) in batches, emits progress events, reports errors by throwing so invoke rejects, and a frontend using @libanyar/api's dialog.open and listen for progress.

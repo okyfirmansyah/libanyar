@@ -1,0 +1,6 @@
+schema_version: "1.1"
+name: exit-crash-diagnosis
+expected_outcome: |
+  Identifies that shutdown() runs on the main thread while command handlers still run on the service thread, so the unguarded sessions_ map races with telemetry:release; also notices the poll loop is a raw execute() loop that is never stopped/joined. Fixes with a mutex around the shared map and a BackgroundTask stopped in shutdown(), and proposes a repeatable verification: running the app many times (sequentially) with an ANYAR_TEST_SCRIPT that exits at a random moment and counting crashes before/after.
+context:
+  scaffold_script: place-files.sh
