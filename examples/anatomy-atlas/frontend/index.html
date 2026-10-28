@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Anatomy Atlas</title>
+</head>
+<body>
+<div class="app">
+  <header class="top">
+    <div class="brand">
+      <span class="logo" aria-hidden="true"></span>
+      <b>Anatomy Atlas</b>
+      <span class="chip" id="packChip">…</span>
+    </div>
+    <div class="search">
+      <input id="search" type="search" placeholder="Search 2,234 structures — e.g. femur, left kidney, FMA7088" autocomplete="off" spellcheck="false">
+      <div class="results" id="results" role="listbox"></div>
+    </div>
+    <button class="btn ghost" id="aboutBtn">About &amp; licences</button>
+  </header>
+
+  <div class="main">
+    <aside class="side">
+      <section>
+        <h2>Body systems</h2>
+        <ul class="systems" id="systems"></ul>
+      </section>
+      <section class="browse">
+        <h2>Browse <span class="muted" id="browseCount"></span></h2>
+        <div class="tree" id="tree"></div>
+      </section>
+    </aside>
+
+    <section class="viewport" id="viewport">
+      <div class="labels" id="labels"></div>
+      <div class="toolbar left" id="regions"></div>
+      <div class="toolbar right">
+        <button class="btn" id="clipBtn" aria-pressed="false" title="Cross-section">Section</button>
+        <button class="btn" id="xrayBtn" aria-pressed="false" title="Ghost everything except the selection">X-ray</button>
+        <button class="btn" id="resetBtn" title="Show default systems and frame the body">Reset</button>
+      </div>
+      <div class="clipbar" id="clipbar" hidden>
+        <div class="seg" id="clipAxis">
+          <button data-axis="x" aria-pressed="true">Sagittal</button>
+          <button data-axis="z" aria-pressed="false">Coronal</button>
+          <button data-axis="y" aria-pressed="false">Transverse</button>
+        </div>
+        <input type="range" id="clipPos" min="-1" max="1" step="0.001" value="0">
+        <button class="btn small" id="clipFlip">Flip</button>
+      </div>
+      <aside class="info" id="info" hidden></aside>
+      <div class="tooltip" id="tooltip" hidden></div>
+      <img class="watermark" src="/assets/libanyar-logo.png" alt="Built with LibAnyar" draggable="false">
+      <div class="status" id="status">Starting…</div>
+      <div class="credit" id="credit"></div>
+      <div class="loading" id="loading"><div><span id="loadText">Loading anatomy…</span><div class="bar"><i id="loadBar"></i></div></div></div>
+    </section>
+  </div>
+</div>
+
+<dialog id="about">
+  <div class="about" id="aboutBody"></div>
+  <form method="dialog"><button class="btn primary">Close</button></form>
+</dialog>
+
+<script type="module" src="/src/main.ts"></script>
+</body>
+</html>

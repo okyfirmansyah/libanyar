@@ -88,6 +88,19 @@ anyar_add_test(test_http_file
     test_http_file.cpp
 )
 
+# Example: anatomy atlas pack reader + search (pure C++, no display)
+if(ANYAR_BUILD_EXAMPLES)
+    set(ATLAS_DIR ${CMAKE_SOURCE_DIR}/examples/anatomy-atlas)
+    anyar_add_test(test_anatomy_atlas
+        $<TARGET_OBJECTS:catch2_main>
+        ${ATLAS_DIR}/test/test_anatomy_atlas.cpp
+        ${ATLAS_DIR}/src-cpp/atlas_pack.cpp
+    )
+    target_include_directories(test_anatomy_atlas PRIVATE ${ATLAS_DIR}/src-cpp)
+    target_compile_definitions(test_anatomy_atlas PRIVATE
+        ATLAS_SAMPLE_PACK="${ATLAS_DIR}/assets/bodyparts3d/sample.pack")
+endif()
+
 # ── WebGL E2E Tests (requires display) ───────────────────────────────────────
 # Fetches frames via anyar-shm://, which WebView2 does not serve yet.
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")

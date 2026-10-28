@@ -1,0 +1,44 @@
+{
+  "name": "BodyParts3D",
+  "version": "4.0 (isa, obj_99)",
+  "license": "CC-BY-4.0",
+  "license_url": "https://creativecommons.org/licenses/by/4.0/",
+  "attribution": "BodyParts3D, © The Database Center for Life Science licensed under CC Attribution 4.0 International",
+  "source_url": "https://dbarchive.biosciencedbc.jp/en/bodyparts3d/",
+  "license_page": "https://dbarchive.biosciencedbc.jp/en/bodyparts3d/lic.html",
+  "retrieved": "2026-10-21",
+  "inputs": {
+    "isa_BP3D_4.0_obj_99.zip": "40665852c49f218326590e204db91064a1ecfc3c6f8cbd7bbbcaac62c7cd409e",
+    "partof_BP3D_4.0_obj_99.zip": "9fbc713fffeee924a5a657d9813d84d7eb957bded63adb854931dd5e3eb61c97",
+    "isa_element_parts.txt": "a3de74423f943b0d724ae8f59b3a817f87c423a544f8db98113b1980817cbeaf",
+    "isa_inclusion_relation_list.txt": "26e7d818e03a8c909fe09c561f38d0d513423c87681f9450a803bc38f5b07564",
+    "isa_parts_list_e.txt": "ab7796deedd49205e77f3609a1cb8c53e2bbee14ecb5c9a6ca05227469780513",
+    "partof_element_parts.txt": "3f5f6df1028eb122b30de77c711597b6bb8e5541658e5985859fd228adbf88ea",
+    "partof_inclusion_relation_list.txt": "1b40738270931e3c1d955ce34e0fce0d8d10d8c5ad543463e40b4b4c0243007c",
+    "partof_parts_list_e.txt": "9224080557053e6f1322f1e13ab27f0ecde0db19bb3b505f0631afad230eeebd"
+  },
+  "output": {
+    "file": "sample.pack",
+    "sha256": "1aca517d655520dc8e89d3974e0208a72eaa131884a5e13cdc5f0fec168d4970",
+    "bytes": 2775948,
+    "parts": 2234,
+    "lods_mm": [
+      12.0
+    ]
+  },
+  "changes": "converted from OBJ, re-framed to cm, simplified by vertex clustering, positions quantised to 16 bits",
+  "tool": "examples/anatomy-atlas/tools/build_atlas_pack.py <bp3d_dir> sample.pack --lods 12 --only-lod 1",
+  "note": "The OBJ headers in the 4.0 archive still state CC BY-SA 2.1 JP; the licence page (updated 2025-02-27) states CC BY 4.0.",
+  "full_pack": {
+    "release_tag": "anatomy-bodyparts3d-v1",
+    "url": "https://github.com/okyfirmansyah/libanyar/releases/download/anatomy-bodyparts3d-v1/bodyparts3d-full.pack",
+    "sha256": "c1af96b576d122a629deb32381a67cb8f5624e8abc532b833baa8480993dc2c5",
+    "bytes": 89964784,
+    "lods_mm": [
+      0.0,
+      3.0,
+      9.0
+    ],
+    "tool": "examples/anatomy-atlas/tools/build_atlas_pack.py <bp3d_dir> bodyparts3d-full.pack"
+  }
+}

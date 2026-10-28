@@ -72,3 +72,24 @@ Productizing it (not done) means: ship the `.so` with apps (DEB/AppImage/`--embe
 - **`anyar-shm://` is not zero-copy in practice**: ~21 ms per 1080p frame (WebKit's 8 KB-chunked URI-scheme IPC, see above) caps the SharedBuffer+WebGL path well under 1080p60. A WebProcess extension brings it to ~0.4 ms (prototype).
 - **Pinhole is the only path that sustains 1080p60 here** (0.7 ms CPU per frame, vsync-locked), though above its 0.2 ms target; a PBO / persistent-mapped texture upload is the obvious next optimization.
 - **Cold start** (~2.1 s before the window exists) is worth profiling separately (WebKit process spawn, GL/shader caches).
+
+## Anatomy atlas (roadmap A2.5) — 2026-10-21
+
+`examples/anatomy-atlas`, full BodyParts3D pack (2,234 parts), measured with headless Chrome over the app's HTTP/WS IPC (`ATLAS_PORT=3080`), canvas 1060×800 at DPR 1. FPS uses `requestAnimationFrame` over 3 s and is capped by vsync at 60. The native WebKitGTK window was checked for correct streaming (all 14 buffers via `anyar-shm://`), not for FPS.
+
+| Scene | Triangles | AMD Radeon 780M (iGPU, ANGLE GL) | RTX 4050 Laptop (ANGLE Vulkan) |
+|---|---|---|---|
+| Default systems at 3 mm (no muscles / skin) | 762,961 | 60.3 fps | 60.3 fps |
+| Every system at 3 mm | 1,693,291 | 60.3 fps | 60.3 fps |
+
+Backend decode (`atlas:load`, Debug build with `-O2` on `atlas_pack.cpp`, AMD Ryzen 7 8845HS):
+
+| Geometry | Triangles | Decode + normals | Buffer |
+|---|---|---|---|
+| Skeletal @ 3 mm | 205,006 | 8.1 ms | 4.8 MB |
+| Cardiovascular @ 3 mm (1,081 parts) | 360,990 | 13.6 ms | 7.8 MB |
+| Muscular @ 3 mm | 750,657 | 125 ms | 16.6 MB |
+| Muscular @ full | 2,538,960 | 339 ms | — |
+
+An exact `reserve()` per appended part had made multi-part decodes quadratic: cardiovascular took 401 ms. Letting the vectors grow geometrically fixed it.
+

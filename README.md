@@ -3,6 +3,7 @@
 # LibAnyar
 
 [![Linux CI](https://img.shields.io/circleci/build/github/okyfirmansyah/libanyar/main?label=Linux%20CI)](https://dl.circleci.com/status-badge/redirect/gh/okyfirmansyah/libanyar/tree/main)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Windows CI](https://img.shields.io/github/actions/workflow/status/okyfirmansyah/libanyar/windows.yml?branch=main&label=Windows%20CI)](https://github.com/okyfirmansyah/libanyar/actions/workflows/windows.yml)
 
 > **Anyar** (Indonesian/Javanese) — "new", "fresh", "modern"
@@ -52,6 +53,14 @@ Building desktop apps shouldn't force a choice between powerful native performan
 <h3>Wifi Analyzer</h3>
 <img src="docs/assets/wifi-analyzer.gif" alt="Wifi Analyzer" height="200" /><br/>
 <sub>Real-time signal strength visualization and channel scanning.</sub>
+</td>
+</tr>
+<tr>
+<td colspan="2" align="center">
+<h3>Anatomy Atlas</h3>
+<img src="docs/assets/anatomy_atlas.jpg" alt="Anatomy Atlas" height="320" /><br/>
+<sub>Whole-body 3D anatomy: 2,234 parts streamed from C++ to WebGL through SharedBuffers, with levels of detail, GPU picking, search, X-ray and cross-sections.<br/>
+Anatomy data: BodyParts3D, © The Database Center for Life Science licensed under CC Attribution 4.0 International. For education only — not a medical device.</sub>
 </td>
 </tr>
 </table>
@@ -250,4 +259,8 @@ Guides, API references, and tutorials: **[LibAnyar Documentation](docs/README.md
 
 ## License
 
-MIT
+LibAnyar is released under the [MIT License](LICENSE).
+
+Third-party code and data keep their own licences; see [NOTICE](NOTICE). Example data such as anatomy meshes lives under `examples/*/assets/<source>/` with its own `LICENSE` and `MANIFEST.json`, and CI (`scripts/check_assets.py`) rejects assets without a permitted licence and matching attribution.
+
+> **Medical disclaimer.** The anatomy examples are for education and demonstration only. They are not medical devices and must not be used for diagnosis or treatment.
