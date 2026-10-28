@@ -223,6 +223,19 @@ jobs:
           paths:
             - js-bridge/node_modules
 
+  licence-check:
+    docker:
+      - image: python:3.12-slim
+    resource_class: small
+    steps:
+      - checkout
+      - run:
+          name: "Licence gate: asset manifests + NOTICE"
+          command: |
+            apt-get update -qq && apt-get install -y -qq git >/dev/null
+            git config --global --add safe.directory "$PWD"
+            python3 scripts/check_assets.py
+
 # ── Workflows ────────────────────────────────────────────────────────────────
 
 workflows:
@@ -231,3 +244,4 @@ workflows:
     jobs:
       - build-and-test
       - js-bridge-typecheck
+      - licence-check
