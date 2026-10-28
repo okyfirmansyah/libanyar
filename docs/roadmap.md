@@ -1310,6 +1310,7 @@ If any of these are needed, use `@libanyar/api/canvas` (Phase 4f path) instead.
 - [x] Key Storage (SQLite CRUD + Svelte + multi-window modal) — exists with README
 - [x] Video Player (SharedBufferPool + WebGL canvas, RGBA/YUV420) — exists with README
 - [x] WiFi Analyzer (passive/active scan, libnl, WebGL canvas) — exists with README
+- [x] Anatomy Atlas (whole-body BodyParts3D, SharedBuffer LOD streaming, GPU picking, sections) — exists with README
 - [ ] Todo App (SQLite CRUD + React)
 - [ ] File Explorer (native dialogs + file system)
 - [ ] Markdown Editor (file read/write + live preview)
@@ -1329,6 +1330,20 @@ If any of these are needed, use `@libanyar/api/canvas` (Phase 4f path) instead.
 - [x] Benchmark: SharedBuffer 1080p fetch — ❌ ~21 ms (design claim ~1 ms)
 - [x] Benchmark: Pinhole 1080p draw — ⚠️ 0.68 ms CPU p50 (target < 0.2 ms), vsync 60 fps sustained
 - [ ] Profile and optimize hot paths — `anyar-shm://` fetch path, cold startup, Pinhole texture upload (PBO)
+
+### 6.6 Debug Tooling (ADR-016, docs/debugging.md)
+- [x] Console forwarding (`ANYAR_CONSOLE` / `debug_tools.console`) — all platforms (JS-only)
+- [x] Injected test scripts + `anyarTest` + `debug:exit` exit codes + timeout (`ANYAR_TEST_SCRIPT`) — all platforms (JS-only)
+- [x] `debug:screenshot` + `debug:input` on Linux (WebKitGTK snapshot, GDK event synthesis); `@libanyar/api` `debug` module; `tests/debug_tools`
+- [ ] Windows backends: `ICoreWebView2::CapturePreview` + `SendInput` / `SendMouseInput` (`debug_unsupported.cpp` today)
+- [ ] macOS backends: `takeSnapshotWithConfiguration` + synthesized `NSEvent`s (with the macOS port)
+- [ ] Remote inspection wiring: WebView2 `--remote-debugging-port` / WebKitGTK inspector server behind `anyar dev --remote-debug`
+
+### 6.7 AI-assistant support
+- [x] `skills/libanyar/` Claude Code skill (SKILL.md + 5 references + 3 eval cases), install notes in `skills/README.md`
+- [x] `anyar init` writes `CLAUDE.md` with the `@` import (was `#import`, silently ignored); guarded by `cli_init_smoke`
+- [ ] Run the skill evals (with vs without skill), iterate; then description-trigger optimisation
+- [ ] `anyar init` copies the skill into new projects (`.claude/skills/libanyar/`)
 
 ### Phase 6 Deliverable
 > Well-documented, well-tested, production-ready framework on Linux.
@@ -1433,6 +1448,21 @@ If any of these are needed, use `@libanyar/api/canvas` (Phase 4f path) instead.
 > Feature-complete framework with plugin ecosystem and distribution tooling.
 
 ---
+
+---
+
+## Phase 9: 3D Medical Anatomy Tools (planned)
+
+Generic anatomy atlas, imaging viewer, segmentation and measurement examples, planned with licence constraints first (repo LICENSE, NOTICE, asset manifests, CI licence gate). Full step-by-step plan, source licence matrix and release checklist: [anatomy-roadmap.md](anatomy-roadmap.md).
+
+- [x] A0 Legal & repo groundwork (LICENSE, NOTICE, disclaimer, `check_assets.py`) — 2026-10-21
+- [x] A1 Anatomy asset pipeline (BodyParts3D CC BY 4.0 → pack v2 + manifest) — 2026-10-21; full pack awaits the GitHub Release upload
+- [x] A2 Anatomy Atlas Explorer MVP — `examples/anatomy-atlas` (2026-10-21)
+- [ ] A3 Atlas polish & education
+- [ ] B1 Imaging (DICOM) viewer
+- [ ] B2 Segmentation & meshing (TotalSegmentator Apache-2.0 tasks only)
+- [ ] B3 Measurement & planning
+- [ ] B4 Multi-window sync & release
 
 ---
 

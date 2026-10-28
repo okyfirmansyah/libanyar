@@ -2,7 +2,7 @@
 
 > **Current Phase**: Phase 7 — Windows port complete (ADR-010..014; wifi-analyzer deferred to Phase 8); macOS not started
 > **Phase Status**: 🟢 Phases 1–4g complete (Linux), Phases 5–6 partial, Phase 7 Windows: core, zero-copy buffers, Pinhole, CLI, zip/NSIS/MSI packaging, code signing, app icon (local: 15/15 ctest); Windows CI moved to GitHub Actions, first run pending
-> **Last Updated**: 2026-10-01 (MSI packaging, Windows CI on GitHub Actions)
+> **Last Updated**: 2026-10-28 (debug tooling ADR-016: console forwarding, `debug:*` automation, injected test scripts; atlas shutdown race fixed)
 
 > **Agents**: update this file (and the matching checkbox in [roadmap.md](roadmap.md)) at the end of every task that changes status, adds a feature, or discovers a risk. Keep "Next Priorities" and "Open Risks" current; append to the Session Log.
 
@@ -49,6 +49,8 @@ See [roadmap.md](roadmap.md) for full per-task checklists and [roadmap.md — Ne
 
 ## Next Priorities
 
+0b. **Debug tooling on Windows** — implement `debug_win32.cpp` (`CapturePreview` + `SendInput`) so `tests/debug_tools` asserts capture/input there too; first Windows CI run of `tests/debug_tools` (platform-neutral parts).
+0. **Anatomy atlas follow-through** (branch `body_atlas_demo`): publish the full pack as GitHub Release `anatomy-bodyparts3d-v1` (`bodyparts3d-full.pack` + `.manifest.json`, SHA-256 pinned in `examples/anatomy-atlas/CMakeLists.txt`), confirm the new CircleCI `licence-check` job, then Phase A3 / B1 per [anatomy-roadmap.md](anatomy-roadmap.md).
 1. **Land the Windows port safely** — the port touched shared code (`app.cpp` platform hooks, `window.cpp` Impl restructure, `shared_buffer.cpp` split, OS-chosen ports, LibAsyik 1.8.1 on Linux CI with a fresh `cpp-deps-v5` cache) that was only compiled on Windows. Confirm Linux CI (incl. xvfb display tests), get the first GitHub Actions `Windows CI` run green (promote display tests to blocking once stable), then enable `tests/native_ipc` on Linux.
 2. **Windows follow-ups** — signing in CI (Azure Trusted Signing via `--sign-command`); `anyar dev` HMR (all platforms). wifi-analyzer WLAN backend deferred to Phase 8.5.
 3. **Productize the SharedBuffer WebProcess extension** — prototype in `benchmarks/shm_webext/` reads 1080p in ~0.4 ms vs ~21 ms via `anyar-shm://` (root cause: WebKit's 8 KB-chunked URI-scheme IPC). Needs packaging (DEB/AppImage), `App` wiring, `@libanyar/api/buffer` API + `FrameRenderer` use.
@@ -65,6 +67,10 @@ See [roadmap.md](roadmap.md) for full per-task checklists and [roadmap.md — Ne
 
 | Risk / Issue | Severity | Status / Notes |
 |------|----------|-------|
+| Full anatomy pack not yet published | Low | Until the `anatomy-bodyparts3d-v1` release exists, `-DANYAR_FETCH_ANATOMY=ON` warns and the app uses the embedded 12 mm sample. Local builds can point `-DANYAR_ANATOMY_PACK=` at a built pack. |
+| Third-party data licences drift | Medium | BodyParts3D changed BY-SA 2.1 JP → BY 4.0 without updating its files. Licence facts are dated in `docs/anatomy-roadmap.md` and NOTICE; re-check before every release (ADR-015). |
+| Plugin `shutdown()` runs on the main thread concurrently with command fibers | Medium | Documented contract (graceful-shutdown.md, writing-plugins.md); not enforced. Atlas hit it (unlocked map → heap corruption on early exit, fixed 2026-10-28). Consider moving plugin shutdown onto the service thread (ADR candidate). |
+| `docs/shared-memory-webgl.md` examples use removed APIs | Medium | `SharedBufferPool(name, count, size)` order, `slot_buffer`, `acquire_read`, `registry.create/destroy`, `shm_url()` no longer exist; headers + video-player/atlas are current. Users copying the guide get compile errors. Rewrite against `shared_buffer.h`. |
 | Shutdown fragility | High | Fixed repeatedly (ADR-007, 2026-03-15; plugin-shutdown reorder, 2026-05-01). Plugins must stop their own `execute()` loops and unblock back-pressure waits in `shutdown()` — contract, not enforced. See [graceful-shutdown.md](graceful-shutdown.md). |
 | WebGL test hangs without watchdog | Medium | ⚠️ Mitigated by 5 s `_exit()` watchdog — can mask real teardown hangs in CI. |
 | `post_to_main_thread` deadlock | Medium | ⚠️ Documented only — never call from a fiber during shutdown (ADR-007). |
@@ -299,3 +305,67 @@ See [roadmap.md](roadmap.md) for full per-task checklists and [roadmap.md — Ne
   - **packages:** the CLI artifact plus Node/NSIS/WiX run `scripts/ci/windows-package-e2e.ps1`: scaffold → `--package all` → MSI install, then checks (files, shortcut, ARP, app serves), upgrade 1.0.0→1.0.1 (one ARP entry), downgrade refused, uninstall (everything gone) → NSIS per-user install/uninstall.
   - The CircleCI `build-windows` job (never run) and the windows orb were removed. README now has separate Linux CI / Windows CI badges.
 - wifi-analyzer Windows port moved to roadmap Phase 8.5
+
+### Anatomy tools roadmap (2026-10-21)
+- The MICS-CABG planner demo is parked on the unreleased `mics_demo` branch; `main` was reverted.
+- Planned Phase 9 (generic 3D anatomy tools) in [anatomy-roadmap.md](anatomy-roadmap.md), with a licence-first policy.
+- Licence facts checked 2026-10-21:
+  - BodyParts3D is now **CC BY 4.0** (its OBJ headers still say BY-SA 2.1 JP);
+  - Z-Anatomy is CC BY-SA 4.0 (not committed);
+  - HRA organs are CC BY 4.0;
+  - Visible Human data is under the NLM Terms (attribution, runtime download);
+  - TotalSegmentator: only the Apache-2.0 tasks are allowed.
+- Risk: the repo has **no root LICENSE**, so the code is not legally reusable. Phase A0 fixes this before any showcase.
+
+### Anatomy tools A0–A2 (2026-10-21, branch `body_atlas_demo`)
+- **A0:**
+  - root `LICENSE` (MIT) + ADR-015 (MIT code, licence-gated data, large packs as Release assets);
+  - `NOTICE` (vendored, linked and data components; LibAsyik confirmed MIT);
+  - README licence badge + medical disclaimer;
+  - `scripts/check_assets.py` licence gate in CircleCI (`licence-check`) and GitHub Actions, negative-tested;
+  - `mics_demo` re-licensed to CC BY 4.0 wording (commit `72f9d85`).
+- **A1:** `examples/anatomy-atlas/tools/build_atlas_pack.py` (pure Python, deterministic) turns BodyParts3D 4.0 (is-a, 2,234 parts) into `ANATPAK2` packs with systems, types, regions, LODs and a provenance manifest.
+  - Sample (12 mm, 2.8 MB) committed under `assets/bodyparts3d/` with LICENSE + MANIFEST.
+  - Full pack (source / 3 mm / 9 mm, 90 MB) fetched by `-DANYAR_FETCH_ANATOMY=ON` from the not-yet-published release, or `-DANYAR_ANATOMY_PACK=`.
+- **A2:** `examples/anatomy-atlas`.
+  - C++ `AtlasPlugin`: one SharedBuffer per system and LOD, explicit `atlas:release`, in-memory search with type/system/region tags.
+  - three.js frontend: per-part state texture, GPU picking, X-ray, isolate, stencil-capped sections, coarse → 3 mm → full-res-selection streaming, credits/About generated from the manifest.
+  - `test_anatomy_atlas` (Catch2).
+  - Measured 60 fps (vsync) with the whole body at 3 mm (1.69M ▲) on a Radeon 780M iGPU and an RTX 4050 (headless Chrome/ANGLE).
+  - The native WebKitGTK window streamed all buffers via `anyar-shm://` under Xvfb (FPS not measured there).
+- **Found and fixed:** an exact per-part `reserve()` made multi-part decodes quadratic. Cardiovascular went from 401 ms to 13.6 ms.
+
+### Debug tooling + atlas shutdown race (2026-10-28, branch `body_atlas_demo`)
+- **New core feature (ADR-016, docs/debugging.md):**
+  - `AppConfig::debug_tools` / `ANYAR_CONSOLE`, `ANYAR_DEBUG_TOOLS`, `ANYAR_TEST_SCRIPT`, `ANYAR_TEST_TIMEOUT`;
+  - console forwarding;
+  - `debug:info|screenshot|input|exit`;
+  - `window.anyarTest` + injected test script (main window; exit codes `done(code)` / 1 / 124);
+  - `Window::capture()` / `Window::inject_input()` via private platform hooks: `debug_linux.cpp` (WebKitGTK snapshot + GDK synthesis) and `debug_unsupported.cpp` (Windows, macOS);
+  - `App::run()` returns the exit code;
+  - `@libanyar/api` `debug` module (+ `./debug` subpath, 7 Vitest cases);
+  - `tests/debug_tools` (display).
+- **Verified in the real WebKitGTK window under Xvfb:**
+  - 2880×1800 screenshots including WebGL;
+  - real typing + Enter selecting "Left femur" in the atlas;
+  - console/error/rejection forwarding;
+  - exit codes 0 / 1 / 124;
+  - `examples/anatomy-atlas/test/smoke.js` ships as the showcase.
+- **Found with the new tools:** heap corruption (`malloc_consolidate(): unaligned fastbin chunk`) when the atlas exits shortly after start.
+  - Loop: sequential runs of a test script that exits early, ~15% red.
+  - Minimised: atlas-only, and `atlas:release` is load-bearing (0/30 with it disabled vs 8/30).
+  - Cause: `AtlasPlugin::buffers_` touched by `shutdown()` on the main thread and by `atlas:release` on the service thread.
+  - Fix: a mutex; 0/80 after.
+  - Also added an in-flight drain for worker-pool loads.
+  - Documented the plugin threading rule.
+- **WebKit quirks:** `Error.stack` lacks the message line (the forwarder adds `Name: message`); errors thrown from injected scripts are sanitized to "Script error.".
+
+### LibAnyar Claude Code skill (2026-10-28)
+- New `skills/libanyar/` for developers *using* LibAnyar:
+  - `SKILL.md`: threading model, core pattern, the rules that prevent common failures, feature workflow, debugging table.
+  - References (read on demand): cpp-backend, frontend, binary-data-and-rendering, debugging-and-testing, build-and-ship.
+- Facts checked against the headers, not the prose docs (which turned out partly stale; see risks).
+- 3 eval cases in `claude plugin eval` format: webcam streaming, 2 GB CSV import, exit-crash diagnosis with a planted plugin.
+- Evals not run yet.
+- Fixed `anyar init`'s generated `CLAUDE.md` (`#import` → `@.github/copilot-instructions.md`); `cli_init_smoke` now asserts it (verified red/green).
+
