@@ -89,6 +89,24 @@ public:
     /// if the window is destroyed.  Use on the main thread only.
     void* browser_controller() const;
 
+    // ── Debugging / automation (see <anyar/debug.h>, docs/debugging.md) ──
+
+    /// Capture the webview's visible area as PNG, as the engine rendered it
+    /// (DOM, CSS, WebGL).  Native Pinhole surfaces under the webview are not
+    /// included.  Main thread only; @p done runs later on the main thread.
+    /// Linux: implemented.  Windows / macOS: @p done receives an error until
+    /// their platform hooks land.
+    /// @param done  Receives the snapshot or an error message.
+    void capture(SnapshotCallback done);
+
+    /// Deliver a synthetic input event through the toolkit's event path, so
+    /// the page treats it as real user input (it counts as a user gesture).
+    /// Main thread only.  Linux: implemented.  Windows / macOS: returns an
+    /// error until their platform hooks land.
+    /// @param ev  The event (CSS px coordinates).
+    /// @returns   Empty on success, otherwise an error message.
+    std::string inject_input(const InputEvent& ev);
+
     // ── Parent / Child / Modal ──────────────────────────────────────────
 
     /// Establish parent/child (transient) relationship.

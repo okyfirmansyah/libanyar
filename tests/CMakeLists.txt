@@ -97,6 +97,8 @@ endif()
 # ── Native window close regression (requires display) ───────────────────────
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux" OR WIN32)
     add_subdirectory(window_close)
+    # Debug tooling end to end: console forwarding, test script, input, capture, exit code
+    add_subdirectory(debug_tools)
     # window:close-all arriving while the main window is still being created
     add_subdirectory(early_close)
 endif()

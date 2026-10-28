@@ -223,6 +223,7 @@ void shutdown() override {
 ```
 
 Shutdown checklist:
+- `shutdown()` runs on the **main thread** while command handlers may still run on the service thread: lock any state the two share.
 - Stop long-lived `service_->execute()` loops in `shutdown()`.
 - Unblock waiting loops with a close/cancel path.
 - Do not call `service_->stop()` from plugin code or window-close handlers.

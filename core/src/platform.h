@@ -6,6 +6,8 @@
 // platform_<os>.cpp and main_thread_<os>.cpp so app.cpp / window.cpp stay
 // free of #ifdef blocks for these concerns.
 
+#include <anyar/debug.h>
+
 #include <filesystem>
 #include <string>
 
@@ -36,6 +38,21 @@ bool has_shm_uri_scheme();
 /// `buffer:attach` (Windows / WebView2 shared buffers).  Injected into pages
 /// as `window.__LIBANYAR_SHARED_BUFFERS__`.
 bool has_webview_shared_buffers();
+
+// ── Debug tooling (debug_<os>.cpp; see <anyar/debug.h>) ─────────────────────
+
+/// Whether capture_webview() / inject_webview_input() work on this platform.
+bool can_capture_webview();
+bool can_inject_webview_input();
+
+/// Capture the visible area of the webview behind @p engine (the
+/// Window::browser_controller() handle) as PNG.  UI thread only; @p done runs
+/// on the UI thread (possibly synchronously, e.g. with an error).
+void capture_webview(void* engine, SnapshotCallback done);
+
+/// Inject @p ev into the webview behind @p engine through the toolkit's event
+/// path.  UI thread only.  Returns empty on success, else an error message.
+std::string inject_webview_input(void* engine, const InputEvent& ev);
 
 #ifdef _WIN32
 /// Ask the UI thread's message loop to exit.  Thread-safe (webview's own

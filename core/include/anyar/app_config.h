@@ -1,5 +1,7 @@
 #pragma once
 
+#include <anyar/debug.h>
+
 #include <functional>
 #include <string>
 #include <vector>
@@ -117,6 +119,12 @@ struct AppConfig {
     /// Merged with `WindowConfig::debug` via OR — if either is `true`,
     /// DevTools and debug features are enabled.
     bool debug = false;
+
+    /// @brief Developer debugging aids: console forwarding, `debug:*`
+    /// automation commands, injected test scripts.  All off by default; each
+    /// can also be enabled by environment variable (`ANYAR_CONSOLE=1`,
+    /// `ANYAR_DEBUG_TOOLS=1`, `ANYAR_TEST_SCRIPT=path`).  See `<anyar/debug.h>`.
+    DebugToolsConfig debug_tools;
 
     /// @brief Path to the frontend build output directory.
     /// Served as static files by the HTTP server. Typically `"./dist"`.
