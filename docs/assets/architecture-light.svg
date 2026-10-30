@@ -1,0 +1,96 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="612" viewBox="0 0 960 612" role="img" aria-labelledby="title desc">
+<title id="title">LibAnyar architecture</title>
+<desc id="desc">A web frontend runs in the OS webview and talks to a C++17 core over three channels: native IPC, events, and zero-copy binary data. The core runs on LibAsyik.</desc>
+<defs>
+<linearGradient id="fe" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#4f46e5"/><stop offset="1" stop-color="#7c3aed"/></linearGradient>
+<linearGradient id="core" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#0f766e"/><stop offset="1" stop-color="#0d9488"/></linearGradient>
+<linearGradient id="ch0" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#6366f1"/><stop offset="1" stop-color="#8b5cf6"/></linearGradient>
+<linearGradient id="ch1" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#0ea5e9"/><stop offset="1" stop-color="#6366f1"/></linearGradient>
+<linearGradient id="ch2" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#f59e0b"/><stop offset="1" stop-color="#f97316"/></linearGradient>
+<filter id="shadow" x="-10%" y="-10%" width="120%" height="140%"><feDropShadow dx="0" dy="4" stdDeviation="8" flood-color="#0f172a" flood-opacity="0.10"/></filter>
+<marker id="arr" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M0 0 10 5 0 10z" fill="#94a3b8"/></marker>
+</defs>
+<rect x="24" y="24" width="912" height="92" rx="18" fill="url(#fe)" filter="url(#shadow)"/>
+<g transform="translate(52,50)"><rect width="40" height="40" rx="10" fill="rgba(255,255,255,0.18)"/><rect x="9" y="11" width="22" height="18" rx="3" fill="none" stroke="#fff" stroke-width="2"/><path d="M9 16h22" stroke="#fff" stroke-width="2"/></g>
+<text x="108" y="66" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="22" font-weight="700" fill="#fff" text-anchor="start">Your web frontend</text>
+<text x="108" y="90" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="14" font-weight="400" fill="rgba(255,255,255,0.85)" text-anchor="start">Svelte · React · Vue · vanilla — any Vite app, hot reload in dev</text>
+<rect x="771" y="53" width="137" height="34" rx="17" fill="rgba(255,255,255,0.18)" stroke="rgba(255,255,255,0.35)"/>
+<text x="839.5" y="75" font-family="ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace" font-size="14" font-weight="600" fill="#fff" text-anchor="middle">@libanyar/api</text>
+<rect x="24" y="132" width="912" height="52" rx="14" fill="#f8fafc" stroke="#e2e8f0"/>
+<text x="48" y="163" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="15" font-weight="700" fill="#0f172a" text-anchor="start">OS webview</text>
+<text x="142" y="163" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="13" font-weight="400" fill="#475569" text-anchor="start">native, not bundled</text>
+<rect x="701" y="144" width="215" height="28" rx="14" fill="#f1f5f9" stroke="#e2e8f0" stroke-dasharray="4 3"/>
+<circle cx="717" cy="158" r="4" fill="#94a3b8"/>
+<text x="728" y="163" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="13"><tspan font-weight="600" fill="#475569">macOS</tspan><tspan fill="#475569"> · WKWebView · soon</tspan></text>
+<rect x="520" y="144" width="171" height="28" rx="14" fill="#f1f5f9" stroke="#e2e8f0"/>
+<circle cx="536" cy="158" r="4" fill="#22c55e"/>
+<text x="547" y="163" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="13"><tspan font-weight="600" fill="#0f172a">Windows</tspan><tspan fill="#475569"> · WebView2</tspan></text>
+<rect x="346" y="144" width="164" height="28" rx="14" fill="#f1f5f9" stroke="#e2e8f0"/>
+<circle cx="362" cy="158" r="4" fill="#22c55e"/>
+<text x="373" y="163" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="13"><tspan font-weight="600" fill="#0f172a">Linux</tspan><tspan fill="#475569"> · WebKitGTK</tspan></text>
+<line x1="168.0" y1="188" x2="168.0" y2="210" stroke="#94a3b8" stroke-width="2" marker-start="url(#arr)" marker-end="url(#arr)"/>
+<line x1="168.0" y1="350" x2="168.0" y2="378" stroke="#94a3b8" stroke-width="2" marker-start="url(#arr)" marker-end="url(#arr)"/>
+<rect x="24.0" y="214" width="288.0" height="132" rx="16" fill="#ffffff" stroke="#e2e8f0" filter="url(#shadow)"/>
+<clipPath id="clip0"><rect x="24.0" y="214" width="288.0" height="132" rx="16"/></clipPath>
+<rect x="24.0" y="214" width="288.0" height="5" fill="url(#ch0)" clip-path="url(#clip0)"/>
+<rect x="44.0" y="238" width="44" height="44" rx="12" fill="url(#ch0)"/>
+<path transform="translate(54.0,248)" d="M13 2 4 14h7l-1 8 9-12h-7l1-8z" fill="#fff"/>
+<text x="102.0" y="256" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="16" font-weight="700" fill="#0f172a" text-anchor="start">Native IPC</text>
+<text x="102.0" y="278" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="20" font-weight="800" fill="#4f46e5" text-anchor="start">~0.01 ms</text>
+<text x="44.0" y="312" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="13" font-weight="500" fill="#0f172a" text-anchor="start">invoke() → C++ command</text>
+<text x="44.0" y="331" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="13" font-weight="400" fill="#475569" text-anchor="start">in-process, no HTTP</text>
+<line x1="480.0" y1="188" x2="480.0" y2="210" stroke="#94a3b8" stroke-width="2" marker-start="url(#arr)" marker-end="url(#arr)"/>
+<line x1="480.0" y1="350" x2="480.0" y2="378" stroke="#94a3b8" stroke-width="2" marker-start="url(#arr)" marker-end="url(#arr)"/>
+<rect x="336.0" y="214" width="288.0" height="132" rx="16" fill="#ffffff" stroke="#e2e8f0" filter="url(#shadow)"/>
+<clipPath id="clip1"><rect x="336.0" y="214" width="288.0" height="132" rx="16"/></clipPath>
+<rect x="336.0" y="214" width="288.0" height="5" fill="url(#ch1)" clip-path="url(#clip1)"/>
+<rect x="356.0" y="238" width="44" height="44" rx="12" fill="url(#ch1)"/>
+<g transform="translate(366.0,248)" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="2.2" fill="#fff" stroke="none"/><path d="M8 8a5.6 5.6 0 0 0 0 8M16 8a5.6 5.6 0 0 1 0 8"/><path d="M5 5a9.8 9.8 0 0 0 0 14M19 5a9.8 9.8 0 0 1 0 14"/></g>
+<text x="414.0" y="256" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="16" font-weight="700" fill="#0f172a" text-anchor="start">Events</text>
+<text x="414.0" y="278" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="20" font-weight="800" fill="#0284c7" text-anchor="start">any window</text>
+<text x="356.0" y="312" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="13" font-weight="500" fill="#0f172a" text-anchor="start">emit · listen</text>
+<text x="356.0" y="331" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="13" font-weight="400" fill="#475569" text-anchor="start">push to one window or all</text>
+<line x1="792.0" y1="188" x2="792.0" y2="210" stroke="#94a3b8" stroke-width="2" marker-start="url(#arr)" marker-end="url(#arr)"/>
+<line x1="792.0" y1="350" x2="792.0" y2="378" stroke="#94a3b8" stroke-width="2" marker-start="url(#arr)" marker-end="url(#arr)"/>
+<rect x="648.0" y="214" width="288.0" height="132" rx="16" fill="#ffffff" stroke="#e2e8f0" filter="url(#shadow)"/>
+<clipPath id="clip2"><rect x="648.0" y="214" width="288.0" height="132" rx="16"/></clipPath>
+<rect x="648.0" y="214" width="288.0" height="5" fill="url(#ch2)" clip-path="url(#clip2)"/>
+<rect x="668.0" y="238" width="44" height="44" rx="12" fill="url(#ch2)"/>
+<g transform="translate(678.0,248)" fill="none" stroke="#fff" stroke-width="2" stroke-linejoin="round"><path d="M12 3 2 8l10 5 10-5-10-5z" fill="#fff"/><path d="M2 12.5l10 5 10-5"/><path d="M2 17l10 5 10-5"/></g>
+<text x="726.0" y="256" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="16" font-weight="700" fill="#0f172a" text-anchor="start">Binary &amp; video</text>
+<text x="726.0" y="278" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="20" font-weight="800" fill="#d97706" text-anchor="start">zero-copy</text>
+<text x="668.0" y="312" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="13" font-weight="500" fill="#0f172a" text-anchor="start">SharedBuffer · Pinhole</text>
+<text x="668.0" y="331" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="13" font-weight="400" fill="#475569" text-anchor="start">no JSON, no base64</text>
+<rect x="24" y="382" width="912" height="134" rx="18" fill="url(#core)" filter="url(#shadow)"/>
+<g transform="translate(52,408)"><rect width="40" height="40" rx="10" fill="rgba(255,255,255,0.16)"/><path d="M14 13 8 20l6 7M26 13l6 7-6 7" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></g>
+<text x="108" y="426" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="22" font-weight="700" fill="#fff" text-anchor="start">LibAnyar core</text>
+<text x="260" y="426" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="16" font-weight="600" fill="rgba(255,255,255,0.75)" text-anchor="start">C++17</text>
+<text x="108" y="448" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="14" font-weight="400" fill="rgba(255,255,255,0.85)" text-anchor="start">one service thread of fibers + a worker pool for blocking work</text>
+<rect x="52.0" y="468" width="83.6" height="30" rx="15" fill="rgba(255,255,255,0.16)" stroke="rgba(255,255,255,0.22)"/>
+<text x="93.8" y="488" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="12.5" font-weight="600" fill="#fff" text-anchor="middle">Commands</text>
+<rect x="146.9" y="468" width="75.9" height="30" rx="15" fill="rgba(255,255,255,0.16)" stroke="rgba(255,255,255,0.22)"/>
+<text x="184.9" y="488" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="12.5" font-weight="600" fill="#fff" text-anchor="middle">Plugins</text>
+<rect x="234.2" y="468" width="91.3" height="30" rx="15" fill="rgba(255,255,255,0.16)" stroke="rgba(255,255,255,0.22)"/>
+<text x="279.8" y="488" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="12.5" font-weight="600" fill="#fff" text-anchor="middle">Event bus</text>
+<rect x="336.8" y="468" width="114.4" height="30" rx="15" fill="rgba(255,255,255,0.16)" stroke="rgba(255,255,255,0.22)"/>
+<text x="394.0" y="488" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="12.5" font-weight="600" fill="#fff" text-anchor="middle">Multi-window</text>
+<rect x="462.6" y="468" width="114.4" height="30" rx="15" fill="rgba(255,255,255,0.16)" stroke="rgba(255,255,255,0.22)"/>
+<text x="519.8" y="488" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="12.5" font-weight="600" fill="#fff" text-anchor="middle">SharedBuffer</text>
+<rect x="588.3" y="468" width="75.9" height="30" rx="15" fill="rgba(255,255,255,0.16)" stroke="rgba(255,255,255,0.22)"/>
+<text x="626.3" y="488" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="12.5" font-weight="600" fill="#fff" text-anchor="middle">Pinhole</text>
+<rect x="675.6" y="468" width="114.4" height="30" rx="15" fill="rgba(255,255,255,0.16)" stroke="rgba(255,255,255,0.22)"/>
+<text x="732.8" y="488" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="12.5" font-weight="600" fill="#fff" text-anchor="middle">run_blocking</text>
+<rect x="801.3" y="468" width="106.7" height="30" rx="15" fill="rgba(255,255,255,0.16)" stroke="rgba(255,255,255,0.22)"/>
+<text x="854.6" y="488" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="12.5" font-weight="600" fill="#fff" text-anchor="middle">Debug tools</text>
+<rect x="24" y="532" width="912" height="56" rx="14" fill="#f1f5f9" stroke="#e2e8f0"/>
+<text x="48" y="566" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="15" font-weight="700" fill="#0f172a" text-anchor="start">LibAsyik</text>
+<text x="124" y="566" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="13" font-weight="400" fill="#475569" text-anchor="start">foundation</text>
+<rect x="801" y="546" width="115" height="28" rx="14" fill="#f1f5f9" stroke="#e2e8f0"/>
+<text x="858.5" y="565" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="13" font-weight="500" fill="#334155" text-anchor="middle">MIT licensed</text>
+<rect x="676" y="546" width="115" height="28" rx="14" fill="#f1f5f9" stroke="#e2e8f0"/>
+<text x="733.5" y="565" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="13" font-weight="500" fill="#334155" text-anchor="middle">SQL via SOCI</text>
+<rect x="522" y="546" width="144" height="28" rx="14" fill="#f1f5f9" stroke="#e2e8f0"/>
+<text x="594.0" y="565" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="13" font-weight="500" fill="#334155" text-anchor="middle">HTTP · WebSocket</text>
+<rect x="397" y="546" width="115" height="28" rx="14" fill="#f1f5f9" stroke="#e2e8f0"/>
+<text x="454.5" y="565" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="13" font-weight="500" fill="#334155" text-anchor="middle">Boost fibers</text>
+</svg>
