@@ -70,7 +70,7 @@ See [roadmap.md](roadmap.md) for full per-task checklists and [roadmap.md — Ne
 | Full anatomy pack not yet published | Low | Until the `anatomy-bodyparts3d-v1` release exists, `-DANYAR_FETCH_ANATOMY=ON` warns and the app uses the embedded 12 mm sample. Local builds can point `-DANYAR_ANATOMY_PACK=` at a built pack. |
 | Third-party data licences drift | Medium | BodyParts3D changed BY-SA 2.1 JP → BY 4.0 without updating its files. Licence facts are dated in `docs/anatomy-roadmap.md` and NOTICE; re-check before every release (ADR-015). |
 | Plugin `shutdown()` runs on the main thread concurrently with command fibers | Medium | Documented contract (graceful-shutdown.md, writing-plugins.md); not enforced. Atlas hit it (unlocked map → heap corruption on early exit, fixed 2026-10-28). Consider moving plugin shutdown onto the service thread (ADR candidate). |
-| `docs/shared-memory-webgl.md` examples use removed APIs | Medium | `SharedBufferPool(name, count, size)` order, `slot_buffer`, `acquire_read`, `registry.create/destroy`, `shm_url()` no longer exist; headers + video-player/atlas are current. Users copying the guide get compile errors. Rewrite against `shared_buffer.h`. |
+| `examples/wifi-analyzer` scan loop is a raw `service_->execute()` loop | Low | `wifi:start` starts it, `shutdown()` only sets `stop_scan_` and never joins it. Same pattern the shutdown rules forbid; an exit mid-scan can race plugin destruction. Port to `anyar::BackgroundTask`. |
 | Shutdown fragility | High | Fixed repeatedly (ADR-007, 2026-03-15; plugin-shutdown reorder, 2026-05-01). Plugins must stop their own `execute()` loops and unblock back-pressure waits in `shutdown()` — contract, not enforced. See [graceful-shutdown.md](graceful-shutdown.md). |
 | WebGL test hangs without watchdog | Medium | ⚠️ Mitigated by 5 s `_exit()` watchdog — can mask real teardown hangs in CI. |
 | `post_to_main_thread` deadlock | Medium | ⚠️ Documented only — never call from a fiber during shutdown (ADR-007). |
@@ -369,3 +369,12 @@ See [roadmap.md](roadmap.md) for full per-task checklists and [roadmap.md — Ne
 - Evals not run yet.
 - Fixed `anyar init`'s generated `CLAUDE.md` (`#import` → `@.github/copilot-instructions.md`); `cli_init_smoke` now asserts it (verified red/green).
 
+### Diagrams and docs sync (2026-10-30)
+- Every diagram in the user docs is now Mermaid with one palette, legible in GitHub light and dark themes, and rendered locally (mermaid-cli) before commit. 17 diagrams across README, ARCHITECTURE, multi-window, writing-plugins, shared-memory-webgl, roadmap and the key-storage / video-player / wifi-analyzer READMEs.
+- README architecture shows the five real channels (native IPC, events, SharedBuffer, Pinhole, loopback HTTP); ARCHITECTURE adds a layered component map, sequence diagrams for the command round trip, event push and buffer handoff, the threading model, and the pool slot states.
+- Stale facts fixed while checking:
+  - JS `emit()` broadcasts via `EventBus::emit` (not `emit_local`): ARCHITECTURE, `events.ts` comment, js-bridge instructions.
+  - Pool slots never enter READING; real transitions documented. `buffer:pool-release-read` only finds pools made with `buffer:pool-create` (plugin pools need their own release command).
+  - `docs/shared-memory-webgl.md` rewritten against `shared_buffer.h` (risk closed); its full example is now a BackgroundTask plugin.
+  - ARCHITECTURE: stray code fence that turned the WindowManager section into a code block; webkit2gtk-4.0 (not 4.1); no nativefiledialog; macOS planned; `X-Anyar-Window` is not validated; 11 buffer commands (`buffer:attach`); Pinhole on Windows; `run_blocking` instead of `as->async()`; directory tree.
+  - wifi-analyzer README: `wifi:info` added, nonexistent `wifi:status` event removed. `shared_buffer.h` usage comment called a nonexistent `notify()`.

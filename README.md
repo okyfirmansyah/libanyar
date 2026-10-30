@@ -68,26 +68,41 @@ Anatomy data: BodyParts3D, © The Database Center for Life Science licensed unde
 ## Architecture
 
 ```mermaid
-block-beta
-  columns 1
+flowchart LR
+  P["<b>Producer</b><br/>camera · decoder · sensor<br/>BackgroundTask"]
+  S[("<b>Pool slot</b><br/>SharedBufferPool<br/>N slots, reused")]
+  F["<b>fetchBuffer()</b><br/>Linux: anyar-shm://<br/>Windows: WebView2 shared buffer"]
+  R["<b>WebGL canvas</b><br/>FrameRenderer.drawFrame<br/>RGBA · YUV · NV12 …"]
+  P -- "1 · try_acquire_write<br/>fill · release_write" --> S
+  S -- "2 · buffer:ready event" --> F
+  F -- "3 · drawFrame" --> R
+  R -. "4 · release command<br/>slot free again" .-> S
+  subgraph CPP["C++ backend"]
+    P
+    S
+  end
+  subgraph JS["Frontend"]
+    F
+    R
+  end
+  class P core
+  class S data
+  class F bridge
+  class R ui
 
-  A["🌐 Web Frontend — React / Vue / Svelte"]
-  B["📡 @libanyar/api — JS Bridge\n★ Native IPC (webview_bind, ~0.01ms)\n★ Shared Memory (anyar-shm://, zero-copy)\n○ HTTP/WS fallback (browser dev mode)"]
-  C["🖼️ OS WebView — WebKit / WebView2"]
-  D["⚙️ LibAnyar Core (C++17)\nIPC Router · Commands · Event Bus\nWindow Mgr · Plugins · Native APIs\nSharedBuffer · BufferPool · Pinhole · WebGL"]
-  E["🧱 LibAsyik — Foundation\nHTTP/WS Server · SOCI/SQL · Boost Fibers"]
-
-  A -- " " --> B
-  B -- " " --> C
-  C -- " " --> D
-  D -- " " --> E
-
-  style A fill:#4f46e5,color:#fff
-  style B fill:#7c3aed,color:#fff
-  style C fill:#2563eb,color:#fff
-  style D fill:#0891b2,color:#fff
-  style E fill:#059669,color:#fff
+  classDef ui fill:#eef2ff,stroke:#6366f1,color:#1e1b4b
+  classDef bridge fill:#f5f3ff,stroke:#8b5cf6,color:#2e1065
+  classDef native fill:#e0f2fe,stroke:#0284c7,color:#082f49
+  classDef core fill:#ccfbf1,stroke:#0d9488,color:#042f2e
+  classDef data fill:#fef3c7,stroke:#d97706,color:#451a03
+  classDef base fill:#f1f5f9,stroke:#64748b,color:#0f172a
+  classDef work fill:#ecfccb,stroke:#65a30d,color:#1a2e05
+  classDef warn fill:#ffe4e6,stroke:#e11d48,color:#4c0519
+  style CPP fill:transparent,stroke:#0d9488,stroke-dasharray:5 4
+  style JS fill:transparent,stroke:#6366f1,stroke-dasharray:5 4
 ```
+
+The frontend and the C++ backend share one process. Commands, events and binary data each have their own channel, so a 4K frame never goes through JSON. Command handlers run as fibers on one service thread; blocking work goes to a worker pool with `anyar::run_blocking`. See [ARCHITECTURE.md](ARCHITECTURE.md) for the component map and threading model.
 
 ## Quick Start
 

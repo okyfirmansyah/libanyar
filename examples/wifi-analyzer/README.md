@@ -14,42 +14,39 @@ A real-time WiFi spectrum analyzer that demonstrates **native Linux nl80211 WiFi
 
 ## Architecture
 
-```
-┌────────────────────────────────────────────────────────┐
-│  Svelte 5 + Vite Frontend                              │
-│                                                        │
-│  ┌────────────────────────────────────────────────────┐ │
-│  │ App.svelte (layout + state orchestration)          │ │
-│  │  ┌───────────────────┐  ┌───────────────────────┐  │ │
-│  │  │ Spectrum Canvas    │  │ Network Table         │  │ │
-│  │  │ (WebGL RGBA)       │  │ (sortable, colored)   │  │ │
-│  │  └──────┬─────────────┘  └──────┬────────────────┘  │ │
-│  │         │                       │                   │ │
-│  │  SharedBuffer IPC        @libanyar/api              │ │
-│  │  (anyar-shm:// fetch)   (invoke / listen)           │ │
-│  └─────────┼───────────────────────┼───────────────────┘ │
-└────────────┼───────────────────────┼─────────────────────┘
-             │                       │
-     anyar-shm:// fetch        HTTP / JSON IPC
-   + buffer:ready events             │
-             │                       │
-┌────────────┴───────────────────────┴─────────────────────┐
-│  C++ Backend (LibAnyar Core + WifiPlugin)                 │
-│                                                           │
-│  WifiPlugin (libnl-3 / nl80211)                           │
-│  ├── wifi:start        — begin periodic passive scanning  │
-│  ├── wifi:stop         — stop scanning                    │
-│  ├── wifi:scan-once    — trigger a single scan cycle      │
-│  ├── wifi:active-scan  — trigger full channel sweep       │
-│  │                      (requires CAP_NET_ADMIN)          │
-│  └── scan_loop()       — periodic scan + render cycle     │
-│       ├── nl80211_scan()          — read BSS cache        │
-│       ├── render_spectrum()       — draw RGBA bitmap      │
-│       └── SharedBufferPool write  — emit buffer:ready     │
-│                                                           │
-│  SharedBufferPool "wifi-spectrum" (2 slots, 800×400 RGBA) │
-│  Built-in: EventBus, HTTP + WebSocket IPC                 │
-└───────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TB
+  subgraph FE["Svelte 5 frontend"]
+    direction LR
+    NT["<b>Network table</b><br/>sortable · associated AP"]
+    SP["<b>Spectrum view</b><br/>WebGL RGBA canvas"]
+  end
+  subgraph CPP["WifiPlugin · C++"]
+    direction LR
+    CMD["<b>wifi:* commands</b><br/>start · stop · scan-once<br/>active-scan · info"]
+    LOOP["<b>scan_loop()</b><br/>scan → render_spectrum()"]
+    POOL[("<b>SharedBufferPool</b><br/>&quot;wifi-spectrum&quot;<br/>2 × 800×400 RGBA")]
+  end
+  NL["<b>Linux kernel</b><br/>libnl-3 · nl80211"]
+  NT -- "invoke / listen" --> CMD
+  SP <-- "buffer:ready · fetchBuffer" --> POOL
+  CMD --> LOOP --> POOL
+  LOOP <--> NL
+  class SP,NT ui
+  class CMD,LOOP core
+  class POOL data
+  class NL base
+
+  classDef ui fill:#eef2ff,stroke:#6366f1,color:#1e1b4b
+  classDef bridge fill:#f5f3ff,stroke:#8b5cf6,color:#2e1065
+  classDef native fill:#e0f2fe,stroke:#0284c7,color:#082f49
+  classDef core fill:#ccfbf1,stroke:#0d9488,color:#042f2e
+  classDef data fill:#fef3c7,stroke:#d97706,color:#451a03
+  classDef base fill:#f1f5f9,stroke:#64748b,color:#0f172a
+  classDef work fill:#ecfccb,stroke:#65a30d,color:#1a2e05
+  classDef warn fill:#ffe4e6,stroke:#e11d48,color:#4c0519
+  style FE fill:transparent,stroke:#6366f1,stroke-dasharray:5 4
+  style CPP fill:transparent,stroke:#0d9488,stroke-dasharray:5 4
 ```
 
 ### IPC Commands
@@ -60,13 +57,13 @@ A real-time WiFi spectrum analyzer that demonstrates **native Linux nl80211 WiFi
 | `wifi:stop` | JS → C++ | — | Stop scanning |
 | `wifi:scan-once` | JS → C++ | — | Trigger a single scan + render cycle |
 | `wifi:active-scan` | JS → C++ | — | Trigger nl80211 active scan (requires root) |
+| `wifi:info` | JS → C++ | — | Interface name, MAC address and scanning state |
 
 ### Events (C++ → JS via EventBus)
 
 | Event | Payload | Description |
 |-------|---------|-------------|
 | `buffer:ready` | `{pool, name, url, size, metadata: {width, height, networks}}` | New spectrum bitmap available in shared memory |
-| `wifi:status` | `{scanning, interface}` | Scanning state change |
 | `wifi:active-scan-done` | `{ok, error?}` | Active scan completed or failed |
 
 ## Requirements

@@ -834,25 +834,32 @@ Research was conducted across the Tauri/wry ecosystem and WebKit documentation:
 
 ### Architecture
 
-```
-┌──────────────────────────────┐
-│  @libanyar/api/canvas        │  ← Feature 2 (WebGL frame renderer)
-│  createFrameRenderer()       │
-│  drawFrame(buffer, meta)     │
-└──────────┬───────────────────┘
-           │ uses internally
-┌──────────▼───────────────────┐
-│  @libanyar/api/buffer        │  ← Feature 1 (shared memory IPC)
-│  onSharedBuffer()            │
-│  SharedBufferHandle          │
-└──────────┬───────────────────┘
-           │ uses internally
-┌──────────▼───────────────────┐
-│  Platform shared memory      │  ← C++ core (anyar::SharedBuffer)
-│  Linux: shm_open + mmap      │
-│  Win:   CreateSharedBuffer   │
-│  macOS: shm_open + mmap      │
-└──────────────────────────────┘
+```mermaid
+flowchart TB
+  A["<b>@libanyar/api/canvas</b><br/>createFrameRenderer · createBufferRenderer<br/>WebGL, 7 pixel formats"]
+  B["<b>@libanyar/api/buffer</b><br/>fetchBuffer · onBufferReady · pools"]
+  C["<b>anyar::SharedBuffer</b> · C++ core"]
+  L["<b>Linux</b><br/>shm_open + mmap<br/>anyar-shm:// scheme"]
+  W["<b>Windows</b><br/>WebView2 CreateSharedBuffer<br/>+ HTTP fallback"]
+  M["<b>macOS</b><br/>planned"]
+  A -- "uses" --> B -- "uses" --> C
+  C --> L
+  C --> W
+  C -.-> M
+  class A ui
+  class B bridge
+  class C core
+  class L,W native
+  class M base
+
+  classDef ui fill:#eef2ff,stroke:#6366f1,color:#1e1b4b
+  classDef bridge fill:#f5f3ff,stroke:#8b5cf6,color:#2e1065
+  classDef native fill:#e0f2fe,stroke:#0284c7,color:#082f49
+  classDef core fill:#ccfbf1,stroke:#0d9488,color:#042f2e
+  classDef data fill:#fef3c7,stroke:#d97706,color:#451a03
+  classDef base fill:#f1f5f9,stroke:#64748b,color:#0f172a
+  classDef work fill:#ecfccb,stroke:#65a30d,color:#1a2e05
+  classDef warn fill:#ffe4e6,stroke:#e11d48,color:#4c0519
 ```
 
 Feature 1 (`buffer`) is a standalone general-purpose API. Feature 2 (`canvas`) is a convenience layer that consumes Feature 1 internally.
@@ -1126,20 +1133,32 @@ Pinhole collapses this to **C++ draws directly on a native GL/Metal/D3D surface 
 
 ### Architecture
 
-```
-┌─ OS Window ───────────────────────────────┐
-│  ┌─ WebView (full window) ──────────────┐ │
-│  │   <header>...</header>              │ │
-│  │   <div data-anyar-pinhole="cam">    │ │   ← transparent placeholder
-│  │     [transparent in DOM]            │ │
-│  │   </div>                            │ │
-│  │   <footer>...</footer>              │ │
-│  └──────────────────────────────────────┘ │
-│      ▲                                    │
-│      │ ◄── native overlay surface (GL/Metal/D3D)
-│      │     position+size synced to placeholder rect
-│      │     C++ draws directly here
-└───────────────────────────────────────────┘
+```mermaid
+flowchart TB
+  subgraph WIN["One OS window"]
+    direction TB
+    T["<b>Webview</b> · top layer, transparent background<br/>&lt;header&gt; … &lt;div data-anyar-pinhole=&quot;video&quot;&gt; … &lt;footer&gt;"]
+    H["<b>Placeholder rect</b><br/>transparent hole in the page"]
+    N["<b>Pinhole surface</b> · bottom layer<br/>Linux: GtkGLArea (GL 3.3) in a GtkOverlay<br/>Windows: D3D11 swap chain via DirectComposition"]
+    T --- H
+    H -- "tracking script reports rect, DPR, scroll" --> N
+  end
+  C["<b>C++</b><br/>pin->on_render(ctx) on the UI thread<br/>draw_frame / draw_image / clear"]
+  C -- "request_redraw() from any thread" --> N
+  class T ui
+  class H bridge
+  class N native
+  class C core
+
+  classDef ui fill:#eef2ff,stroke:#6366f1,color:#1e1b4b
+  classDef bridge fill:#f5f3ff,stroke:#8b5cf6,color:#2e1065
+  classDef native fill:#e0f2fe,stroke:#0284c7,color:#082f49
+  classDef core fill:#ccfbf1,stroke:#0d9488,color:#042f2e
+  classDef data fill:#fef3c7,stroke:#d97706,color:#451a03
+  classDef base fill:#f1f5f9,stroke:#64748b,color:#0f172a
+  classDef work fill:#ecfccb,stroke:#65a30d,color:#1a2e05
+  classDef warn fill:#ffe4e6,stroke:#e11d48,color:#4c0519
+  style WIN fill:transparent,stroke:#94a3b8,stroke-dasharray:5 4
 ```
 
 JS-side (`@libanyar/api/pinhole`):

@@ -22,29 +22,48 @@ It is also the reference for LibAnyar's background-work primitives ([ADR-009](..
 
 ## Architecture
 
-```
-┌──────────────────────────────────────────────────────────────┐
-│  Svelte 5 + Vite frontend                                    │
-│   App.svelte ── {#key file} ── VideoPlayer (clock + seeks)   │
-│                                 ├─ <audio src=/video/stream> │  ← master clock
-│                                 └─ Pinhole div | WebGL canvas│
-│   Waveform (wavesurfer.js)   BitrateChart (uPlot)            │
-└──────────┬───────────────────────┬───────────────────────────┘
-   invoke / listen (native IPC)    │ HTTP Range (206, streamed)
-┌──────────┴───────────────────────┴───────────────────────────┐
-│  VideoPlugin (service thread: fibers only schedule work)     │
-│   video:open ──► stop+join old BackgroundTask ─► probe ─►    │
-│                  start new BackgroundTask (paused)           │
-│   decode loop ── run_blocking(decode/seek/convert) ──► queue │
-│                  ─► present when PTS ≤ audio clock           │
-│   video:waveform / video:bitrate ── run_blocking (parallel)  │
-│   /video/stream ── anyar::serve_file (worker-pool reads)     │
-├──────────────────────────────────────────────────────────────┤
-│  Worker pool (LibAsyik async): FFmpeg demux/decode/swscale   │
-├──────────────────────────────────────────────────────────────┤
-│  pinhole: FrameMailbox ─► GTK on_render ─► draw_frame (GL)   │
-│  webgl:   per-session SharedBufferPool ─► buffer:ready ─► JS │
-└──────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TB
+  subgraph FE["Svelte 5 frontend"]
+    direction LR
+    V["<b>VideoPlayer</b><br/>clock · seeks · controls"]
+    AU["<b>&lt;audio&gt;</b><br/>master clock"]
+    VS["<b>Video surface</b><br/>Pinhole div or WebGL canvas"]
+    CH["<b>Waveform · bitrate</b><br/>wavesurfer.js · uPlot"]
+  end
+  subgraph CPP["VideoPlugin · service thread"]
+    direction LR
+    O["<b>video:open</b><br/>stop + join old session<br/>probe · new session"]
+    S["<b>/video/stream</b><br/>serve_file · HTTP Range"]
+    L["<b>Decode loop</b><br/>BackgroundTask per file<br/>present when PTS ≤ audio clock"]
+    A["<b>video:waveform<br/>video:bitrate</b>"]
+  end
+  subgraph WK["Worker pool"]
+    FF["<b>FFmpeg</b><br/>demux · decode · swscale"]
+  end
+  V -- "invoke / listen" --> O
+  AU -- "HTTP Range 206" --> S
+  VS <-- "pinhole: FrameMailbox<br/>webgl: SharedBufferPool" --> L
+  CH -- "invoke" --> A
+  O --> L
+  L -- "run_blocking" --> FF
+  A -- "run_blocking" --> FF
+  class V,AU,CH ui
+  class VS native
+  class O,L,S,A core
+  class FF work
+
+  classDef ui fill:#eef2ff,stroke:#6366f1,color:#1e1b4b
+  classDef bridge fill:#f5f3ff,stroke:#8b5cf6,color:#2e1065
+  classDef native fill:#e0f2fe,stroke:#0284c7,color:#082f49
+  classDef core fill:#ccfbf1,stroke:#0d9488,color:#042f2e
+  classDef data fill:#fef3c7,stroke:#d97706,color:#451a03
+  classDef base fill:#f1f5f9,stroke:#64748b,color:#0f172a
+  classDef work fill:#ecfccb,stroke:#65a30d,color:#1a2e05
+  classDef warn fill:#ffe4e6,stroke:#e11d48,color:#4c0519
+  style FE fill:transparent,stroke:#6366f1,stroke-dasharray:5 4
+  style CPP fill:transparent,stroke:#0d9488,stroke-dasharray:5 4
+  style WK fill:transparent,stroke:#65a30d,stroke-dasharray:5 4
 ```
 
 ### IPC Commands

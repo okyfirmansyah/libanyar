@@ -403,36 +403,63 @@ The `examples/key-storage/` app demonstrates the full multi-window pattern:
 
 ### Flow: Opening an Entry
 
-```
-User double-clicks entry in main window
-  → handleOpenEntry(id)
-  → isNativeIpc() ? createWindow({...}) : showCssOverlay()
-  → C++ creates GTK child window (modal, transient to main)
-  → Child loads http://127.0.0.1:<port>/#/entry/42
-  → EntryDetailPage mounts, loads entry via invoke('ks:get_entry')
-  → User edits fields, clicks Save → invoke('ks:update_entry')
-  → emit('entry:updated', { id }) → main window refreshes list
-  → Or clicks Cancel → closeWindow() discards changes
-  → User closes child window → GTK destroys it
-  → window:closed event broadcast → main window cleans up
+```mermaid
+sequenceDiagram
+  actor User
+  participant M as Main window
+  participant C as C++ core
+  participant D as Child window "entry-42"
+  User->>M: double-clicks an entry
+  M->>C: createWindow({label, url: "/#35;/entry/42",<br/>parent: "main", modal: true})
+  C->>D: open native window, main disabled
+  D->>C: invoke("ks:get_entry", {id: 42})
+  C-->>D: entry
+  User->>D: edits and clicks Save
+  D->>C: invoke("ks:update_entry", …)
+  D-)M: emit("entry:updated", {id})
+  M->>C: refresh the list
+  D->>C: closeWindow()
+  C-)M: "window:closed" {label}, main enabled again
 ```
 
 ## Architecture Details
 
 ### How Multiple Windows Share One Server
 
-All windows connect to the same LibAsyik HTTP server on `127.0.0.1:<port>`. The C++ backend runs on a background thread with Boost fibers; the GTK main loop on the main thread serves all windows.
+Every window has its own webview and its own native IPC binding, but they all share one backend: one command registry, one event bus, one LibAsyik server on `127.0.0.1:<port>` that serves each window's page. The UI thread runs every window; command handlers run as fibers on the service thread.
 
-```
-Main Thread (GTK)           Background Thread (LibAsyik)
-┌──────────────────┐        ┌──────────────────────────┐
-│  GtkWindow "main"│───────▶│  HTTP Server :port       │
-│  GtkWindow "child"│──────▶│  ┌─ /__anyar__/invoke   │
-│  g_main_loop     │        │  ├─ /__anyar_ws__       │
-│  g_idle_add()    │        │  └─ /* (static files)   │
-└──────────────────┘        │  CommandRegistry         │
-                            │  EventBus (WS sinks)     │
-                            └──────────────────────────┘
+```mermaid
+flowchart TB
+  subgraph UI["UI thread"]
+    direction LR
+    M["<b>Window &quot;main&quot;</b><br/>own webview + __anyar_ipc__"]
+    D["<b>Window &quot;detail&quot;</b><br/>own webview + __anyar_ipc__"]
+  end
+  subgraph SVC["Service thread · one backend for every window"]
+    direction LR
+    R["<b>CommandRegistry</b><br/>_caller_label says<br/>which window asked"]
+    E["<b>EventBus</b><br/>one sink per window label"]
+    H["<b>HTTP server</b><br/>127.0.0.1:port<br/>serves each window's page"]
+  end
+  M -- "invoke" --> R
+  D -- "invoke" --> R
+  M -. "events" .- E
+  D -. "events" .- E
+  M -. "page" .- H
+  D -. "page" .- H
+  class M,D native
+  class R,E,H core
+
+  classDef ui fill:#eef2ff,stroke:#6366f1,color:#1e1b4b
+  classDef bridge fill:#f5f3ff,stroke:#8b5cf6,color:#2e1065
+  classDef native fill:#e0f2fe,stroke:#0284c7,color:#082f49
+  classDef core fill:#ccfbf1,stroke:#0d9488,color:#042f2e
+  classDef data fill:#fef3c7,stroke:#d97706,color:#451a03
+  classDef base fill:#f1f5f9,stroke:#64748b,color:#0f172a
+  classDef work fill:#ecfccb,stroke:#65a30d,color:#1a2e05
+  classDef warn fill:#ffe4e6,stroke:#e11d48,color:#4c0519
+  style UI fill:transparent,stroke:#0284c7,stroke-dasharray:5 4
+  style SVC fill:transparent,stroke:#0d9488,stroke-dasharray:5 4
 ```
 
 ### Per-Window IPC
@@ -441,7 +468,7 @@ Each window gets its own `__anyar_ipc__` binding via `webview_bind()`. The C++ s
 
 ### Modal Implementation Details
 
-When `modal: true` is set on a child window, LibAnyar applies these native GTK operations:
+When `modal: true` is set on a child window, LibAnyar applies these native operations (shown for GTK on Linux; Windows does the equivalent with the Win32 owner window):
 
 1. **Parent disabled**: `gtk_widget_set_sensitive(parent_window, FALSE)` — grays out and blocks all input
 2. **Child type hint**: `gdk_window_set_type_hint(child, GDK_WINDOW_TYPE_HINT_DIALOG)` — OS treats it as a dialog

@@ -29,7 +29,7 @@ Subpath imports (must match `package.json` `"exports"`): `@libanyar/api/{fs,dial
 - Port from `window.__LIBANYAR_PORT__` or `<meta name="anyar-port">`
 
 ## Window Awareness & Echo
-`window.__LIBANYAR_WINDOW_LABEL__` injected per-window. `listen()` skips events targeted at OTHER windows (via `EventMessage.target`); `listenGlobal()` receives all. JS-emitted events go through `invoke('anyar:emit_event', ...)` → C++ `events_.emit_local()` (C++ subscribers only — no echo back to JS).
+`window.__LIBANYAR_WINDOW_LABEL__` injected per-window. `listen()` skips events targeted at OTHER windows (via `EventMessage.target`); `listenGlobal()` receives all. JS-emitted events go through `invoke('anyar:emit_event', ...)` → C++ `events_.emit()`: a broadcast to C++ subscribers and every window, the sender included (cross-window notifications rely on it).
 
 ## Commands
 ```bash
