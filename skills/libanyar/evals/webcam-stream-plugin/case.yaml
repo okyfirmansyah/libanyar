@@ -1,0 +1,4 @@
+schema_version: "1.1"
+name: webcam-stream-plugin
+expected_outcome: |
+  A plugin that grabs frames in a BackgroundTask (or equivalent stoppable loop) with grab_frame wrapped in run_blocking, publishes them through a SharedBufferPool (try_acquire_write, drop when full) and a buffer:ready event, a frontend that fetches buffers and releases each slot in a finally block, and a shutdown() that stops the loop, closes the pool and locks shared state.

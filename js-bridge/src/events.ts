@@ -187,8 +187,8 @@ export function listen<T = unknown>(
  */
 export function emit(event: string, payload: unknown = null): void {
   if (isNative()) {
-    // Route through native IPC — calls anyar:emit_event which dispatches
-    // to C++ subscribers only (no echo back to frontends).
+    // Route through native IPC — anyar:emit_event broadcasts through the
+    // EventBus: C++ subscribers and every window (including this one).
     invoke('anyar:emit_event', { event, payload }).catch((err) => {
       console.error('[LibAnyar] Native emit failed:', err);
     });

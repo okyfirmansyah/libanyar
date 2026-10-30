@@ -3,6 +3,7 @@ cmake_minimum_required(VERSION 3.16)
 # ── Define the core library (platform-neutral sources) ───────────────────────
 add_library(anyar_core STATIC
     src/app.cpp
+    src/app_debug.cpp         # debug tooling: console forwarding, debug:* commands, test scripts
     src/ipc_router.cpp
     src/command_registry.cpp
     src/event_bus.cpp
@@ -21,6 +22,7 @@ add_library(anyar_core STATIC
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     target_sources(anyar_core PRIVATE
         src/platform_linux.cpp
+        src/debug_linux.cpp               # webview capture + synthetic input (WebKitGTK)
         src/main_thread_linux.cpp
         src/shared_buffer_linux.cpp
         src/pinhole_linux.cpp
@@ -31,6 +33,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
 elseif(WIN32)
     target_sources(anyar_core PRIVATE
         src/platform_win32.cpp
+        src/debug_unsupported.cpp         # TODO: CapturePreview + SendInput (see file)
         src/main_thread_win32.cpp
         src/shared_buffer_win32.cpp
         src/pinhole_win32.cpp             # DComp + D3D11 below a transparent WebView2
@@ -46,7 +49,7 @@ elseif(APPLE)
     #     src/plugins/clipboard_macos.mm
     #     src/plugins/shell_macos.mm
     # )
-    target_sources(anyar_core PRIVATE src/pinhole_stub.cpp)
+    target_sources(anyar_core PRIVATE src/pinhole_stub.cpp src/debug_unsupported.cpp)
 endif()
 
 target_include_directories(anyar_core

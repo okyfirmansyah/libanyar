@@ -14,100 +14,125 @@ LibAnyar provides two complementary modules for high-throughput binary data:
 **Use cases:** Video frame streaming, image processing pipelines, LiDAR/point cloud visualization, real-time sensor data, screen capture overlays.
 
 **How it works:**
-1. C++ allocates a named shared memory region (`SharedBuffer`)
-2. C++ writes binary data directly to the mmap'd memory
-3. C++ emits a `buffer:ready` event to notify the frontend
-4. JS fetches the data via `fetch('anyar-shm://<name>')` — zero-copy on Linux
-5. JS renders the data using WebGL (`FrameRenderer`) or processes the `ArrayBuffer` directly
+
+```mermaid
+sequenceDiagram
+  autonumber
+  box transparent C++ backend
+    participant P as Producer<br/>(BackgroundTask fiber)
+    participant B as SharedBufferPool
+  end
+  box transparent Webview
+    participant J as Page (JS)
+    participant G as WebGL
+  end
+  P->>B: try_acquire_write()
+  B-->>P: free slot (or nullptr → drop the frame)
+  P->>P: write pixels into slot->data()
+  P->>B: release_write(slot)
+  P-)J: emit "buffer:ready" {name, pool, id, metadata}
+  J->>B: fetchBuffer(name, {id})
+  Note over B,J: Linux: anyar-shm:// · Windows: WebView2<br/>shared buffer · browser: HTTP
+  B-->>J: ArrayBuffer
+  J->>G: drawFrame(bytes)
+  J-)B: release command → release_read(name)
+  Note over B: slot is FREE again
+```
+
+1. C++ takes a slot from a `SharedBufferPool` (or creates a one-off `SharedBuffer`) and writes into its memory.
+2. C++ emits `buffer:ready` with the buffer's name and generation id.
+3. JS calls `fetchBuffer()`, which picks the fastest transport for the platform (below).
+4. JS draws with WebGL (`FrameRenderer`) or uses the `ArrayBuffer` directly, then releases the slot.
 
 ---
 
 ## C++ API
 
+> Signatures below match `core/include/anyar/shared_buffer.h`. The working references are `examples/video-player` (streaming pool) and `examples/anatomy-atlas` (one-off buffers).
+
 ### SharedBuffer
 
-A named shared memory region backed by POSIX `shm_open()` + `mmap()`.
+A named shared memory region. On Linux it is POSIX `shm_open()` + `mmap()`; on Windows it is a WebView2 shared buffer once a window exists (otherwise a pagefile-backed mapping served over HTTP).
 
 ```cpp
 #include <anyar/shared_buffer.h>
 
-// Create a 1920×1080 RGBA buffer (≈8MB)
+// Create a 1920×1080 RGBA buffer (≈8 MB). Names are process-global, and
+// create() registers the buffer so the page can fetch it by name.
 auto buf = anyar::SharedBuffer::create("camera-frame", 1920 * 1080 * 4);
 
-// Write data
 std::memcpy(buf->data(), pixels, buf->size());
 
-// Access properties
-buf->name();    // "camera-frame"
-buf->size();    // 8294400
-buf->data();    // void* — raw pointer to mmap'd memory
-buf->shm_url(); // "anyar-shm://camera-frame"
+buf->name();   // "camera-frame"
+buf->size();   // 8294400
+buf->data();   // uint8_t* into the shared mapping
+buf->id();     // generation id — never reused, even for the same name
 
-// Notify frontend that new data is available
+// Tell the page. fetchBuffer() takes the name; `id` lets it skip revalidation.
 app.emit("buffer:ready", {
-    {"name", buf->name()},
-    {"url", buf->shm_url()},
-    {"width", 1920},
-    {"height", 1080}
+    {"name", buf->name()}, {"id", buf->id()},
+    {"url", "anyar-shm://" + buf->name()}, {"size", buf->size()},
+    {"metadata", {{"width", 1920}, {"height", 1080}, {"format", "rgba"}}}
 });
 
-// Cleanup (automatic on destruction, or explicit)
-buf.reset();  // calls munmap() + shm_unlink()
+// Free it when the page is done (for example from a release command):
+anyar::SharedBufferRegistry::instance().remove("camera-frame");
 ```
 
 ### SharedBufferRegistry
 
-Singleton that tracks all active buffers. Used internally by IPC commands.
+Process-wide map from name to buffer. `SharedBuffer::create()` adds to it; the `anyar-shm://` handler, the HTTP fallback and the `buffer:*` commands look buffers up here.
 
 ```cpp
-auto& registry = anyar::SharedBufferRegistry::instance();
-
-// Create via registry (same as SharedBuffer::create, but tracked)
-auto buf = registry.create("frame", size);
-
-// Lookup by name
-auto found = registry.get("frame");
-
-// List all active buffers
-auto names = registry.list();  // std::vector<std::string>
-
-// Destroy by name
-registry.destroy("frame");     // munmap + shm_unlink + remove from registry
+auto& reg = anyar::SharedBufferRegistry::instance();
+std::shared_ptr<anyar::SharedBuffer> b = reg.get("camera-frame");  // nullptr if absent
+std::vector<std::string> names = reg.names();
+reg.remove("camera-frame");   // unmapped once the last shared_ptr is gone
 ```
+
+Memory stays valid while anyone holds the `shared_ptr` — including a fetch in flight — so removing a buffer the page is still reading is safe.
 
 ### SharedBufferPool
 
-Lock-free ring buffer pool for streaming scenarios (e.g., 30fps video).
+A ring of N buffers for streaming (video frames, sensor data). Slots are named `<base>_0 … <base>_{N-1}`.
 
 ```cpp
-// Create a pool of 3 slots, each 8MB (triple buffering)
-anyar::SharedBufferPool pool("video", 3, 1920 * 1080 * 4);
+// One pool per session, with its own base name (names are process-global).
+auto pool = std::make_unique<anyar::SharedBufferPool>("video-" + std::to_string(++session),
+                                                      1920 * 1080 * 4, /*count=*/3);
 
-// Producer side (C++ thread or fiber)
-int slot = pool.acquire_write();   // Returns slot index, or -1 if none free
-if (slot >= 0) {
-    auto& buf = pool.slot_buffer(slot);
-    std::memcpy(buf.data(), frame_data, buf.size());
-    pool.release_write(slot);      // Transitions slot: WRITING → READY
+// Producer (a BackgroundTask fiber):
+anyar::SharedBuffer* slot = pool->try_acquire_write();   // nullptr = page is behind → drop
+if (slot) {
+    std::memcpy(slot->data(), frame, slot->size());
+    pool->release_write(*slot, "{}");                     // WRITING → READY
+    app.emit("buffer:ready", {{"name", slot->name()}, {"pool", pool->base_name()},
+                              {"id", slot->id()}, {"url", "anyar-shm://" + slot->name()},
+                              {"size", slot->size()}, {"metadata", {{"width", 1920}, {"height", 1080}}}});
 }
 
-// Consumer side (triggered by buffer:ready event in JS)
-int slot = pool.acquire_read();    // Returns slot with READY state, or -1
-if (slot >= 0) {
-    // JS fetches anyar-shm://video_0, video_1, or video_2
-    pool.release_read(slot);       // Transitions slot: READING → FREE
-}
+// Consumer: the page calls your release command once it has drawn the slot:
+pool->release_read(name);                                 // READY → FREE
+
+// Shutdown: unblock a producer waiting in acquire_write() (it throws SharedBufferPoolClosed).
+pool->close();
 ```
 
-**Slot state machine:**
-```
-FREE ──acquire_write()──► WRITING ──release_write()──► READY
-  ▲                                                      │
-  │                                                      │
-  └───release_read()──── READING ◄──acquire_read()───────┘
+Use `try_acquire_write()` for live sources: dropping a frame beats stalling the camera. The blocking `acquire_write()` suits producers that must deliver every item, as long as `close()` can wake it at shutdown. `release_unpublished(slot)` returns a slot you filled but decided not to send (seek, error).
+
+**Slot states:**
+
+```mermaid
+stateDiagram-v2
+  direction LR
+  [*] --> FREE
+  FREE --> WRITING: acquire_write
+  WRITING --> READY: release_write + buffer:ready
+  WRITING --> FREE: release_unpublished (drop)
+  READY --> FREE: release_read (page done)
 ```
 
-All transitions use `std::atomic::compare_exchange_strong` — no mutexes in the hot path.
+Transitions are `compare_exchange_strong` on an atomic per slot, so the hot path takes no mutex. A stale or duplicate release never frees a slot the producer is still writing.
 
 ---
 
@@ -138,7 +163,7 @@ await createBuffer('my-frame', 1920 * 1080 * 4);
 | `name` | `string` | Unique buffer name |
 | `size` | `number` | Size in bytes |
 
-**Returns:** `Promise<{ name: string, size: number, url: string }>`
+**Returns:** `Promise<SharedBufferInfo>` — `{ name, size, url, id? }`
 
 ---
 
@@ -176,7 +201,7 @@ const pixels = new Uint8Array(data);
 
 Transport by platform:
 
-- **Linux:** `fetch('anyar-shm://<name>')`. WebKitGTK reads the mmap'd region through `g_bytes_new_static()`.
+- **Linux:** `fetch('anyar-shm://<name>')`. The scheme handler wraps the mapping in a `GBytes` (`g_bytes_new_with_free_func()`, which keeps the buffer alive until WebKit is done).
 - **Windows (WebView2):**
   1. The page calls `buffer:attach {name, have}`.
   2. C++ posts the buffer's own memory with `PostSharedBufferToScript`.
@@ -205,14 +230,14 @@ await destroyBuffer('my-frame');
 ---
 
 #### `listBuffers()`
-List all active buffer names.
+List all active buffers.
 
 ```ts
 const buffers = await listBuffers();
-// ["camera-frame", "depth-map", ...]
+// [{ name: "camera-frame", size: 8294400, url: "anyar-shm://camera-frame" }, …]
 ```
 
-**Returns:** `Promise<string[]>`
+**Returns:** `Promise<SharedBufferInfo[]>`
 
 ---
 
@@ -230,9 +255,10 @@ Listen for `buffer:ready` events.
 
 ```ts
 const unlisten = onBufferReady((event) => {
-  console.log(event.name);   // "my-frame"
-  console.log(event.url);    // "anyar-shm://my-frame"
-  console.log(event.width);  // 1920 (if provided by notifier)
+  console.log(event.name);            // "my-frame"
+  console.log(event.pool);            // "video" (pool slots only)
+  console.log(event.id);              // generation id → fetchBuffer(name, { id })
+  console.log(event.metadata.width);  // whatever the producer put in metadata
 });
 
 // Stop listening
@@ -243,11 +269,12 @@ unlisten();
 
 ### Pool Operations
 
-#### `createPool(name, slotCount, slotSize)`
-Create a ring buffer pool for streaming.
+#### `createPool(name, bufferSize, count = 3)`
+Create a ring buffer pool for streaming. Usually C++ owns its pools; these JS wrappers exist for prototyping and tests.
 
 ```ts
-await createPool('video', 3, 1920 * 1080 * 4);
+const info = await createPool('video', 1920 * 1080 * 4, 3);
+// { name: "video", bufferSize: 8294400, count: 3, buffers: [ … ] }
 ```
 
 ---
@@ -256,28 +283,28 @@ await createPool('video', 3, 1920 * 1080 * 4);
 Acquire a free slot for writing.
 
 ```ts
-const result = await poolAcquire('video');
-// { slot: 0, name: "video_0", url: "anyar-shm://video_0" }
+const slot = await poolAcquire('video');
+// { name: "video_0", size: 8294400, url: "anyar-shm://video_0" }
 ```
 
-**Returns:** `Promise<{ slot: number, name: string, url: string }>`
+**Returns:** `Promise<SharedBufferInfo>`
 
 ---
 
-#### `poolReleaseWrite(poolName, slot)`
-Release a slot after writing (transitions WRITING → READY, emits `buffer:ready`).
+#### `poolReleaseWrite(poolName, bufferName, metadata?)`
+Release a slot after writing (WRITING → READY) and emit `buffer:ready` with `metadata`.
 
 ```ts
-await poolReleaseWrite('video', 0);
+await poolReleaseWrite('video', 'video_0', { width: 1920, height: 1080 });
 ```
 
 ---
 
-#### `poolReleaseRead(poolName, slot)`
-Release a slot after reading (transitions READING → FREE).
+#### `poolReleaseRead(poolName, bufferName)`
+Give a slot back after reading (READY → FREE). Call it in a `finally`, so a failed draw can't leak a slot. It only finds pools created with `createPool()`; a pool owned by a C++ plugin needs that plugin's own release command.
 
 ```ts
-await poolReleaseRead('video', 0);
+await poolReleaseRead('video', 'video_0');
 ```
 
 ---
@@ -358,15 +385,15 @@ renderer.destroy();
 
 ### `createBufferRenderer(options)`
 
-Convenience function that combines shared memory fetching with WebGL rendering. Automatically listens for `buffer:ready` events and renders each new frame.
+Convenience function that combines shared memory fetching with WebGL rendering. It listens for `buffer:ready` events from one pool, draws each frame, and releases the slot.
 
 ```ts
-const { renderer, destroy } = createBufferRenderer({
+const { destroy } = createBufferRenderer({
   canvas: '#viewport',
   width: 1920,
   height: 1080,
   format: 'rgba',
-  pool: 'video-frames',  // Optional: pool name for auto-release
+  pool: 'video-frames',   // required: only this pool's frames are drawn
 });
 
 // Rendering happens automatically on buffer:ready events
@@ -376,10 +403,13 @@ destroy();
 
 **Additional options:**
 
-| Option | Type | Description |
-|---|---|---|
-| `pool` | `string` | If set, auto-calls `poolReleaseRead()` after each frame |
-| `bufferName` | `string` | Filter events to only this buffer name |
+| Option | Type | Default | Description |
+|---|---|---|---|
+| `pool` | `string` | — | Pool whose `buffer:ready` events are drawn |
+| `autoRelease` | `boolean` | `true` | Call `poolReleaseRead()` after each frame (in a `finally`). That built-in command only knows pools made with `createPool()` / `buffer:pool-create`; for a pool your C++ plugin owns, set `false` and call your plugin's release command (example below) |
+| `onFrame` | `(event) => void` | — | Called after each frame is drawn |
+
+If a frame's `metadata.width`/`height` differ from the options, the renderer resizes itself.
 
 ---
 
@@ -387,46 +417,67 @@ destroy();
 
 ### C++ Side (Producer)
 
+A plugin that owns a pool and a producer loop. The loop is an `anyar::BackgroundTask`, so `shutdown()` can stop and join it (see [graceful-shutdown.md](graceful-shutdown.md)).
+
 ```cpp
-#include <anyar/app.h>
+#include <anyar/plugin.h>
 #include <anyar/shared_buffer.h>
+#include <anyar/task.h>
+#include <libasyik/service.hpp>
 #include <cstring>
 
-int main() {
-    anyar::App app({.title = "Video Viewer", .width = 1280, .height = 720});
+class FramesPlugin : public anyar::IAnyarPlugin {
+public:
+    std::string name() const override { return "frames"; }
 
-    // Create a triple-buffer pool
-    anyar::SharedBufferPool pool("video", 3, 1280 * 720 * 4);
+    void initialize(anyar::PluginContext& ctx) override {
+        service_ = ctx.service;
+        events_ = &ctx.events;
+        pool_ = std::make_unique<anyar::SharedBufferPool>("video", W * H * 4, 3);
 
-    // Simulate a frame producer (in practice: FFmpeg, camera, etc.)
-    app.command("video:start", [&](const json& args) -> json {
-        auto svc = app.service();
-        svc->execute([&pool, &app]() {
-            for (int frame = 0; frame < 300; ++frame) {  // 10s at 30fps
-                int slot = pool.acquire_write();
-                if (slot < 0) continue;  // All slots busy, drop frame
-
-                auto& buf = pool.slot_buffer(slot);
-                generate_frame(buf.data(), buf.size(), frame);  // Your renderer
-
-                pool.release_write(slot);
-
-                // Notify frontend
-                app.emit("buffer:ready", {
-                    {"name", pool.slot_name(slot)},
-                    {"url", pool.slot_url(slot)},
-                    {"slot", slot},
-                    {"pool", "video"},
-                    {"width", 1280}, {"height", 720}
-                });
-
-                // ~33ms per frame
-                asyik::sleep_for(std::chrono::milliseconds(33));
-            }
+        ctx.commands.add("video:start", [this](const anyar::json&) -> anyar::json {
+            if (loop_.running()) return {{"status", "running"}};
+            loop_.start(service_, [this](anyar::StopToken st) {
+                for (int frame = 0; !st.stop_requested(); ++frame) {
+                    anyar::SharedBuffer* slot = pool_->try_acquire_write();
+                    if (slot) {                                    // else: page is behind, drop
+                        generate_frame(slot->data(), slot->size(), frame);   // your renderer
+                        pool_->release_write(*slot, "{}");
+                        events_->emit("buffer:ready", {
+                            {"name", slot->name()}, {"pool", pool_->base_name()},
+                            {"id", slot->id()}, {"url", "anyar-shm://" + slot->name()},
+                            {"size", slot->size()},
+                            {"metadata", {{"width", W}, {"height", H}, {"format", "rgba"}}}});
+                    }
+                    asyik::sleep_for(std::chrono::milliseconds(33));   // ~30 fps, yields the fiber
+                }
+            });
+            return {{"status", "started"}};
         });
-        return {{"status", "started"}};
-    });
+        // The page gives each slot back after drawing it.
+        ctx.commands.add("video:frame-done", [this](const anyar::json& a) -> anyar::json {
+            pool_->release_read(a.at("name").get<std::string>());
+            return {{"ok", true}};
+        });
+    }
 
+    void shutdown() override {     // UI thread; the service thread is still running
+        loop_.stop();              // request + join
+        pool_->close();
+    }
+
+private:
+    static constexpr int W = 1280, H = 720;
+    asyik::service_ptr service_;
+    anyar::EventBus* events_ = nullptr;
+    std::unique_ptr<anyar::SharedBufferPool> pool_;
+    anyar::BackgroundTask loop_;
+};
+
+int main() {
+    anyar::App app;
+    app.use(std::make_shared<FramesPlugin>());
+    app.create_window({.title = "Video Viewer", .width = 1280, .height = 720});
     return app.run();
 }
 ```
@@ -437,22 +488,26 @@ int main() {
 <canvas id="viewport" width="1280" height="720"></canvas>
 
 <script type="module">
-import { createBufferRenderer } from '@libanyar/api/canvas';
+import { createFrameRenderer } from '@libanyar/api/canvas';
+import { fetchBuffer, onBufferReady } from '@libanyar/api/buffer';
 import { invoke } from '@libanyar/api';
 
-// Start rendering — auto-fetches and displays each frame
-const { destroy } = createBufferRenderer({
-  canvas: '#viewport',
-  width: 1280,
-  height: 720,
-  format: 'rgba',
-  pool: 'video',
+const renderer = createFrameRenderer({ canvas: '#viewport', width: 1280, height: 720, format: 'rgba' });
+
+onBufferReady(async (e) => {
+  if (e.pool !== 'video') return;
+  try {
+    renderer.drawFrame(await fetchBuffer(e.name, { copy: false, id: e.id }));  // live view where supported
+  } finally {
+    await invoke('video:frame-done', { name: e.name });                         // always give the slot back
+  }
 });
 
-// Tell C++ to start producing frames
 await invoke('video:start');
 </script>
 ```
+
+For a pool created from JS with `createPool()`, `createBufferRenderer({ canvas, width, height, format, pool })` does all of this in one call.
 
 ---
 

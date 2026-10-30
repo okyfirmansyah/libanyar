@@ -1,6 +1,7 @@
 #include <anyar/window.h>
 #include <anyar/pinhole.h>
 #include "webview/webview.h"
+#include "platform.h"
 
 #include <atomic>
 #include <memory>
@@ -16,7 +17,6 @@
 #include <webkit2/webkit2.h>
 #elif defined(_WIN32)
 #include <anyar/main_thread.h>
-#include "platform.h"
 #include "win32_util.h"
 #include "pinhole_win32.h"
 #include <iostream>
@@ -1021,6 +1021,23 @@ void* Window::browser_controller() const {
 
 void* Window::native_handle() const {
     return impl_->native_handle();
+}
+
+// ── Debugging / automation ──────────────────────────────────────────────────
+
+void Window::capture(SnapshotCallback done) {
+    void* engine = browser_controller();
+    if (!engine) {
+        done({}, "window is destroyed");
+        return;
+    }
+    platform::capture_webview(engine, std::move(done));
+}
+
+std::string Window::inject_input(const InputEvent& ev) {
+    void* engine = browser_controller();
+    if (!engine) return "window is destroyed";
+    return platform::inject_webview_input(engine, ev);
 }
 
 // ── Parent / Child / Modal ──────────────────────────────────────────────────

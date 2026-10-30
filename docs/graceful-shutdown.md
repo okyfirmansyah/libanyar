@@ -8,7 +8,9 @@ LibAnyar owns the shutdown order inside `app.run()`. App and plugin code still n
 - Wrap blocking calls (codecs, file I/O, heavy CPU work) in `anyar::run_blocking(service_, fn)` so they never stall the service thread. That also keeps stop latency low.
 - If the loop can wait on back-pressure or consumer release, prefer a non-blocking call (`SharedBufferPool::try_acquire_write()`) or add a close/cancel path (`SharedBufferPool::close()`).
 - Do not call `service_->stop()` from plugin code or window-close handlers. Let `App::run()` own the sequence.
-- Test by closing the native window while the app is busy, not only when idle.
+- **`shutdown()` runs on the main (UI) thread while the service thread is still dispatching commands.** The page can still send fire-and-forget commands during shutdown, so any state that both `shutdown()` and your command handlers touch (maps of buffers, sessions, handles) needs a `std::mutex`. Without one, an exit at the wrong moment corrupts the heap. The anatomy atlas hit exactly this with its buffer map (2026-10-28). Hold that lock only briefly, and never while joining a task or waiting for jobs: a command fiber blocked on a `std::mutex` freezes the whole service thread, so the work you are waiting for can never finish. Set a stop flag under the lock, release it, then join (a condition-variable wait, which releases the lock, is fine).
+- Commands that wait on `run_blocking()` must finish before the service stops. Count them in flight and wait for zero in `shutdown()`, or make them bail out early on a stop flag (see `AtlasPlugin::InFlight`).
+- Test by closing the native window while the app is busy, not only when idle. To do that repeatably, run the app many times with a test script that exits at a random moment (`ANYAR_TEST_SCRIPT`, see [Debugging](debugging.md#recipe-hunting-a-shutdown-race)).
 
 ## Minimal Pattern
 

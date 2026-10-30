@@ -44,6 +44,11 @@ export { buffer };
 import * as canvas from './modules/canvas';
 export { canvas };
 
+// ── Debug / automation ─────────────────────────────────────────────────────
+import * as debug from './modules/debug';
+export { debug };
+export type { DebugInfo, Screenshot, InputOptions, Target } from './modules/debug';
+
 // ── Pinhole ───────────────────────────────────────────────────────────────────
 import * as pinhole from './modules/pinhole';
 export { pinhole };

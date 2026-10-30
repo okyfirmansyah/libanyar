@@ -17,8 +17,10 @@
 #include <libasyik/http.hpp>
 
 #include <atomic>
+#include <condition_variable>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <thread>
 #include <vector>
@@ -148,6 +150,14 @@ private:
     void register_pinhole_commands();
     int find_available_port();
 
+    // Debug tooling (app_debug.cpp, <anyar/debug.h>)
+    void apply_debug_env();
+    void register_debug_commands();
+    void inject_debug_scripts(Window* window);
+    void start_test_watchdog();
+    void stop_test_watchdog();
+    void request_exit(int code);
+
     AppConfig config_;
     int port_ = 0;
 
@@ -167,6 +177,18 @@ private:
     /// main window exists (WebView2 creation takes ~2 s, requests are served
     /// meanwhile).
     std::atomic<bool> close_all_requested_{false};
+
+    /// Process exit code returned by run() (set by `debug:exit` / test timeout).
+    std::atomic<int> exit_code_{0};
+
+    /// Contents of DebugToolsConfig::test_script (read once at construction).
+    std::string test_script_source_;
+
+    /// Aborts a test script that runs past DebugToolsConfig::test_timeout_s.
+    std::thread test_watchdog_;
+    std::mutex watchdog_mu_;
+    std::condition_variable watchdog_cv_;
+    bool watchdog_stop_ = false;
 
     /// Per-window native event sink IDs (label → sink id)
     std::map<std::string, uint64_t> native_event_sinks_;

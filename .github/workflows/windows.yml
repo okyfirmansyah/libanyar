@@ -48,6 +48,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Licence gate (asset manifests + NOTICE)
+        run: python scripts/check_assets.py
+
       - name: Bootstrap vcpkg
         run: |
           git init -q "$VCPKG_ROOT"

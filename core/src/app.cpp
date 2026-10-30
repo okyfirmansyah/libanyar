@@ -53,6 +53,9 @@ App::App(AppConfig config) : config_(std::move(config)) {
     // Platform-specific initialization (snap env cleanup on Linux, etc.)
     platform::init_process();
 
+    // ANYAR_CONSOLE / ANYAR_DEBUG_TOOLS / ANYAR_TEST_SCRIPT (app_debug.cpp)
+    apply_debug_env();
+
     // Default dist path
     if (config_.dist_path.empty()) {
         config_.dist_path = "./dist";
@@ -266,6 +269,7 @@ void App::start_server() {
 
     // ── Register pinhole IPC commands ────────────────────────────────────
     register_pinhole_commands();
+    register_debug_commands();
 
     // ── Auto-register built-in plugins ─────────────────────────────────────
     std::vector<std::shared_ptr<IAnyarPlugin>> builtins;
@@ -464,6 +468,7 @@ int App::run() {
     service_thread_ = std::thread([this]() {
         service_->run();
     });
+    start_test_watchdog();
 
     if (has_window_) {
         // ── Window creation callback — sets up IPC for every new window ──
@@ -586,10 +591,12 @@ int App::run() {
     } else {
         // No window — run headless (useful for testing)
         service_thread_.join();
-        return 0;
+        stop_test_watchdog();
+        return exit_code_.load();
     }
 
-    return 0;
+    stop_test_watchdog();
+    return exit_code_.load();
 }
 
 // ── Window IPC Commands ─────────────────────────────────────────────────────
@@ -1149,6 +1156,9 @@ void App::setup_native_ipc(Window* window) {
             }
         };
     )JS");
+
+    // Console forwarding, anyarTest helpers, test script (app_debug.cpp)
+    inject_debug_scripts(window);
 
     // ── Native-app behavior: disable browser defaults in production ────
     if (!main_window_opts_.debug && !config_.debug) {

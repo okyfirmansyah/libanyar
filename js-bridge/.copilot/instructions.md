@@ -11,7 +11,7 @@ NPM package providing typed JS bridge to the C++ backend. Builds dual ESM + CJS 
 - `src/config.ts` — port, `isNativeIpc()`
 - `src/react.ts` — `useInvoke / useEvent / useEventCallback`
 - `src/types.ts`, `global.d.ts`
-- `src/modules/`: `fs.ts dialog.ts shell.ts db.ts`; `window.ts` (`createWindow, emitTo, listenGlobal, onWindowFocused`); `buffer.ts` (`SharedBuffer + fetchBuffer(nameOrUrl, {copy?, id?})`: WebView2 shared memory via `buffer:attach` + `sharedbufferreceived` on Windows (`copy:false` = live zero-copy view; pass `id` from `buffer:ready` to skip revalidation), `anyar-shm://` on Linux, HTTP otherwise); `canvas.ts` (WebGL `FrameRenderer` — RGBA/RGB/BGRA/Gray/YUV420/NV12/NV21); `pinhole.ts` (optional typed helpers for native overlay: `onPinholeMounted, updatePinholeRect, setPinholeVisible, getPinholeMetrics` → `pinhole:*` commands; DOM tracking itself is injected by C++ `create_pinhole()`); `event.ts` (re-exports `listen/emit/emitTo/listenGlobal/once/onReady` for the `./event` subpath)
+- `src/modules/`: `fs.ts dialog.ts shell.ts db.ts`; `window.ts` (`createWindow, emitTo, listenGlobal, onWindowFocused`); `buffer.ts` (`SharedBuffer + fetchBuffer(nameOrUrl, {copy?, id?})`: WebView2 shared memory via `buffer:attach` + `sharedbufferreceived` on Windows (`copy:false` = live zero-copy view; pass `id` from `buffer:ready` to skip revalidation), `anyar-shm://` on Linux, HTTP otherwise); `canvas.ts` (WebGL `FrameRenderer` — RGBA/RGB/BGRA/Gray/YUV420/NV12/NV21); `pinhole.ts` (optional typed helpers for native overlay: `onPinholeMounted, updatePinholeRect, setPinholeVisible, getPinholeMetrics` → `pinhole:*` commands; DOM tracking itself is injected by C++ `create_pinhole()`); `event.ts` (re-exports `listen/emit/emitTo/listenGlobal/once/onReady` for the `./event` subpath); `debug.ts` (`info, screenshot, click, moveTo, mouse, scroll, key, typeText, exit, targetPoint` → `debug:*` commands, only registered when the app enables automation — ADR-016, docs/debugging.md; also `./debug` subpath)
 
 ## Conventions
 - Named exports only — no default exports
@@ -29,7 +29,7 @@ Subpath imports (must match `package.json` `"exports"`): `@libanyar/api/{fs,dial
 - Port from `window.__LIBANYAR_PORT__` or `<meta name="anyar-port">`
 
 ## Window Awareness & Echo
-`window.__LIBANYAR_WINDOW_LABEL__` injected per-window. `listen()` skips events targeted at OTHER windows (via `EventMessage.target`); `listenGlobal()` receives all. JS-emitted events go through `invoke('anyar:emit_event', ...)` → C++ `events_.emit_local()` (C++ subscribers only — no echo back to JS).
+`window.__LIBANYAR_WINDOW_LABEL__` injected per-window. `listen()` skips events targeted at OTHER windows (via `EventMessage.target`); `listenGlobal()` receives all. JS-emitted events go through `invoke('anyar:emit_event', ...)` → C++ `events_.emit()`: a broadcast to C++ subscribers and every window, the sender included (cross-window notifications rely on it).
 
 ## Commands
 ```bash

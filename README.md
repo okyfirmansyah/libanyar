@@ -3,6 +3,7 @@
 # LibAnyar
 
 [![Linux CI](https://img.shields.io/circleci/build/github/okyfirmansyah/libanyar/main?label=Linux%20CI)](https://dl.circleci.com/status-badge/redirect/gh/okyfirmansyah/libanyar/tree/main)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Windows CI](https://img.shields.io/github/actions/workflow/status/okyfirmansyah/libanyar/windows.yml?branch=main&label=Windows%20CI)](https://github.com/okyfirmansyah/libanyar/actions/workflows/windows.yml)
 
 > **Anyar** (Indonesian/Javanese) — "new", "fresh", "modern"
@@ -54,31 +55,45 @@ Building desktop apps shouldn't force a choice between powerful native performan
 <sub>Real-time signal strength visualization and channel scanning.</sub>
 </td>
 </tr>
+<tr>
+<td colspan="2" align="center">
+<h3>Anatomy Atlas</h3>
+<img src="docs/assets/anatomy-atlas.gif" alt="Anatomy Atlas" height="320" /><br/>
+<sub>Whole-body 3D anatomy: 2,234 parts streamed from C++ to WebGL through SharedBuffers, with levels of detail, GPU picking, search, X-ray and cross-sections.<br/>
+Anatomy data: BodyParts3D, © The Database Center for Life Science licensed under CC Attribution 4.0 International. For education only — not a medical device.</sub>
+</td>
+</tr>
 </table>
 
 ## Architecture
 
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/architecture-dark.svg">
+    <img src="docs/assets/architecture-light.svg" alt="LibAnyar architecture: your web frontend runs in the OS webview and talks to a C++17 core over native IPC, events and zero-copy binary channels; the core runs on LibAsyik" width="860">
+  </picture>
+</p>
+
+The frontend and the C++ backend share one process. Commands, events and binary data each have their own channel, so a 4K frame never goes through JSON. Command handlers run as fibers on one service thread; blocking work goes to a worker pool with `anyar::run_blocking`. See [ARCHITECTURE.md](ARCHITECTURE.md) for the component map and threading model.
+
+<details>
+<summary>Diagram as text</summary>
+
+<!-- Source of truth for the picture above: docs/assets/src/architecture.py. Keep the two in step. -->
+
 ```mermaid
-block-beta
-  columns 1
-
-  A["🌐 Web Frontend — React / Vue / Svelte"]
-  B["📡 @libanyar/api — JS Bridge\n★ Native IPC (webview_bind, ~0.01ms)\n★ Shared Memory (anyar-shm://, zero-copy)\n○ HTTP/WS fallback (browser dev mode)"]
-  C["🖼️ OS WebView — WebKit / WebView2"]
-  D["⚙️ LibAnyar Core (C++17)\nIPC Router · Commands · Event Bus\nWindow Mgr · Plugins · Native APIs\nSharedBuffer · BufferPool · Pinhole · WebGL"]
-  E["🧱 LibAsyik — Foundation\nHTTP/WS Server · SOCI/SQL · Boost Fibers"]
-
-  A -- " " --> B
-  B -- " " --> C
-  C -- " " --> D
-  D -- " " --> E
-
-  style A fill:#4f46e5,color:#fff
-  style B fill:#7c3aed,color:#fff
-  style C fill:#2563eb,color:#fff
-  style D fill:#0891b2,color:#fff
-  style E fill:#059669,color:#fff
+flowchart TB
+  FE["Web frontend<br/>Svelte · React · Vue · vanilla"] -- "@libanyar/api" --> WV["OS webview<br/>WebKitGTK (Linux) · WebView2 (Windows) · WKWebView (macOS, planned)"]
+  WV <--> IPC["Native IPC<br/>invoke() → C++ command, ~0.01 ms"]
+  WV <--> EVT["Events<br/>emit · listen, one window or all"]
+  WV <--> BIN["Binary & video<br/>SharedBuffer · Pinhole, zero-copy"]
+  IPC <--> CORE["LibAnyar core (C++17)<br/>commands · plugins · event bus · multi-window<br/>SharedBuffer · Pinhole · run_blocking · debug tools"]
+  EVT <--> CORE
+  BIN <--> CORE
+  CORE --> ASY["LibAsyik<br/>Boost fibers · HTTP/WebSocket · SQL via SOCI"]
 ```
+
+</details>
 
 ## Quick Start
 
@@ -196,32 +211,33 @@ See the [Pinhole Native Overlay Rendering Guide](docs/pinhole-rendering.md) for 
 
 LibAnyar provides **zero-copy binary data transfer** between C++ and the webview frontend — ideal for video frames, LiDAR point clouds, image processing, or any large binary payload.
 
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/shared-memory-dark.svg">
+    <img src="docs/assets/shared-memory-light.svg" alt="Shared-memory streaming: a C++ producer writes pixels into a free slot of a SharedBufferPool, emits buffer:ready, the WebGL canvas reads the slot (anyar-shm:// on Linux, WebView2 shared buffer on Windows) and releases it back to FREE" width="860">
+  </picture>
+</p>
+
+<details>
+<summary>Diagram as text</summary>
+
+<!-- Source of truth for the picture above: docs/assets/src/shared_memory.py. Keep the two in step. -->
+
 ```mermaid
 flowchart LR
-  subgraph CPP["C++ Backend"]
-    A["Capture / Generate\n(FFmpeg, sensor, etc.)"] --> B["SharedBuffer\nmmap'd memory"]
-  end
-
-  subgraph IPC["Zero-copy IPC"]
-    B -- "anyar-shm:// URI" --> C["OS WebView\nfetch()"]
-  end
-
-  subgraph JS["JS Frontend"]
-    C --> D["WebGL Renderer\n(RGBA/YUV420/NV12...)"]
-    D --> E["Canvas\n🖥️"]
-  end
-
-  style CPP fill:#0891b2,color:#fff
-  style IPC fill:#7c3aed,color:#fff
-  style JS fill:#4f46e5,color:#fff
+  P["C++ producer<br/>acquire_write()"] -- "1 · write pixels in place" --> POOL["SharedBufferPool<br/>ring of N slots: FREE → WRITING → READY"]
+  POOL -- "2 · emit buffer:ready" --> C["WebGL canvas<br/>createBufferRenderer()<br/>Linux: anyar-shm:// · Windows: WebView2 shared buffer"]
+  C -. "3 · release → FREE" .-> POOL
 ```
+
+</details>
 
 | Feature | Description |
 |---|---|
-| `@libanyar/api/buffer` | Shared memory buffers with `anyar-shm://` custom URI scheme |
+| `@libanyar/api/buffer` | Shared memory buffers: `anyar-shm://` URI on Linux, WebView2 shared buffers on Windows |
 | `@libanyar/api/canvas` | WebGL frame renderer (RGBA, RGB, BGRA, Grayscale, YUV420, NV12, NV21) |
 | `SharedBufferPool` | Lock-free ring buffer pool for streaming (e.g. 30fps video) |
-| Zero-copy | C++ writes to mmap'd memory → JS reads via `fetch()` — no serialization |
+| Zero-copy | C++ writes straight into shared memory → JS reads it with `fetchBuffer()`, no serialization |
 
 ```cpp
 // C++ — write pixels into shared memory
@@ -250,4 +266,8 @@ Guides, API references, and tutorials: **[LibAnyar Documentation](docs/README.md
 
 ## License
 
-MIT
+LibAnyar is released under the [MIT License](LICENSE).
+
+Third-party code and data keep their own licences; see [NOTICE](NOTICE). Example data such as anatomy meshes lives under `examples/*/assets/<source>/` with its own `LICENSE` and `MANIFEST.json`, and CI (`scripts/check_assets.py`) rejects assets without a permitted licence and matching attribution.
+
+> **Medical disclaimer.** The anatomy examples are for education and demonstration only. They are not medical devices and must not be used for diagnosis or treatment.

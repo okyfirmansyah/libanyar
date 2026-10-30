@@ -38,7 +38,7 @@ class App;
 /// Usage:
 ///   auto buf = SharedBuffer::create("video-frame", width * height * 4);
 ///   memcpy(buf->data(), pixels, buf->size());
-///   buf->notify(window, R"({"width":1920,"height":1080})");
+///   app.emit("buffer:ready", {{"name", buf->name()}, {"id", buf->id()}});
 ///
 class SharedBuffer {
 public:

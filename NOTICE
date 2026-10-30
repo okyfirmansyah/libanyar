@@ -1,0 +1,46 @@
+LibAnyar
+Copyright (c) 2026 Oky Firmansyah — MIT License (see LICENSE)
+
+This product includes or uses third-party software and data. Each component
+keeps its own licence. Entries marked [data] are not code.
+
+== Vendored in this repository ==
+
+webview/webview (third_party/webview)
+  MIT License — Copyright (c) 2017 Serge Zaitsev
+  https://github.com/webview/webview
+
+CMakeRC (cmake/CMakeRC.cmake)
+  MIT License — Copyright (c) vector-of-bool
+  https://github.com/vector-of-bool/cmrc
+
+== Linked / required at build time (not vendored) ==
+
+LibAsyik            MIT License            https://github.com/okyfirmansyah/libasyik
+Boost               Boost Software License 1.0   https://www.boost.org/LICENSE_1_0.txt
+nlohmann/json       MIT License            https://github.com/nlohmann/json
+OpenSSL 3.x         Apache License 2.0     https://www.openssl.org/source/license.html
+SOCI                Boost Software License 1.0   https://github.com/SOCI/soci
+SQLite              Public domain          https://www.sqlite.org/copyright.html
+Catch2 (tests)      Boost Software License 1.0   https://github.com/catchorg/Catch2
+WebView2 SDK (Win)  Microsoft licence terms (see the Microsoft.Web.WebView2 NuGet package)
+WebKitGTK (Linux)   LGPL-2.1 / BSD (system library, dynamically linked)
+
+== Frontend packages (examples, installed by npm) ==
+
+three.js            MIT License            https://github.com/mrdoob/three.js
+Svelte, React, Vite, Tailwind CSS — MIT License (see each package)
+Fonts via @fontsource — SIL Open Font License 1.1 (see each package)
+
+== Anatomy data [data] ==
+
+BodyParts3D (examples/anatomy-atlas/assets/bodyparts3d, and the full-body pack
+fetched by -DANYAR_FETCH_ANATOMY=ON)
+  "BodyParts3D, © The Database Center for Life Science licensed under CC Attribution 4.0 International"
+  Licence: CC BY 4.0 — https://creativecommons.org/licenses/by/4.0/
+  Source:  https://dbarchive.biosciencedbc.jp/en/bodyparts3d/
+  Licence page checked 2026-10-21: https://dbarchive.biosciencedbc.jp/en/bodyparts3d/lic.html
+  Changes: converted from OBJ, re-framed, simplified and quantised by
+  examples/anatomy-atlas/tools/build_atlas_pack.py (see the asset MANIFEST.json).
+  docs/assets/anatomy_atlas.jpg and docs/assets/anatomy-atlas.gif are renderings of this data
+  (same licence and attribution).

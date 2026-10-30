@@ -42,6 +42,12 @@ if(EXISTS "${app}/frontend/node_modules")
     fail("--no-install still ran npm install")
 endif()
 
+# CLAUDE.md must use Claude Code's import syntax (@path); `#import` is ignored.
+file(READ "${app}/CLAUDE.md" claude_md)
+if(NOT claude_md MATCHES "^@\\.github/copilot-instructions\\.md")
+    fail("CLAUDE.md does not @-import .github/copilot-instructions.md: ${claude_md}")
+endif()
+
 file(READ "${app}/CMakeLists.txt" cml)
 if(NOT cml MATCHES "project\\(smokeapp")
     fail("project() name not set")

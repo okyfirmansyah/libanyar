@@ -834,25 +834,32 @@ Research was conducted across the Tauri/wry ecosystem and WebKit documentation:
 
 ### Architecture
 
-```
-┌──────────────────────────────┐
-│  @libanyar/api/canvas        │  ← Feature 2 (WebGL frame renderer)
-│  createFrameRenderer()       │
-│  drawFrame(buffer, meta)     │
-└──────────┬───────────────────┘
-           │ uses internally
-┌──────────▼───────────────────┐
-│  @libanyar/api/buffer        │  ← Feature 1 (shared memory IPC)
-│  onSharedBuffer()            │
-│  SharedBufferHandle          │
-└──────────┬───────────────────┘
-           │ uses internally
-┌──────────▼───────────────────┐
-│  Platform shared memory      │  ← C++ core (anyar::SharedBuffer)
-│  Linux: shm_open + mmap      │
-│  Win:   CreateSharedBuffer   │
-│  macOS: shm_open + mmap      │
-└──────────────────────────────┘
+```mermaid
+flowchart TB
+  A["<b>@libanyar/api/canvas</b><br/>createFrameRenderer · createBufferRenderer<br/>WebGL, 7 pixel formats"]
+  B["<b>@libanyar/api/buffer</b><br/>fetchBuffer · onBufferReady · pools"]
+  C["<b>anyar::SharedBuffer</b> · C++ core"]
+  L["<b>Linux</b><br/>shm_open + mmap<br/>anyar-shm:// scheme"]
+  W["<b>Windows</b><br/>WebView2 CreateSharedBuffer<br/>+ HTTP fallback"]
+  M["<b>macOS</b><br/>planned"]
+  A -- "uses" --> B -- "uses" --> C
+  C --> L
+  C --> W
+  C -.-> M
+  class A ui
+  class B bridge
+  class C core
+  class L,W native
+  class M base
+
+  classDef ui fill:#eef2ff,stroke:#6366f1,color:#1e1b4b
+  classDef bridge fill:#f5f3ff,stroke:#8b5cf6,color:#2e1065
+  classDef native fill:#e0f2fe,stroke:#0284c7,color:#082f49
+  classDef core fill:#ccfbf1,stroke:#0d9488,color:#042f2e
+  classDef data fill:#fef3c7,stroke:#d97706,color:#451a03
+  classDef base fill:#f1f5f9,stroke:#64748b,color:#0f172a
+  classDef work fill:#ecfccb,stroke:#65a30d,color:#1a2e05
+  classDef warn fill:#ffe4e6,stroke:#e11d48,color:#4c0519
 ```
 
 Feature 1 (`buffer`) is a standalone general-purpose API. Feature 2 (`canvas`) is a convenience layer that consumes Feature 1 internally.
@@ -1126,20 +1133,32 @@ Pinhole collapses this to **C++ draws directly on a native GL/Metal/D3D surface 
 
 ### Architecture
 
-```
-┌─ OS Window ───────────────────────────────┐
-│  ┌─ WebView (full window) ──────────────┐ │
-│  │   <header>...</header>              │ │
-│  │   <div data-anyar-pinhole="cam">    │ │   ← transparent placeholder
-│  │     [transparent in DOM]            │ │
-│  │   </div>                            │ │
-│  │   <footer>...</footer>              │ │
-│  └──────────────────────────────────────┘ │
-│      ▲                                    │
-│      │ ◄── native overlay surface (GL/Metal/D3D)
-│      │     position+size synced to placeholder rect
-│      │     C++ draws directly here
-└───────────────────────────────────────────┘
+```mermaid
+flowchart TB
+  subgraph WIN["One OS window"]
+    direction TB
+    T["<b>Webview</b> · top layer, transparent background<br/>&lt;header&gt; … &lt;div data-anyar-pinhole=&quot;video&quot;&gt; … &lt;footer&gt;"]
+    H["<b>Placeholder rect</b><br/>transparent hole in the page"]
+    N["<b>Pinhole surface</b> · bottom layer<br/>Linux: GtkGLArea (GL 3.3) in a GtkOverlay<br/>Windows: D3D11 swap chain via DirectComposition"]
+    T --- H
+    H -- "tracking script reports rect, DPR, scroll" --> N
+  end
+  C["<b>C++</b><br/>pin->on_render(ctx) on the UI thread<br/>draw_frame / draw_image / clear"]
+  C -- "request_redraw() from any thread" --> N
+  class T ui
+  class H bridge
+  class N native
+  class C core
+
+  classDef ui fill:#eef2ff,stroke:#6366f1,color:#1e1b4b
+  classDef bridge fill:#f5f3ff,stroke:#8b5cf6,color:#2e1065
+  classDef native fill:#e0f2fe,stroke:#0284c7,color:#082f49
+  classDef core fill:#ccfbf1,stroke:#0d9488,color:#042f2e
+  classDef data fill:#fef3c7,stroke:#d97706,color:#451a03
+  classDef base fill:#f1f5f9,stroke:#64748b,color:#0f172a
+  classDef work fill:#ecfccb,stroke:#65a30d,color:#1a2e05
+  classDef warn fill:#ffe4e6,stroke:#e11d48,color:#4c0519
+  style WIN fill:transparent,stroke:#94a3b8,stroke-dasharray:5 4
 ```
 
 JS-side (`@libanyar/api/pinhole`):
@@ -1310,6 +1329,7 @@ If any of these are needed, use `@libanyar/api/canvas` (Phase 4f path) instead.
 - [x] Key Storage (SQLite CRUD + Svelte + multi-window modal) — exists with README
 - [x] Video Player (SharedBufferPool + WebGL canvas, RGBA/YUV420) — exists with README
 - [x] WiFi Analyzer (passive/active scan, libnl, WebGL canvas) — exists with README
+- [x] Anatomy Atlas (whole-body BodyParts3D, SharedBuffer LOD streaming, GPU picking, sections) — exists with README
 - [ ] Todo App (SQLite CRUD + React)
 - [ ] File Explorer (native dialogs + file system)
 - [ ] Markdown Editor (file read/write + live preview)
@@ -1329,6 +1349,20 @@ If any of these are needed, use `@libanyar/api/canvas` (Phase 4f path) instead.
 - [x] Benchmark: SharedBuffer 1080p fetch — ❌ ~21 ms (design claim ~1 ms)
 - [x] Benchmark: Pinhole 1080p draw — ⚠️ 0.68 ms CPU p50 (target < 0.2 ms), vsync 60 fps sustained
 - [ ] Profile and optimize hot paths — `anyar-shm://` fetch path, cold startup, Pinhole texture upload (PBO)
+
+### 6.6 Debug Tooling (ADR-016, docs/debugging.md)
+- [x] Console forwarding (`ANYAR_CONSOLE` / `debug_tools.console`) — all platforms (JS-only)
+- [x] Injected test scripts + `anyarTest` + `debug:exit` exit codes + timeout (`ANYAR_TEST_SCRIPT`) — all platforms (JS-only)
+- [x] `debug:screenshot` + `debug:input` on Linux (WebKitGTK snapshot, GDK event synthesis); `@libanyar/api` `debug` module; `tests/debug_tools`
+- [ ] Windows backends: `ICoreWebView2::CapturePreview` + `SendInput` / `SendMouseInput` (`debug_unsupported.cpp` today)
+- [ ] macOS backends: `takeSnapshotWithConfiguration` + synthesized `NSEvent`s (with the macOS port)
+- [ ] Remote inspection wiring: WebView2 `--remote-debugging-port` / WebKitGTK inspector server behind `anyar dev --remote-debug`
+
+### 6.7 AI-assistant support
+- [x] `skills/libanyar/` Claude Code skill (SKILL.md + 5 references + 3 eval cases), install notes in `skills/README.md`
+- [x] `anyar init` writes `CLAUDE.md` with the `@` import (was `#import`, silently ignored); guarded by `cli_init_smoke`
+- [ ] Run the skill evals (with vs without skill), iterate; then description-trigger optimisation
+- [ ] `anyar init` copies the skill into new projects (`.claude/skills/libanyar/`)
 
 ### Phase 6 Deliverable
 > Well-documented, well-tested, production-ready framework on Linux.
@@ -1433,6 +1467,21 @@ If any of these are needed, use `@libanyar/api/canvas` (Phase 4f path) instead.
 > Feature-complete framework with plugin ecosystem and distribution tooling.
 
 ---
+
+---
+
+## Phase 9: 3D Medical Anatomy Tools (planned)
+
+Generic anatomy atlas, imaging viewer, segmentation and measurement examples, planned with licence constraints first (repo LICENSE, NOTICE, asset manifests, CI licence gate). Full step-by-step plan, source licence matrix and release checklist: [anatomy-roadmap.md](anatomy-roadmap.md).
+
+- [x] A0 Legal & repo groundwork (LICENSE, NOTICE, disclaimer, `check_assets.py`) — 2026-10-21
+- [x] A1 Anatomy asset pipeline (BodyParts3D CC BY 4.0 → pack v2 + manifest) — 2026-10-21; full pack awaits the GitHub Release upload
+- [x] A2 Anatomy Atlas Explorer MVP — `examples/anatomy-atlas` (2026-10-21)
+- [ ] A3 Atlas polish & education
+- [ ] B1 Imaging (DICOM) viewer
+- [ ] B2 Segmentation & meshing (TotalSegmentator Apache-2.0 tasks only)
+- [ ] B3 Measurement & planning
+- [ ] B4 Multi-window sync & release
 
 ---
 

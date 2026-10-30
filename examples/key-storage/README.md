@@ -15,17 +15,39 @@ A KeePass-like encrypted password manager built with LibAnyar — demonstrating 
 
 ## Architecture
 
-```
-┌─────────────────────────────────────┐
-│  Svelte 5 Frontend (Tailwind CSS)   │
-│  GroupTree │ EntryList │ EntryDetail │
-├─────────────────────────────────────┤
-│  @libanyar/api  →  IPC  →  C++     │
-├─────────────────────────────────────┤
-│        KeystorePlugin (C++)         │
-│  24 commands (ks:open, ks:save...)  │
-│  SQLite3 │ OpenSSL │ AES-256-GCM   │
-└─────────────────────────────────────┘
+```mermaid
+flowchart LR
+  subgraph FE["Svelte 5 frontend · Tailwind"]
+    direction TB
+    F1["<b>Vault UI</b><br/>GroupTree · EntryList · EntryDetail"]
+    F2["<b>Entry window</b><br/>modal child · /#35;/entry/:id<br/>emits entry:updated"]
+    F1 -- "createWindow" --> F2
+  end
+  subgraph CPP["KeystorePlugin · C++"]
+    direction TB
+    K1["<b>24 ks:* commands</b><br/>vault · groups · entries<br/>attachments · icons · search"]
+    K2[("<b>Working SQLite DB</b><br/>decrypted temp file")]
+    K3["<b>Vault file</b><br/>PBKDF2-SHA256 → AES-256-GCM"]
+    K1 --> K2
+    K2 -- "save / open" --> K3
+  end
+  F1 -- "invoke" --> K1
+  F2 -- "invoke" --> K1
+  class F1,F2 ui
+  class K1 core
+  class K2 data
+  class K3 warn
+
+  classDef ui fill:#eef2ff,stroke:#6366f1,color:#1e1b4b
+  classDef bridge fill:#f5f3ff,stroke:#8b5cf6,color:#2e1065
+  classDef native fill:#e0f2fe,stroke:#0284c7,color:#082f49
+  classDef core fill:#ccfbf1,stroke:#0d9488,color:#042f2e
+  classDef data fill:#fef3c7,stroke:#d97706,color:#451a03
+  classDef base fill:#f1f5f9,stroke:#64748b,color:#0f172a
+  classDef work fill:#ecfccb,stroke:#65a30d,color:#1a2e05
+  classDef warn fill:#ffe4e6,stroke:#e11d48,color:#4c0519
+  style FE fill:transparent,stroke:#6366f1,stroke-dasharray:5 4
+  style CPP fill:transparent,stroke:#0d9488,stroke-dasharray:5 4
 ```
 
 ## Commands (24 total)

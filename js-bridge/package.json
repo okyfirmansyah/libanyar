@@ -47,6 +47,16 @@
         "default": "./dist/cjs/modules/shell.js"
       }
     },
+    "./debug": {
+      "import": {
+        "types": "./dist/esm/modules/debug.d.ts",
+        "default": "./dist/esm/modules/debug.js"
+      },
+      "require": {
+        "types": "./dist/cjs/modules/debug.d.ts",
+        "default": "./dist/cjs/modules/debug.js"
+      }
+    },
     "./event": {
       "import": {
         "types": "./dist/esm/modules/event.d.ts",

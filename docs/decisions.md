@@ -4,6 +4,51 @@
 
 ---
 
+## ADR-016: Debug Tooling in Core — Console Forwarding, `debug:*` Automation, Injected Test Scripts
+
+**Date**: 2026-10-28
+**Status**: Accepted
+
+**Context**: A LibAnyar UI runs in the OS webview, so the usual web-debugging loop (browser console, headless browser automation) does not reach the shipped engine. Headless Chrome against the HTTP fallback tests Blink and the HTTP transport, not WebKitGTK/WebView2 or the native bridge. The video-player example had grown its own private hooks (`VIDEO_PLAYER_TEST_SCRIPT`, a GTK `inject_click`), and capturing the native window under Xvfb returns black frames because WebKit composites on the GPU.
+
+**Decision**:
+- Three opt-in tools in core, configured by `AppConfig::debug_tools` (`<anyar/debug.h>`) **and** by environment variables, so any binary can be debugged without a rebuild: `ANYAR_CONSOLE=1`, `ANYAR_DEBUG_TOOLS=1`, `ANYAR_TEST_SCRIPT=path` (+ `ANYAR_TEST_TIMEOUT`).
+- **Console forwarding** and **test scripts** are pure JS + IPC (an init script calls the native binding), so they work on every platform with no native code.
+- **Capture and input** are `Window::capture(SnapshotCallback)` and `Window::inject_input(InputEvent)`: platform-neutral types, async callback (fits WebKitGTK `get_snapshot`, WebView2 `CapturePreview` and WKWebView `takeSnapshot`). They route through private `platform::capture_webview` / `inject_webview_input` hooks: `debug_linux.cpp` (WebKitGTK snapshot, GDK event synthesis) now, and `debug_unsupported.cpp` for Windows and macOS until their backends land. `debug:info` reports per-platform capability, so one test script runs everywhere.
+- Input is synthesized at the toolkit level, not with DOM `dispatchEvent`, so pages see trusted events and user gestures.
+- `debug:*` commands are registered only when automation is on. The test script runs in the main window only, after `load`, wrapped in an async function. Exit codes: `done(code)`, 1 for an uncaught error, 124 for a timeout. The timeout watchdog is a thread that requests the exit through a service fiber (the window manager is not thread-safe).
+
+**Rationale**: Environment switches make field debugging possible on release binaries. The JS-only parts give every platform the high-value tools immediately. The async capture API is the common denominator of all three engines, so Windows and macOS only add a backend.
+
+**Consequence**:
+- `App::run()` now returns an exit code (`debug:exit`, test timeout).
+- Shipping with `debug_tools.automation` on would let page code take screenshots and synthesize input; it is documented as dev-only.
+- Windows and macOS capture/input are open roadmap items.
+- Errors thrown from injected scripts are sanitized by WebKit ("Script error."); the test wrapper reports them itself.
+- `tests/debug_tools` (label `display`) covers the tools end to end.
+
+---
+
+## ADR-015: MIT Licence for the Code; Licence-Gated Third-Party Data
+
+**Date**: 2026-10-21
+**Status**: Accepted
+
+**Context**: The repository had no `LICENSE` file, so the code was all-rights-reserved by default even though the README said "MIT". The planned anatomy tools ([anatomy-roadmap.md](anatomy-roadmap.md)) need third-party data (meshes, scans, models) whose licences vary: CC BY, CC BY-SA, NC-only and bespoke terms. Mixing those into the repo would be risky for anyone reusing the code.
+
+**Decision**:
+- The code is **MIT** (`LICENSE`, copyright Oky Firmansyah). `NOTICE` lists every vendored or linked third-party component and every data source with its exact attribution.
+- Third-party data lives under `examples/<app>/assets/<source>/` with its own `LICENSE` and a `MANIFEST.json` (source, licence ID and URL, attribution, retrieval date, checksums, build command).
+- Only permissive data licences may be committed: CC0, public domain, CC BY 4.0, MIT, BSD, Apache-2.0, Zlib. CC BY-SA data is opt-in and downloaded only, NC data is never used, and unknown licences are blocked.
+- `scripts/check_assets.py` enforces this in CI (CircleCI `licence-check` job and a Windows GitHub Actions step): every data file must be covered by a manifest, the licence must be on the allow-list, the attribution must appear in `NOTICE`, and a `LICENSE` must sit next to the manifest.
+- Large data packs are published as **GitHub Release assets** and fetched by CMake on demand with a SHA-256 check, not stored in Git or LFS.
+
+**Rationale**: MIT matches the README's long-standing intent and keeps adoption simple. Keeping data separate from code, with a machine-checked manifest, means a licence mistake fails CI instead of shipping. Release assets avoid LFS bandwidth quotas and keep clones small.
+
+**Consequence**: Every new asset needs a manifest, a LICENSE and a NOTICE entry, or CI fails. Licence facts are dated and must be re-checked before releases (BodyParts3D changed from CC BY-SA 2.1 JP to CC BY 4.0 without updating its downloadable files).
+
+---
+
 ## ADR-014: Windows MSI via WiX v4+, and Windows CI on GitHub Actions
 
 **Date**: 2026-10-01

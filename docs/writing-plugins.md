@@ -205,12 +205,26 @@ Built-in plugins use: `fs:`, `dialog:`, `shell:`, `clipboard:`, `db:`.
 
 ## Plugin Lifecycle
 
-```
-app.use(plugin)           → plugin stored
-app.run()                 → plugin.initialize(ctx) called
-  ... app running ...
-    native window closed
-App::run() orderly shutdown → plugin.shutdown() called while the service thread is still alive
+```mermaid
+flowchart LR
+  A["<b>app.use(plugin)</b><br/>stored"]
+  B["<b>initialize(ctx)</b><br/>inside app.run()<br/>register commands, routes"]
+  C["<b>Running</b><br/>handlers on the service thread<br/>BackgroundTasks, run_blocking"]
+  D["<b>shutdown()</b><br/>UI thread, service still running<br/>stop tasks · close pools · lock shared state"]
+  E["<b>Service stops</b><br/>then windows close<br/>plugin destroyed"]
+  A --> B --> C -- "last window closes" --> D --> E
+  class A,B,C core
+  class D warn
+  class E base
+
+  classDef ui fill:#eef2ff,stroke:#6366f1,color:#1e1b4b
+  classDef bridge fill:#f5f3ff,stroke:#8b5cf6,color:#2e1065
+  classDef native fill:#e0f2fe,stroke:#0284c7,color:#082f49
+  classDef core fill:#ccfbf1,stroke:#0d9488,color:#042f2e
+  classDef data fill:#fef3c7,stroke:#d97706,color:#451a03
+  classDef base fill:#f1f5f9,stroke:#64748b,color:#0f172a
+  classDef work fill:#ecfccb,stroke:#65a30d,color:#1a2e05
+  classDef warn fill:#ffe4e6,stroke:#e11d48,color:#4c0519
 ```
 
 For simple plugins, `shutdown()` can stay empty. For anything that owns background fibres, streams, pools, sockets, or temp resources, treat it as required:
@@ -223,7 +237,8 @@ void shutdown() override {
 ```
 
 Shutdown checklist:
-- Stop long-lived `service_->execute()` loops in `shutdown()`.
+- `shutdown()` runs on the **main thread** while command handlers may still run on the service thread: lock any state the two share.
+- Run long-lived loops as `anyar::BackgroundTask` and stop them in `shutdown()` (`stop()` requests and joins). A raw `service_->execute()` loop cannot be joined.
 - Unblock waiting loops with a close/cancel path.
 - Do not call `service_->stop()` from plugin code or window-close handlers.
 - Verify by closing the native window while background work is active.
