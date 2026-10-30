@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="960" height="612" viewBox="0 0 960 612" role="img" aria-labelledby="title desc">
 <title id="title">LibAnyar architecture</title>
-<desc id="desc">A web frontend runs in the OS webview and talks to a C++17 core over three channels: native IPC, events, and zero-copy binary data. The core runs on LibAsyik.</desc>
+<desc id="desc">Four layers, top to bottom. 1) Your web frontend (Svelte, React, Vue or vanilla, any Vite app) calls the @libanyar/api package. 2) It runs in the OS webview, native and not bundled: WebKitGTK on Linux, WebView2 on Windows, WKWebView on macOS (planned). 3) The webview talks to the core over three channels, each two-way: Native IPC (invoke() calls a C++ command in-process, about 0.01 ms, no HTTP); Events (emit and listen, pushed to one window or all); Binary and video (SharedBuffer and Pinhole, zero-copy, no JSON or base64). 4) The LibAnyar core, C++17, runs one service thread of fibers plus a worker pool, and provides commands, plugins, the event bus, multi-window, SharedBuffer, Pinhole, run_blocking and debug tools. It is built on LibAsyik: Boost fibers, HTTP and WebSocket, SQL via SOCI, MIT licensed.</desc>
 <defs>
 <linearGradient id="fe" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#4f46e5"/><stop offset="1" stop-color="#7c3aed"/></linearGradient>
 <linearGradient id="core" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#0f766e"/><stop offset="1" stop-color="#0d9488"/></linearGradient>
@@ -10,12 +10,15 @@
 <filter id="shadow" x="-10%" y="-10%" width="120%" height="140%"><feDropShadow dx="0" dy="4" stdDeviation="8" flood-color="#0f172a" flood-opacity="0.10"/></filter>
 <marker id="arr" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M0 0 10 5 0 10z" fill="#94a3b8"/></marker>
 </defs>
+<g id="frontend" data-links="webview">
 <rect x="24" y="24" width="912" height="92" rx="18" fill="url(#fe)" filter="url(#shadow)"/>
 <g transform="translate(52,50)"><rect width="40" height="40" rx="10" fill="rgba(255,255,255,0.18)"/><rect x="9" y="11" width="22" height="18" rx="3" fill="none" stroke="#fff" stroke-width="2"/><path d="M9 16h22" stroke="#fff" stroke-width="2"/></g>
 <text x="108" y="66" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="22" font-weight="700" fill="#fff" text-anchor="start">Your web frontend</text>
 <text x="108" y="90" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="14" font-weight="400" fill="rgba(255,255,255,0.85)" text-anchor="start">Svelte · React · Vue · vanilla — any Vite app, hot reload in dev</text>
 <rect x="771" y="53" width="137" height="34" rx="17" fill="rgba(255,255,255,0.18)" stroke="rgba(255,255,255,0.35)"/>
 <text x="839.5" y="75" font-family="ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace" font-size="14" font-weight="600" fill="#fff" text-anchor="middle">@libanyar/api</text>
+</g>
+<g id="webview" data-links="frontend ipc events binary">
 <rect x="24" y="132" width="912" height="52" rx="14" fill="#f8fafc" stroke="#e2e8f0"/>
 <text x="48" y="163" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="15" font-weight="700" fill="#0f172a" text-anchor="start">OS webview</text>
 <text x="142" y="163" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="13" font-weight="400" fill="#475569" text-anchor="start">native, not bundled</text>
@@ -28,6 +31,8 @@
 <rect x="346" y="144" width="164" height="28" rx="14" fill="#f1f5f9" stroke="#e2e8f0"/>
 <circle cx="362" cy="158" r="4" fill="#22c55e"/>
 <text x="373" y="163" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="13"><tspan font-weight="600" fill="#0f172a">Linux</tspan><tspan fill="#475569"> · WebKitGTK</tspan></text>
+</g>
+<g id="ipc" data-links="webview core">
 <line x1="168.0" y1="188" x2="168.0" y2="210" stroke="#94a3b8" stroke-width="2" marker-start="url(#arr)" marker-end="url(#arr)"/>
 <line x1="168.0" y1="350" x2="168.0" y2="378" stroke="#94a3b8" stroke-width="2" marker-start="url(#arr)" marker-end="url(#arr)"/>
 <rect x="24.0" y="214" width="288.0" height="132" rx="16" fill="#ffffff" stroke="#e2e8f0" filter="url(#shadow)"/>
@@ -39,6 +44,8 @@
 <text x="102.0" y="278" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="20" font-weight="800" fill="#4f46e5" text-anchor="start">~0.01 ms</text>
 <text x="44.0" y="312" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="13" font-weight="500" fill="#0f172a" text-anchor="start">invoke() → C++ command</text>
 <text x="44.0" y="331" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="13" font-weight="400" fill="#475569" text-anchor="start">in-process, no HTTP</text>
+</g>
+<g id="events" data-links="webview core">
 <line x1="480.0" y1="188" x2="480.0" y2="210" stroke="#94a3b8" stroke-width="2" marker-start="url(#arr)" marker-end="url(#arr)"/>
 <line x1="480.0" y1="350" x2="480.0" y2="378" stroke="#94a3b8" stroke-width="2" marker-start="url(#arr)" marker-end="url(#arr)"/>
 <rect x="336.0" y="214" width="288.0" height="132" rx="16" fill="#ffffff" stroke="#e2e8f0" filter="url(#shadow)"/>
@@ -50,6 +57,8 @@
 <text x="414.0" y="278" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="20" font-weight="800" fill="#0284c7" text-anchor="start">any window</text>
 <text x="356.0" y="312" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="13" font-weight="500" fill="#0f172a" text-anchor="start">emit · listen</text>
 <text x="356.0" y="331" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="13" font-weight="400" fill="#475569" text-anchor="start">push to one window or all</text>
+</g>
+<g id="binary" data-links="webview core">
 <line x1="792.0" y1="188" x2="792.0" y2="210" stroke="#94a3b8" stroke-width="2" marker-start="url(#arr)" marker-end="url(#arr)"/>
 <line x1="792.0" y1="350" x2="792.0" y2="378" stroke="#94a3b8" stroke-width="2" marker-start="url(#arr)" marker-end="url(#arr)"/>
 <rect x="648.0" y="214" width="288.0" height="132" rx="16" fill="#ffffff" stroke="#e2e8f0" filter="url(#shadow)"/>
@@ -61,6 +70,8 @@
 <text x="726.0" y="278" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="20" font-weight="800" fill="#d97706" text-anchor="start">zero-copy</text>
 <text x="668.0" y="312" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="13" font-weight="500" fill="#0f172a" text-anchor="start">SharedBuffer · Pinhole</text>
 <text x="668.0" y="331" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="13" font-weight="400" fill="#475569" text-anchor="start">no JSON, no base64</text>
+</g>
+<g id="core" data-links="ipc events binary libasyik">
 <rect x="24" y="382" width="912" height="134" rx="18" fill="url(#core)" filter="url(#shadow)"/>
 <g transform="translate(52,408)"><rect width="40" height="40" rx="10" fill="rgba(255,255,255,0.16)"/><path d="M14 13 8 20l6 7M26 13l6 7-6 7" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></g>
 <text x="108" y="426" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="22" font-weight="700" fill="#fff" text-anchor="start">LibAnyar core</text>
@@ -82,6 +93,8 @@
 <text x="732.8" y="488" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="12.5" font-weight="600" fill="#fff" text-anchor="middle">run_blocking</text>
 <rect x="801.3" y="468" width="106.7" height="30" rx="15" fill="rgba(255,255,255,0.16)" stroke="rgba(255,255,255,0.22)"/>
 <text x="854.6" y="488" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="12.5" font-weight="600" fill="#fff" text-anchor="middle">Debug tools</text>
+</g>
+<g id="libasyik" data-links="core">
 <rect x="24" y="532" width="912" height="56" rx="14" fill="#f1f5f9" stroke="#e2e8f0"/>
 <text x="48" y="566" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="15" font-weight="700" fill="#0f172a" text-anchor="start">LibAsyik</text>
 <text x="124" y="566" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="13" font-weight="400" fill="#475569" text-anchor="start">foundation</text>
@@ -93,4 +106,5 @@
 <text x="594.0" y="565" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="13" font-weight="500" fill="#334155" text-anchor="middle">HTTP · WebSocket</text>
 <rect x="397" y="546" width="115" height="28" rx="14" fill="#f1f5f9" stroke="#e2e8f0"/>
 <text x="454.5" y="565" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="13" font-weight="500" fill="#334155" text-anchor="middle">Boost fibers</text>
+</g>
 </svg>

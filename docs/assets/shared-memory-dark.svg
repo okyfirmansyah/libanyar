@@ -1,0 +1,80 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="276" viewBox="0 0 960 276" role="img" aria-labelledby="title desc">
+<title id="title">LibAnyar shared-memory streaming</title>
+<desc id="desc">Zero-copy frame streaming. A C++ producer (decoder, camera, sensor) calls acquire_write() on a SharedBufferPool, a lock-free ring of N shared-memory slots whose states are FREE, WRITING and READY, and writes pixels in place (step 1). It then emits buffer:ready (step 2); the page's WebGL canvas, made with createBufferRenderer(), reads the slot (Linux: anyar-shm:// URI, Windows: WebView2 shared buffer) and draws RGBA, YUV420 or NV12 without JSON or base64. When drawn, the page releases the slot back to FREE (step 3).</desc>
+<defs>
+<linearGradient id="g-producer" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#0f766e"/><stop offset="1" stop-color="#0d9488"/></linearGradient>
+<linearGradient id="g-pool" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#f59e0b"/><stop offset="1" stop-color="#f97316"/></linearGradient>
+<linearGradient id="g-canvas" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#4f46e5"/><stop offset="1" stop-color="#7c3aed"/></linearGradient>
+<filter id="shadow" x="-10%" y="-10%" width="120%" height="140%"><feDropShadow dx="0" dy="4" stdDeviation="8" flood-color="#0f172a" flood-opacity="0.45"/></filter>
+<marker id="arr" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse"><path d="M0 0 10 5 0 10z" fill="#6e7681"/></marker>
+</defs>
+<g id="producer" data-links="pool">
+<rect x="24" y="24" width="224" height="176" rx="16" fill="#161b22" stroke="#30363d" filter="url(#shadow)"/>
+<clipPath id="clip-producer"><rect x="24" y="24" width="224" height="176" rx="16"/></clipPath>
+<rect x="24" y="24" width="224" height="5" fill="url(#g-producer)" clip-path="url(#clip-producer)"/>
+<rect x="44" y="48" width="44" height="44" rx="12" fill="url(#g-producer)"/>
+<g transform="translate(54,58)" fill="none" stroke="#fff" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"><rect x="6" y="6" width="12" height="12" rx="2"/><path d="M9 2v4M15 2v4M9 18v4M15 18v4M2 9h4M2 15h4M18 9h4M18 15h4"/></g>
+<text x="102" y="66" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="16" font-weight="700" fill="#e6edf3" text-anchor="start">C++ producer</text>
+<text x="102" y="86" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="12.5" font-weight="400" fill="#9da7b3" text-anchor="start">decoder · camera</text>
+<rect x="44" y="118" width="132" height="30" rx="8" fill="#21262d" stroke="#30363d"/>
+<text x="56" y="137.5" font-family="ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace" font-size="12" font-weight="600" fill="#e6edf3" text-anchor="start">acquire_write()</text>
+<text x="44" y="174" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="13" font-weight="400" fill="#9da7b3" text-anchor="start">writes pixels in place</text>
+</g>
+<g id="canvas" data-links="pool">
+<rect x="712" y="24" width="224" height="176" rx="16" fill="#161b22" stroke="#30363d" filter="url(#shadow)"/>
+<clipPath id="clip-canvas"><rect x="712" y="24" width="224" height="176" rx="16"/></clipPath>
+<rect x="712" y="24" width="224" height="5" fill="url(#g-canvas)" clip-path="url(#clip-canvas)"/>
+<rect x="732" y="48" width="44" height="44" rx="12" fill="url(#g-canvas)"/>
+<g transform="translate(742,58)" fill="none" stroke="#fff" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"><rect x="2" y="4" width="20" height="13" rx="2"/><path d="M8 21h8M12 17v4"/></g>
+<text x="790" y="66" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="16" font-weight="700" fill="#e6edf3" text-anchor="start">WebGL canvas</text>
+<text x="790" y="86" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="12.5" font-weight="400" fill="#9da7b3" text-anchor="start">RGBA · YUV · NV12</text>
+<rect x="732" y="118" width="182" height="30" rx="8" fill="#21262d" stroke="#30363d"/>
+<text x="744" y="137.5" font-family="ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace" font-size="12" font-weight="600" fill="#e6edf3" text-anchor="start">createBufferRenderer()</text>
+<text x="732" y="174" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="13" font-weight="400" fill="#9da7b3" text-anchor="start">no JSON, no base64</text>
+</g>
+<g id="pool" data-links="canvas producer">
+<rect x="296" y="24" width="368" height="176" rx="16" fill="#161b22" stroke="#30363d" filter="url(#shadow)"/>
+<clipPath id="clip-pool"><rect x="296" y="24" width="368" height="176" rx="16"/></clipPath>
+<rect x="296" y="24" width="368" height="5" fill="url(#g-pool)" clip-path="url(#clip-pool)"/>
+<rect x="316" y="48" width="44" height="44" rx="12" fill="url(#g-pool)"/>
+<g transform="translate(326,58)" fill="none" stroke="#fff" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"><rect x="3" y="4" width="18" height="6" rx="2"/><rect x="3" y="14" width="18" height="6" rx="2"/></g>
+<text x="374" y="66" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="16" font-weight="700" fill="#e6edf3" text-anchor="start">SharedBufferPool</text>
+<text x="374" y="86" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="12.5" font-weight="400" fill="#9da7b3" text-anchor="start">ring of N slots · lock-free</text>
+<rect x="316.0" y="110" width="76" height="42" rx="9" fill="#6366f1" stroke="none"/>
+<text x="354.0" y="128" font-family="ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace" font-size="11.5" font-weight="700" fill="#fff" text-anchor="middle">READY</text>
+<text x="354.0" y="144" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="11" font-weight="500" fill="rgba(255,255,255,0.85)" text-anchor="middle">on screen</text>
+<rect x="400.0" y="110" width="76" height="42" rx="9" fill="#f59e0b" stroke="none"/>
+<text x="438.0" y="128" font-family="ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace" font-size="11.5" font-weight="700" fill="#fff" text-anchor="middle">WRITING</text>
+<text x="438.0" y="144" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="11" font-weight="500" fill="rgba(255,255,255,0.85)" text-anchor="middle">filling</text>
+<rect x="484.0" y="110" width="76" height="42" rx="9" fill="#21262d" stroke="#30363d" stroke-dasharray="4 3"/>
+<text x="522.0" y="135" font-family="ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace" font-size="11.5" font-weight="700" fill="#9da7b3" text-anchor="middle">FREE</text>
+<rect x="568.0" y="110" width="76" height="42" rx="9" fill="#21262d" stroke="#30363d" stroke-dasharray="4 3"/>
+<text x="606.0" y="135" font-family="ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace" font-size="11.5" font-weight="700" fill="#9da7b3" text-anchor="middle">FREE</text>
+<rect x="316" y="164" width="162" height="24" rx="12" fill="#21262d" stroke="#30363d"/>
+<circle cx="329" cy="176" r="3.5" fill="#22c55e"/>
+<text x="338" y="180.5" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="11.5"><tspan font-weight="600" fill="#e6edf3">Linux</tspan><tspan fill="#9da7b3"> · anyar-shm://</tspan></text>
+<rect x="488" y="164" width="149" height="24" rx="12" fill="#21262d" stroke="#30363d"/>
+<circle cx="501" cy="176" r="3.5" fill="#22c55e"/>
+<text x="510" y="180.5" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="11.5"><tspan font-weight="600" fill="#e6edf3">Windows</tspan><tspan fill="#9da7b3"> · WebView2</tspan></text>
+</g>
+<g id="step1" data-from="producer" data-to="pool">
+<line x1="252" y1="112.0" x2="292" y2="112.0" stroke="#6e7681" stroke-width="2" marker-end="url(#arr)"/>
+<circle cx="272.0" cy="90.0" r="11" fill="#e6edf3"/><text x="272.0" y="94.5" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="12.5" font-weight="800" fill="#161b22" text-anchor="middle">1</text>
+</g>
+<g id="step2" data-from="pool" data-to="canvas">
+<line x1="668" y1="112.0" x2="708" y2="112.0" stroke="#6e7681" stroke-width="2" marker-end="url(#arr)"/>
+<circle cx="688.0" cy="90.0" r="11" fill="#e6edf3"/><text x="688.0" y="94.5" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="12.5" font-weight="800" fill="#161b22" text-anchor="middle">2</text>
+</g>
+<g id="step3" data-from="canvas" data-to="pool">
+<path d="M824.0 204 V234 Q824.0 246 812.0 246 H584.0 Q572.0 246 572.0 234 V210" fill="none" stroke="#6e7681" stroke-width="2" stroke-dasharray="6 5" marker-end="url(#arr)"/>
+<rect x="628" y="233" width="141" height="26" rx="13" fill="#0d1117" stroke="#30363d"/>
+<circle cx="641.7" cy="246" r="11" fill="#e6edf3"/><text x="641.7" y="250.5" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="12.5" font-weight="800" fill="#161b22" text-anchor="middle">3</text>
+<text x="657.7" y="250.5" font-family="ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace" font-size="11.5" font-weight="600" fill="#9da7b3" text-anchor="start">release → FREE</text>
+</g>
+<rect x="24" y="233" width="189" height="26" rx="13" fill="#0d1117" stroke="#30363d"/>
+<circle cx="38" cy="246" r="11" fill="#e6edf3"/><text x="38" y="250.5" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="12.5" font-weight="800" fill="#161b22" text-anchor="middle">1</text>
+<text x="54" y="250.5" font-family="ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace" font-size="11.5" font-weight="600" fill="#9da7b3" text-anchor="start">write pixels in place</text>
+<rect x="223" y="233" width="161" height="26" rx="13" fill="#0d1117" stroke="#30363d"/>
+<circle cx="236.9" cy="246" r="11" fill="#e6edf3"/><text x="236.9" y="250.5" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" font-size="12.5" font-weight="800" fill="#161b22" text-anchor="middle">2</text>
+<text x="252.9" y="250.5" font-family="ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace" font-size="11.5" font-weight="600" fill="#9da7b3" text-anchor="start">emit buffer:ready</text>
+</svg>

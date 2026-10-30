@@ -76,6 +76,25 @@ Anatomy data: BodyParts3D, © The Database Center for Life Science licensed unde
 
 The frontend and the C++ backend share one process. Commands, events and binary data each have their own channel, so a 4K frame never goes through JSON. Command handlers run as fibers on one service thread; blocking work goes to a worker pool with `anyar::run_blocking`. See [ARCHITECTURE.md](ARCHITECTURE.md) for the component map and threading model.
 
+<details>
+<summary>Diagram as text</summary>
+
+<!-- Source of truth for the picture above: docs/assets/src/architecture.py. Keep the two in step. -->
+
+```mermaid
+flowchart TB
+  FE["Web frontend<br/>Svelte · React · Vue · vanilla"] -- "@libanyar/api" --> WV["OS webview<br/>WebKitGTK (Linux) · WebView2 (Windows) · WKWebView (macOS, planned)"]
+  WV <--> IPC["Native IPC<br/>invoke() → C++ command, ~0.01 ms"]
+  WV <--> EVT["Events<br/>emit · listen, one window or all"]
+  WV <--> BIN["Binary & video<br/>SharedBuffer · Pinhole, zero-copy"]
+  IPC <--> CORE["LibAnyar core (C++17)<br/>commands · plugins · event bus · multi-window<br/>SharedBuffer · Pinhole · run_blocking · debug tools"]
+  EVT <--> CORE
+  BIN <--> CORE
+  CORE --> ASY["LibAsyik<br/>Boost fibers · HTTP/WebSocket · SQL via SOCI"]
+```
+
+</details>
+
 ## Quick Start
 
 > [!TIP]
@@ -192,32 +211,33 @@ See the [Pinhole Native Overlay Rendering Guide](docs/pinhole-rendering.md) for 
 
 LibAnyar provides **zero-copy binary data transfer** between C++ and the webview frontend — ideal for video frames, LiDAR point clouds, image processing, or any large binary payload.
 
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/shared-memory-dark.svg">
+    <img src="docs/assets/shared-memory-light.svg" alt="Shared-memory streaming: a C++ producer writes pixels into a free slot of a SharedBufferPool, emits buffer:ready, the WebGL canvas reads the slot (anyar-shm:// on Linux, WebView2 shared buffer on Windows) and releases it back to FREE" width="860">
+  </picture>
+</p>
+
+<details>
+<summary>Diagram as text</summary>
+
+<!-- Source of truth for the picture above: docs/assets/src/shared_memory.py. Keep the two in step. -->
+
 ```mermaid
 flowchart LR
-  subgraph CPP["C++ Backend"]
-    A["Capture / Generate\n(FFmpeg, sensor, etc.)"] --> B["SharedBuffer\nmmap'd memory"]
-  end
-
-  subgraph IPC["Zero-copy IPC"]
-    B -- "anyar-shm:// URI" --> C["OS WebView\nfetch()"]
-  end
-
-  subgraph JS["JS Frontend"]
-    C --> D["WebGL Renderer\n(RGBA/YUV420/NV12...)"]
-    D --> E["Canvas\n🖥️"]
-  end
-
-  style CPP fill:#0891b2,color:#fff
-  style IPC fill:#7c3aed,color:#fff
-  style JS fill:#4f46e5,color:#fff
+  P["C++ producer<br/>acquire_write()"] -- "1 · write pixels in place" --> POOL["SharedBufferPool<br/>ring of N slots: FREE → WRITING → READY"]
+  POOL -- "2 · emit buffer:ready" --> C["WebGL canvas<br/>createBufferRenderer()<br/>Linux: anyar-shm:// · Windows: WebView2 shared buffer"]
+  C -. "3 · release → FREE" .-> POOL
 ```
+
+</details>
 
 | Feature | Description |
 |---|---|
-| `@libanyar/api/buffer` | Shared memory buffers with `anyar-shm://` custom URI scheme |
+| `@libanyar/api/buffer` | Shared memory buffers: `anyar-shm://` URI on Linux, WebView2 shared buffers on Windows |
 | `@libanyar/api/canvas` | WebGL frame renderer (RGBA, RGB, BGRA, Grayscale, YUV420, NV12, NV21) |
 | `SharedBufferPool` | Lock-free ring buffer pool for streaming (e.g. 30fps video) |
-| Zero-copy | C++ writes to mmap'd memory → JS reads via `fetch()` — no serialization |
+| Zero-copy | C++ writes straight into shared memory → JS reads it with `fetchBuffer()`, no serialization |
 
 ```cpp
 // C++ — write pixels into shared memory

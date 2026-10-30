@@ -43,3 +43,4 @@ docs/api/
 
 # skill-creator eval runs
 skills/*-workspace/
+__pycache__/

@@ -36,12 +36,20 @@ THEMES = {
 
 # Channel accents: same in both themes.
 CHANNELS = [
-    dict(title="Native IPC", metric="~0.01 ms", sub="invoke() → C++ command", sub2="in-process, no HTTP", a="#6366f1", b="#8b5cf6", icon="bolt"),
-    dict(title="Events", metric="any window", sub="emit · listen", sub2="push to one window or all", a="#0ea5e9", b="#6366f1", icon="broadcast"),
-    dict(title="Binary & video", metric="zero-copy", sub="SharedBuffer · Pinhole", sub2="no JSON, no base64", a="#f59e0b", b="#f97316", icon="layers"),
+    dict(id="ipc", title="Native IPC", metric="~0.01 ms", sub="invoke() → C++ command", sub2="in-process, no HTTP", a="#6366f1", b="#8b5cf6", icon="bolt"),
+    dict(id="events", title="Events", metric="any window", sub="emit · listen", sub2="push to one window or all", a="#0ea5e9", b="#6366f1", icon="broadcast"),
+    dict(id="binary", title="Binary & video", metric="zero-copy", sub="SharedBuffer · Pinhole", sub2="no JSON, no base64", a="#f59e0b", b="#f97316", icon="layers"),
 ]
 CORE_CHIPS = ["Commands", "Plugins", "Event bus", "Multi-window",
               "SharedBuffer", "Pinhole", "run_blocking", "Debug tools"]
+DESC = ("Four layers, top to bottom. 1) Your web frontend (Svelte, React, Vue or vanilla, any Vite app) "
+        "calls the @libanyar/api package. 2) It runs in the OS webview, native and not bundled: WebKitGTK on Linux, "
+        "WebView2 on Windows, WKWebView on macOS (planned). 3) The webview talks to the core over three channels, "
+        "each two-way: Native IPC (invoke() calls a C++ command in-process, about 0.01 ms, no HTTP); Events (emit and "
+        "listen, pushed to one window or all); Binary and video (SharedBuffer and Pinhole, zero-copy, no JSON or "
+        "base64). 4) The LibAnyar core, C++17, runs one service thread of fibers plus a worker pool, and provides "
+        "commands, plugins, the event bus, multi-window, SharedBuffer, Pinhole, run_blocking and debug tools. "
+        "It is built on LibAsyik: Boost fibers, HTTP and WebSocket, SQL via SOCI, MIT licensed.")
 WEBVIEWS = [("Linux", "WebKitGTK", True), ("Windows", "WebView2", True), ("macOS", "WKWebView · soon", False)]
 
 
@@ -80,8 +88,7 @@ def build(t):
     o.append(f'<svg xmlns="http://www.w3.org/2000/svg" width="{W}" height="{H}" viewBox="0 0 {W} {H}" '
              f'role="img" aria-labelledby="title desc">')
     o.append('<title id="title">LibAnyar architecture</title>')
-    o.append('<desc id="desc">A web frontend runs in the OS webview and talks to a C++17 core over three '
-             'channels: native IPC, events, and zero-copy binary data. The core runs on LibAsyik.</desc>')
+    o.append(f'<desc id="desc">{esc(DESC)}</desc>')
     o.append('<defs>')
     o.append(f'<linearGradient id="fe" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#4f46e5"/>'
              f'<stop offset="1" stop-color="#7c3aed"/></linearGradient>')
@@ -100,6 +107,7 @@ def build(t):
 
     # ── 1. Frontend ───────────────────────────────────────────────────────────
     y = 24
+    o.append('<g id="frontend" data-links="webview">')
     o.append(f'<rect x="{X}" y="{y}" width="{CW}" height="92" rx="18" fill="url(#fe)" filter="url(#shadow)"/>')
     # window glyph
     o.append(f'<g transform="translate({X+28},{y+26})"><rect width="40" height="40" rx="10" fill="rgba(255,255,255,0.18)"/>'
@@ -113,8 +121,11 @@ def build(t):
              f'stroke="rgba(255,255,255,0.35)"/>')
     o.append(text(X + CW - 28 - aw / 2, y + 51, api, 14, "#fff", 600, "middle", MONO))
 
+    o.append('</g>')
+
     # ── 2. OS webview band ────────────────────────────────────────────────────
     y = 132
+    o.append('<g id="webview" data-links="frontend ' + " ".join(c["id"] for c in CHANNELS) + '">')
     o.append(f'<rect x="{X}" y="{y}" width="{CW}" height="52" rx="14" fill="{t["band"]}" stroke="{t["panel_border"]}"/>')
     o.append(text(X + 24, y + 31, "OS webview", 15, t["text"], 700))
     o.append(text(X + 118, y + 31, "native, not bundled", 13, t["muted"]))
@@ -131,6 +142,7 @@ def build(t):
                  f'<tspan font-weight="600" fill="{t["chip_text"] if ok else t["muted"]}">{esc(os_name)}</tspan>'
                  f'<tspan fill="{t["muted"]}"> · {esc(engine)}</tspan></text>')
         bx -= 10
+    o.append('</g>')
 
     # ── 3. Channels ───────────────────────────────────────────────────────────
     y = 214
@@ -139,6 +151,7 @@ def build(t):
     for i, c in enumerate(CHANNELS):
         cx = X + i * (cw + gap)
         mid = cx + cw / 2
+        o.append(f'<g id="{c["id"]}" data-links="webview core">')
         # connectors: webview band ↔ channel ↔ core
         o.append(f'<line x1="{mid}" y1="188" x2="{mid}" y2="{y-4}" stroke="{t["arrow"]}" stroke-width="2" '
                  f'marker-start="url(#arr)" marker-end="url(#arr)"/>')
@@ -154,9 +167,11 @@ def build(t):
         o.append(text(cx + 78, y + 64, c["metric"], 20, t["metrics"][i], 800))
         o.append(text(cx + 20, y + 98, c["sub"], 13, t["text"], 500))
         o.append(text(cx + 20, y + 117, c["sub2"], 13, t["muted"]))
+        o.append('</g>')
 
     # ── 4. Core ───────────────────────────────────────────────────────────────
     y = 382
+    o.append('<g id="core" data-links="' + " ".join(c["id"] for c in CHANNELS) + ' libasyik">')
     o.append(f'<rect x="{X}" y="{y}" width="{CW}" height="134" rx="18" fill="url(#core)" filter="url(#shadow)"/>')
     o.append(f'<g transform="translate({X+28},{y+26})"><rect width="40" height="40" rx="10" fill="rgba(255,255,255,0.16)"/>'
              f'<path d="M14 13 8 20l6 7M26 13l6 7-6 7" fill="none" stroke="#fff" stroke-width="2.4" '
@@ -175,9 +190,11 @@ def build(t):
                  f'stroke="rgba(255,255,255,0.22)"/>')
         o.append(text(round(cx + w / 2, 1), row_y + 20, lbl, 12.5, "#fff", 600, "middle"))
         cx += w + gapc
+    o.append('</g>')
 
     # ── 5. Foundation ─────────────────────────────────────────────────────────
     y = 532
+    o.append('<g id="libasyik" data-links="core">')
     o.append(f'<rect x="{X}" y="{y}" width="{CW}" height="56" rx="14" fill="{t["base"]}" stroke="{t["base_border"]}"/>')
     o.append(text(X + 24, y + 34, "LibAsyik", 15, t["text"], 700))
     o.append(text(X + 100, y + 34, "foundation", 13, t["muted"]))
@@ -189,6 +206,7 @@ def build(t):
         o.append(f'<rect x="{ix}" y="{y+14}" width="{w}" height="28" rx="14" fill="{t["chip"]}" stroke="{t["chip_border"]}"/>')
         o.append(text(ix + w / 2, y + 33, lbl, 13, t["base_text"], 500, "middle"))
         ix -= 10
+    o.append('</g>')
 
     o.append('</svg>')
     return "\n".join(o) + "\n"
