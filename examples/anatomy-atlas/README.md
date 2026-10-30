@@ -6,7 +6,7 @@ A whole-body 3D anatomy explorer: 2,234 FMA-labelled structures from [BodyParts3
 >
 > Anatomy data: **BodyParts3D, © The Database Center for Life Science licensed under CC Attribution 4.0 International** — see [assets/bodyparts3d/README.md](assets/bodyparts3d/README.md). The data is not covered by LibAnyar's MIT licence.
 
-![Anatomy Atlas](../../docs/assets/anatomy_atlas.jpg)
+![Anatomy Atlas](../../docs/assets/anatomy-atlas.gif)
 
 ## What it demonstrates
 
@@ -83,7 +83,7 @@ The atlas is the showcase for LibAnyar's [debugging tools](../../docs/debugging.
 
 ```bash
 ANYAR_CONSOLE=1 ./run.sh build/examples/anatomy-atlas/anatomy_atlas          # page console in the terminal
-xvfb-run -a env ANYAR_TEST_SCRIPT=examples/anatomy-atlas/test/smoke.js ANYAR_TEST_TIMEOUT=120 \
+xvfb-run -a env GDK_BACKEND=x11 ANYAR_TEST_SCRIPT=examples/anatomy-atlas/test/smoke.js ANYAR_TEST_TIMEOUT=120 \
     ./build/examples/anatomy-atlas/anatomy_atlas; echo "exit $?"            # scripted UI test in the real webview
 ```
 
@@ -94,6 +94,12 @@ xvfb-run -a env ANYAR_TEST_SCRIPT=examples/anatomy-atlas/test/smoke.js ANYAR_TES
 4. exits with code 0.
 
 On platforms without synthetic input yet, it falls back to DOM events.
+
+The README animation is recorded the same way. `test/demo.js` is a scripted tour: it orbits, shows and X-rays the muscles, zooms to the thorax, searches for the heart, and sweeps a cross-section. `tools/record_demo.sh` runs that tour on a private Xvfb display, records it with ffmpeg and encodes the GIF (Linux; needs `Xvfb` and `ffmpeg`):
+
+```bash
+examples/anatomy-atlas/tools/record_demo.sh            # → docs/assets/anatomy-atlas.gif (672×420, ~20 s)
+```
 
 ## Performance (2026-10-21, see `benchmarks/README.md`)
 

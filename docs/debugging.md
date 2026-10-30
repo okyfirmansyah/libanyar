@@ -145,8 +145,10 @@ If the script never calls `done()`, the app keeps running, which is useful when 
 **In CI (Linux).** Run the app under Xvfb. WebGL then uses software rendering, which is slower but works:
 
 ```bash
-xvfb-run -a env ANYAR_TEST_SCRIPT=tests/smoke.js ANYAR_TEST_TIMEOUT=120 ./build/my_app
+xvfb-run -a env GDK_BACKEND=x11 ANYAR_TEST_SCRIPT=tests/smoke.js ANYAR_TEST_TIMEOUT=120 ./build/my_app
 ```
+
+Keep `GDK_BACKEND=x11`. On a Wayland desktop, GTK otherwise ignores the Xvfb display and opens the window on your real screen (it falls back to the default `wayland-0` socket even if `WAYLAND_DISPLAY` is unset). Screenshots still work then, because they come from the webview, but a screen recorder grabbing Xvfb sees only black. On a CI machine without Wayland it makes no difference.
 
 LibAnyar's own `tests/debug_tools` test (label `display`) does exactly this. It checks the exit code, the forwarded console output, real clicks and typing, and that the screenshot is a valid PNG.
 
@@ -180,7 +182,7 @@ const d = Math.round(Math.random() * 2500); console.log('DELAY', d);
 await anyarTest.sleep(d); await anyarTest.done(1);
 EOF
 for i in $(seq 30); do
-  xvfb-run -a env ANYAR_TEST_SCRIPT=rand_exit.js ./my_app >run_$i.log 2>&1
+  xvfb-run -a env GDK_BACKEND=x11 ANYAR_TEST_SCRIPT=rand_exit.js ./my_app >run_$i.log 2>&1
   echo $?                      # 1 = clean, 134/139 = crash
 done | sort | uniq -c
 ```

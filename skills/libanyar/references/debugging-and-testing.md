@@ -51,7 +51,7 @@ await anyarTest.done(0);                                     // exit code
 ```
 
 ```bash
-xvfb-run -a env ANYAR_TEST_SCRIPT=tests/smoke.js ANYAR_TEST_TIMEOUT=120 ./build/my_app; echo $?
+xvfb-run -a env GDK_BACKEND=x11 ANYAR_TEST_SCRIPT=tests/smoke.js ANYAR_TEST_TIMEOUT=120 ./build/my_app; echo $?
 ```
 
 `anyarTest` API:
@@ -84,7 +84,7 @@ cat > rand_exit.js <<'EOF'
 const d = Math.round(Math.random() * 2500); console.log('DELAY', d);
 await anyarTest.sleep(d); await anyarTest.done(1);
 EOF
-for i in $(seq 30); do xvfb-run -a env ANYAR_TEST_SCRIPT=rand_exit.js ./my_app >/dev/null 2>&1; echo $?; done | sort | uniq -c
+for i in $(seq 30); do xvfb-run -a env GDK_BACKEND=x11 ANYAR_TEST_SCRIPT=rand_exit.js ./my_app >/dev/null 2>&1; echo $?; done | sort | uniq -c
 # 30 × "1" = clean; 134/139 = crash
 ```
 

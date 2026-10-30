@@ -42,4 +42,5 @@ fetched by -DANYAR_FETCH_ANATOMY=ON)
   Licence page checked 2026-10-21: https://dbarchive.biosciencedbc.jp/en/bodyparts3d/lic.html
   Changes: converted from OBJ, re-framed, simplified and quantised by
   examples/anatomy-atlas/tools/build_atlas_pack.py (see the asset MANIFEST.json).
-  docs/assets/anatomy_atlas.jpg is a rendering of this data (same licence and attribution).
+  docs/assets/anatomy_atlas.jpg and docs/assets/anatomy-atlas.gif are renderings of this data
+  (same licence and attribution).

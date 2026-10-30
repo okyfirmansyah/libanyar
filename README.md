@@ -58,7 +58,7 @@ Building desktop apps shouldn't force a choice between powerful native performan
 <tr>
 <td colspan="2" align="center">
 <h3>Anatomy Atlas</h3>
-<img src="docs/assets/anatomy_atlas.jpg" alt="Anatomy Atlas" height="320" /><br/>
+<img src="docs/assets/anatomy-atlas.gif" alt="Anatomy Atlas" height="320" /><br/>
 <sub>Whole-body 3D anatomy: 2,234 parts streamed from C++ to WebGL through SharedBuffers, with levels of detail, GPU picking, search, X-ray and cross-sections.<br/>
 Anatomy data: BodyParts3D, © The Database Center for Life Science licensed under CC Attribution 4.0 International. For education only — not a medical device.</sub>
 </td>

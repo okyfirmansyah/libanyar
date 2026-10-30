@@ -1,6 +1,6 @@
 // Anatomy Atlas smoke test — runs inside the real webview (docs/debugging.md).
 //
-//   xvfb-run -a env ANYAR_TEST_SCRIPT=examples/anatomy-atlas/test/smoke.js \
+//   xvfb-run -a env GDK_BACKEND=x11 ANYAR_TEST_SCRIPT=examples/anatomy-atlas/test/smoke.js \
 //       ANYAR_TEST_TIMEOUT=120 ./build/examples/anatomy-atlas/anatomy_atlas
 //
 // Exit code 0 = pass. Screenshots go to ./atlas-smoke/ when the platform can
