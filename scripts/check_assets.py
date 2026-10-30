@@ -14,6 +14,7 @@ Exit code 0 = OK, 1 = violations (listed on stderr).
 
 import json
 import os
+import posixpath
 import subprocess
 import sys
 
@@ -31,10 +32,12 @@ def tracked_files(root):
         for d, _, fs in os.walk(root):
             if "/.git" in d or "node_modules" in d:
                 continue
-            files += [os.path.relpath(os.path.join(d, f), root) for f in fs]
+            files += [os.path.relpath(os.path.join(d, f), root).replace(os.sep, "/") for f in fs]
         return files
 
 
+# Repo paths are always '/'-separated (git ls-files), on Windows too: use
+# posixpath for them, os.path only for real filesystem paths under root.
 def main():
     root = os.path.abspath(sys.argv[1] if len(sys.argv) > 1 else os.path.join(os.path.dirname(__file__), ".."))
     files = tracked_files(root)
@@ -46,8 +49,8 @@ def main():
 
     manifests = {}
     for f in files:
-        if os.path.basename(f) == "MANIFEST.json" and "/assets/" in "/" + f:
-            d = os.path.dirname(f)
+        if posixpath.basename(f) == "MANIFEST.json" and "/assets/" in "/" + f:
+            d = posixpath.dirname(f)
             try:
                 m = json.load(open(os.path.join(root, f), encoding="utf-8"))
             except (OSError, ValueError) as e:
@@ -62,7 +65,7 @@ def main():
                 errors.append(f"{f}: licence '{lic}' is not on the allow-list {sorted(ALLOWED)}")
             if m.get("attribution") and m["attribution"] not in notice:
                 errors.append(f"{f}: attribution not found verbatim in NOTICE")
-            if os.path.join(d, "LICENSE") not in files:
+            if posixpath.join(d, "LICENSE") not in files:
                 errors.append(f"{d}/LICENSE is missing")
 
     for f in files:
@@ -71,15 +74,15 @@ def main():
             continue
         if os.path.splitext(f)[1].lower() not in DATA_EXT:
             continue
-        d = os.path.dirname(f)
+        d = posixpath.dirname(f)
         covered = False
-        while d and os.path.basename(d) != "":
+        while d and posixpath.basename(d) != "":
             if d in manifests:
                 covered = True
                 break
-            if os.path.basename(d) == "assets":
+            if posixpath.basename(d) == "assets":
                 break
-            d = os.path.dirname(d)
+            d = posixpath.dirname(d)
         if not covered:
             errors.append(f"{f}: data file not covered by a MANIFEST.json")
 
