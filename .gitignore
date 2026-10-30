@@ -40,3 +40,6 @@ docs/api/
 
 # Logs
 *.log
+
+# skill-creator eval runs
+skills/*-workspace/

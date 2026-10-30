@@ -79,6 +79,7 @@ public:
         events_ = &ctx.events;
         ctx.commands.add("sensor:start", [this](const anyar::json& a) -> anyar::json {
             std::lock_guard<std::mutex> l(mu_);           // state shared with shutdown()
+            if (stopping_) throw std::runtime_error("sensor: shutting down");
             if (loop_.running()) return {{"ok", true}};
             loop_.start(service_, [this](anyar::StopToken st) {
                 while (!st.stop_requested()) {
@@ -91,8 +92,8 @@ public:
     }
 
     void shutdown() override {        // main thread; service still dispatching commands
-        std::lock_guard<std::mutex> l(mu_);
-        loop_.stop();                  // request + join
+        { std::lock_guard<std::mutex> l(mu_); stopping_ = true; }   // refuse new starts
+        loop_.stop();                  // request + join — OUTSIDE the lock (see below)
     }
 
 private:
@@ -100,6 +101,7 @@ private:
     anyar::EventBus* events_ = nullptr;
     anyar::BackgroundTask loop_;
     std::mutex mu_;
+    bool stopping_ = false;
 };
 // main: app.use(std::make_shared<SensorPlugin>());
 ```
@@ -109,7 +111,7 @@ private:
 Teardown checklist for `shutdown()`:
 - Stop every BackgroundTask (`stop()` joins).
 - Close pools/queues that something may be blocked on.
-- Lock any map/vector that command handlers also touch.
+- Lock any map/vector that command handlers also touch — but **never hold a `std::mutex` while joining** (`loop_.stop()`, waiting for in-flight jobs). A command fiber that blocks on that mutex freezes the whole service thread, so the loop you are joining can never finish. Set a `stopping_` flag under the lock, release it, then join; or use a `boost::fibers::mutex`, which suspends the waiting fiber instead of the thread.
 - Drain or refuse commands still waiting on `run_blocking` (count them in flight).
 - Free SharedBuffers you registered (`SharedBufferRegistry::instance().remove(name)`).
 
